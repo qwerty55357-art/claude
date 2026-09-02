@@ -134,7 +134,7 @@ import io
 s = io.open('raskroy.html', encoding='utf-8').read()
 js = s[s.index('<script>')+8 : s.rindex('</script>')]
 names = ['subRanges','subIn','buildLayout','packSheets','packSheetsCols','buildOtkosParts',
-         'packOtkos','nestProfile','subtractRects','holeRects','applyManual','wallS',
+         'packOtkos','nestProfile','subtractRects','holeRects','rotateCuts','applyManual','wallS',
          'jointSegMode','computeProject','compute']
 def grab(n):
     i = js.index('function '+n+'('); d=0; st=False; j=i
@@ -158,7 +158,7 @@ mod = ('"use strict";\n'
        'const m2=(a,b)=>(a*b)/1e6;\n'
        'const PSU_NOMINALS=[12,24,36,48,60,100,150,200,250,300,350,400,500];\n'
        + extra + '\n' + jsk + '\n' + otm + '\n' + pres + '\n' + funcs +
-       '\n\nmodule.exports={compute,computeProject,applyManual,jointSegKey,jointSegMode,otkosMode,buildLayout,wallS,PRESETS};\n')
+       '\n\nmodule.exports={compute,computeProject,applyManual,jointSegKey,jointSegMode,otkosMode,rotateCuts,holeRects,buildLayout,wallS,PRESETS};\n')
 io.open('core.js', 'w', encoding='utf-8').write(mod)
 ```
 

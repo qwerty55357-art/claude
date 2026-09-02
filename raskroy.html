@@ -1294,6 +1294,16 @@ function holeRects(p){
   return (p.cuts||[]).map(c=>({x:p.x+c.ax, y:p.y+(p.len-(c.by+c.bh)), w:c.aw, h:c.bh}));
 }
 const insideRect=(r,h,tol)=>r.x>=h.x-tol && r.y>=h.y-tol && r.x+r.w<=h.x+h.w+tol && r.y+r.h<=h.y+h.h+tol;
+// пересчёт вырезов детали при повороте на 90° (w,len — размеры ДО поворота); сохраняет op/fold,
+// поворачивает и «исходную» границу выреза c.orig (флажок изгиба-«недорезом»), если она есть
+function rotateCuts(cuts,w,len){
+  const turn=c=>({ax:c.by,aw:c.bh,by:w-(c.ax+c.aw),bh:c.aw});
+  return (cuts||[]).map(c=>{
+    const nc=Object.assign({},c,turn(c));
+    if(c.orig) nc.orig=turn(c.orig);
+    return nc;
+  });
+}
 
 /* Ручные перестановки деталей на карте раскроя.
    mv: {uid:{sheet,x,y,rot?}}. rot=true — повернуть на 90° от текущей (свежей автоматической) ориентации.
@@ -1315,7 +1325,15 @@ function applyManual(sheets,mv,G,pl,pw,shelfList){
   const rectOf=it=>it.kind==='w'
     ?{x:it.o.x,y:it.o.y,w:it.o.w,h:it.o.len}
     :{x:it.o.x,y:it.o.y,w:it.o.dw||it.o.dep,h:it.o.dh||it.o.len};
-  const canRotate=it=>it.kind==='o'||!(it.o.cuts&&it.o.cuts.length);
+  // деталь с вырезом можно повернуть, ЕСЛИ в её вырезе сейчас никто не сидит («из выреза» откосы
+  // и другие детали ехали бы вслед за поворотом выреза — этого мы не поддерживаем); на листе, где
+  // вырез пуст, поворот — обычный разворот габарита плюс синхронный разворот самого выреза (rotateCuts)
+  const hasNestedChild=it=>{
+    if(!(it.o.cuts&&it.o.cuts.length)) return false;
+    const holes=holeRects(it.o);
+    return items.some(x=>x.kind==='o'&&x.homeSheetIdx===it.homeSheetIdx&&holes.some(h=>insideRect(rectOf(x),h,3)));
+  };
+  const canRotate=it=>it.kind==='o'||!hasNestedChild(it);
 
   // деталь на верстаке — не на листе; правки её позиции (если остались от прошлого) отбрасываем
   const shelfUids=new Set(shelfList.map(s=>s.uid).filter(u=>byUid[u]));
@@ -1404,7 +1422,10 @@ function applyManual(sheets,mv,G,pl,pw,shelfList){
     g.memberUids.forEach(u=>{
       const it=byUid[u], r=g.rects[u];
       if(r.rot){
-        if(it.kind==='w'){ const ow=it.o.w; it.o.w=it.o.len; it.o.len=ow; it.o.rot=!it.o.rot; }
+        if(it.kind==='w'){
+          const ow=it.o.w, ol=it.o.len; it.o.w=ol; it.o.len=ow; it.o.rot=!it.o.rot;
+          if(it.o.cuts&&it.o.cuts.length) it.o.cuts=rotateCuts(it.o.cuts,ow,ol);
+        }
         else { const odw=it.o.dw, odh=it.o.dh; it.o.dw=odh; it.o.dh=odw; it.o.rot=!it.o.rot; }
       }
       it.o.x=r.x; it.o.y=r.y;
@@ -1439,8 +1460,13 @@ function applyManual(sheets,mv,G,pl,pw,shelfList){
       const src=sheets[it.homeSheetIdx];
       const arr=it.kind==='w'?src.list:src.otk;
       const idx=arr.indexOf(it.o); if(idx>=0) arr.splice(idx,1);
-      if(rot&&canRotate(it)){
-        if(it.kind==='w'){ const ow=it.o.w; it.o.w=it.o.len; it.o.len=ow; it.o.rot=!it.o.rot; }
+      // на верстаке соседей нет (нести вырез с чужими «жильцами» уже не нужно — они переехали
+      // на верстак отдельными строками выше), поэтому поворот детали с вырезом здесь безусловен
+      if(rot){
+        if(it.kind==='w'){
+          const ow=it.o.w, ol=it.o.len; it.o.w=ol; it.o.len=ow; it.o.rot=!it.o.rot;
+          if(it.o.cuts&&it.o.cuts.length) it.o.cuts=rotateCuts(it.o.cuts,ow,ol);
+        }
         else { const odw=it.o.dw, odh=it.o.dh; it.o.dw=odh; it.o.dh=odw; it.o.rot=!it.o.rot; }
       }
       const r=rectOf(it);
@@ -2099,9 +2125,12 @@ function cutmapSvg(sheets,S){
         if(two && tw(dims,fs*0.72)<p.w*0.92)
           g+=txt(lx,ly+fs*1.15,dims,fs*0.72,'var(--ink-face)','var(--straw-face)');
       }
-      // кнопка поворота — только у деталей без выреза под проём, и только если развёрнутая деталь
-      // в принципе способна лечь на лист (иначе кнопка обманывала бы — клик всегда бы отклонялся)
-      if(p._uid && !(p.cuts&&p.cuts.length) && p.len<=S.pw+0.5 && p.w<=S.pl+0.5){
+      // кнопка поворота — доступна и у детали с вырезом, если только в вырезе сейчас никто не
+      // сидит (иначе пришлось бы двигать «детей» под новую форму выреза — не поддерживаем), и
+      // только если развёрнутая деталь в принципе способна лечь на лист (иначе кнопка обманывала
+      // бы — клик всегда бы отклонялся)
+      const holeBusy=p.cuts&&p.cuts.length&&holeRects(p).some(h=>sh.otk.some(k=>insideRect({x:k.x,y:k.y,w:k.dw||k.dep,h:k.dh||k.len},h,3)));
+      if(p._uid && !holeBusy && p.len<=S.pw+0.5 && p.w<=S.pl+0.5){
         const minSide=Math.min(p.w,p.len);
         if(minSide>fs*0.7){
           const ir=Math.min(fs*0.6,minSide/2.8), mg=ir*0.32;
@@ -2187,12 +2216,12 @@ function renderShelf(R){
     box.innerHTML='<span class="shelf-empty">перетащите сюда деталь с карты, чтобы освободить для неё место</span>';
     return;
   }
-  box.innerHTML=items.map(it=>{
-    const canRot=!(it.cuts&&it.cuts.length);
-    return `<div class="shelf-piece k-${it.kind}" data-shelfpiece="${it.uid}" data-pool="${it.pool}">`+
-      (canRot?`<button class="shelf-rot" data-shelfrot="${it.uid}" title="повернуть">↻</button>`:'')+
-      `<b>${esc(it.label)}</b><span>${fmt(it.w)}×${fmt(it.h)}${it.rot?' ↻':''}</span></div>`;
-  }).join('');
+  // на верстаке соседей нет — поворот всегда возможен, даже у детали с вырезом
+  box.innerHTML=items.map(it=>
+    `<div class="shelf-piece k-${it.kind}" data-shelfpiece="${it.uid}" data-pool="${it.pool}">`+
+    `<button class="shelf-rot" data-shelfrot="${it.uid}" title="повернуть">↻</button>`+
+    `<b>${esc(it.label)}</b><span>${fmt(it.w)}×${fmt(it.h)}${it.rot?' ↻':''}</span></div>`
+  ).join('');
 }
 
 /* ===================== ТАБЛИЦЫ ===================== */
@@ -2686,8 +2715,14 @@ $('#btn-print').addEventListener('click',()=>window.print());
   };
   const rectOf=it=>it.kind==='w'?{x:it.o.x,y:it.o.y,w:it.o.w,h:it.o.len}
                                :{x:it.o.x,y:it.o.y,w:it.o.dw||it.o.dep,h:it.o.dh||it.o.len};
-  // может ли деталь поворачиваться: детали с вырезом под проём — нет (вырез и «дети» в нём тоже пришлось бы вращать)
-  const canRotate=it=>it.kind==='o'||!(it.o.cuts&&it.o.cuts.length);
+  // может ли деталь поворачиваться: с вырезом — да, если только в вырезе сейчас пусто (иначе
+  // «детей» в нём тоже пришлось бы двигать под новую форму выреза — этого мы не поддерживаем)
+  const canRotate=it=>{
+    if(it.kind==='o') return true;
+    if(!(it.o.cuts&&it.o.cuts.length)) return true;
+    const holes=holeRects(it.o);
+    return !it.sh.otk.some(k=>holes.some(h=>insideRect({x:k.x,y:k.y,w:k.dw||k.dep,h:k.dh||k.len},h,3)));
+  };
   function doRotate(svg,uid){
     if(!LAST) return;
     const pool=svg.dataset.pool||'main';
@@ -2749,14 +2784,15 @@ $('#btn-print').addEventListener('click',()=>window.print());
     manualMoves[pool][uid]={sheet:shIdx,x:best[0],y:best[1],rot:nextRotFlag};
     run();
   }
-  // поворот детали, которая сейчас лежит на верстаке — там нет ограничений по месту,
-  // поэтому проверка одна: у детали не должно быть выреза под проём
+  // поворот детали, которая сейчас лежит на верстаке — там нет ограничений по месту и нет соседей
+  // (её «дети» из выреза, если были, уже переехали на верстак отдельными строками), так что
+  // поворот безусловен даже для детали с вырезом — applyManual синхронно повернёт и сам вырез
   function doShelfRotate(uid){
     if(!LAST) return;
     let pool=null,entry=null;
     if((LAST.R.shelf||[]).some(s=>s.uid===uid)){ pool='main'; entry=LAST.R.shelf.find(s=>s.uid===uid); }
     else{ for(const f of LAST.R.fills){ const e=(f.shelf||[]).find(s=>s.uid===uid); if(e){ pool=f.matId; entry=e; break; } } }
-    if(!entry||(entry.cuts&&entry.cuts.length)) return;
+    if(!entry) return;
     manualMoves.shelf=(manualMoves.shelf||[]).filter(s=>s.uid!==uid);
     manualMoves.shelf.push({pool,uid,rot:!entry.rot});
     run();

@@ -354,6 +354,93 @@ for(let t=0;t<N;t++){
       o.otkosSeamPos={};
     }
   }
+  // L100-102 (нов): «поворот деталей с вырезами» — алгебра rotateCuts как таковая, независимо от
+  // размещения на листе (в отличие от применения через applyManual, тут не может быть ложного
+  // отказа из-за коллизии на конкретных x,y — проверяем сам пересчёт координат выреза).
+  // Для ЛЮБОЙ детали с вырезом на сцене: новые габариты — len x w (было w x len), каждый
+  // повёрнутый вырез обязан остаться внутри новых габаритов и не потерять площадь (aw*bh
+  // алгебраически не меняется при обмене местами — это защита от опечатки в формуле).
+  {
+    let any=false;
+    for(const sh of R.sheets){
+      for(const p of sh.list){
+        if(!p.cuts||!p.cuts.length) continue;
+        any=true;
+        const w2=p.len, len2=p.w;
+        const rc=C.rotateCuts(p.cuts,p.w,p.len);
+        const areaBefore=p.cuts.reduce((a,c)=>a+c.aw*c.bh,0);
+        const areaAfter=rc.reduce((a,c)=>a+c.aw*c.bh,0);
+        chk('L100',Math.abs(areaBefore-areaAfter)<0.01,`${id}: ${p.label} площадь выреза после rotateCuts ${areaAfter}!=${areaBefore}`);
+        const inside=rc.every(c=>c.ax>=-0.5&&c.ax+c.aw<=w2+0.5&&c.by>=-0.5&&c.by+c.bh<=len2+0.5);
+        chk('L101',inside,`${id}: ${p.label} повёрнутый вырез вышел за новые габариты ${w2}x${len2}`);
+        // четыре поворота на 90° = 360° = тождество — единственный признак «не плывёт», который
+        // не зависит от домысливания геометрии 180°/270° в самом тесте (два поворота на 90° это
+        // 180°, а не исходное положение — проверять здесь на равенство исходнику неверно)
+        let rc4=p.cuts, ww=p.w, ll=p.len;
+        for(let k=0;k<4;k++){ const nc=C.rotateCuts(rc4,ww,ll); const t2=ww; ww=ll; ll=t2; rc4=nc; }
+        const roundtrip=ww===p.w&&ll===p.len&&rc4.every((c,i)=>Math.abs(c.ax-p.cuts[i].ax)<0.5&&Math.abs(c.aw-p.cuts[i].aw)<0.5&&
+                                          Math.abs(c.by-p.cuts[i].by)<0.5&&Math.abs(c.bh-p.cuts[i].bh)<0.5);
+        chk('L102',roundtrip,`${id}: ${p.label} четыре поворота выреза не вернули исходные координаты`);
+      }
+    }
+  }
+  // L103/L104 (нов): интеграция через applyManual/computeProject. Деталь, в вырезе которой сейчас
+  // кто-то сидит (sh.otk внутри holeRects), обязана остаться НЕповёрнутой — canRotate=false молча
+  // отбрасывает правку. Деталь с ПУСТЫМ вырезом, для которой поворот в тех же x,y геометрически
+  // возможен (не выходит за лист и не пересекает соседей — честно проверяем сами, как это делает
+  // doRotate перед применением), обязана повернуться ровно так, как описывает rotateCuts.
+  {
+    const insideTol=(kr,h)=>kr.x>=h.x-3&&kr.y>=h.y-3&&kr.x+kr.w<=h.x+h.w+3&&kr.y+kr.h<=h.y+h.h+3;
+    const overlap=(a,b,kerf)=>{
+      const gx=Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x), gy=Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y);
+      return gx>-kerf+1&&gy>-kerf+1;
+    };
+    let emptyFeasible=null, busyCand=null;
+    outer2:
+    for(const sh of R.sheets){
+      const others=[...sh.list.map(o=>({x:o.x,y:o.y,w:o.w,h:o.len,o})),
+                    ...sh.otk.map(o=>({x:o.x,y:o.y,w:o.dw||o.dep,h:o.dh||o.len,o}))];
+      for(const p of sh.list){
+        if(!p.cuts||!p.cuts.length) continue;
+        const holes=C.holeRects(p);
+        const busy=sh.otk.some(k=>holes.some(h=>insideTol({x:k.x,y:k.y,w:k.dw||k.dep,h:k.dh||k.len},h)));
+        if(busy){ if(!busyCand) busyCand={sh,p}; continue; }
+        if(emptyFeasible) continue;
+        const w2=p.len,h2=p.w;
+        if(p.x+w2>G.pw+0.5||p.y+h2>G.pl+0.5) continue;
+        const rr={x:p.x,y:p.y,w:w2,h:h2};
+        const blocked=others.some(o=>o.o!==p&&overlap(rr,o,G.kerf));
+        if(!blocked) emptyFeasible={sh,p};
+        if(emptyFeasible&&busyCand) break outer2;
+      }
+    }
+    if(emptyFeasible){
+      const {sh,p}=emptyFeasible;
+      const manual={main:{[p._uid]:{sheet:sh.no-1,x:p.x,y:p.y,rot:true}},shelf:[]};
+      let R2;
+      try{ R2=C.computeProject(G,wallsArr,manual); }
+      catch(e){ FAIL++; if(bugs.length<30) bugs.push('CRASH-ROTCUTS-EMPTY #'+t+' :: '+e.message); R2=null; }
+      if(R2){
+        const sh2=R2.sheets[sh.no-1];
+        const p2=sh2&&sh2.list.find(x=>x.label===p.label);
+        chk('L103',!!p2&&Math.abs(p2.w-p.len)<0.5&&Math.abs(p2.len-p.w)<0.5,
+          `${id}: ${p.label} после поворота ${p2?p2.w+'x'+p2.len:'не найдена'}, ожидалось ${p.len}x${p.w}`);
+      }
+    }
+    if(busyCand){
+      const {sh,p}=busyCand;
+      const manual={main:{[p._uid]:{sheet:sh.no-1,x:p.x,y:p.y,rot:true}},shelf:[]};
+      let R2;
+      try{ R2=C.computeProject(G,wallsArr,manual); }
+      catch(e){ FAIL++; if(bugs.length<30) bugs.push('CRASH-ROTCUTS-BUSY #'+t+' :: '+e.message); R2=null; }
+      if(R2){
+        const sh2=R2.sheets[sh.no-1];
+        const p2=sh2&&sh2.list.find(x=>x.label===p.label);
+        chk('L104',!!p2 && Math.abs(p2.w-p.w)<0.5 && Math.abs(p2.len-p.len)<0.5,
+          `${id}: ${p.label} с занятым вырезом повернулась вопреки запрету`);
+      }
+    }
+  }
 }
 console.log(`\nСценариев: ${N} | проверок: ${PASS+FAIL} | провалено: ${FAIL} | падений: ${crashed}`);
 bugs.slice(0,20).forEach(b=>console.log('  '+b));
