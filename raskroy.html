@@ -1,0 +1,2792 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Раскрой — расчёт панелей, профилей и сметы</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#191713; --surface:#22201B; --surface-2:#2B2823;
+  --line:#3A362F; --line-2:#4C4740;
+  --straw:#D9B55F; --straw-deep:#A8853A; --straw-face:#C9A455;
+  --alu:#93A9B8; --alu-deep:#5E7383; --alu-face:#7E96A6;
+  --paper:#EFEADF; --muted:#A0968A;
+  --ink-face:#2A2317; --ink-alu:#14222B; --ink-cut:#2F4A2A;
+  --warn:#E0A050; --err:#D2705E; --ok:#8FB57F; --void:#100F0C;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --disp:"Archivo","IBM Plex Sans",system-ui,sans-serif;
+  --r:3px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--paper);font-family:var(--sans);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+.topbar{display:flex;align-items:baseline;gap:18px;flex-wrap:wrap;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--surface);position:sticky;top:0;z-index:50}
+.brand{font-family:var(--disp);font-weight:700;font-size:17px;letter-spacing:.14em;text-transform:uppercase}
+.brand span{color:var(--straw)}
+.brand-sub{font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:.05em}
+.topbar-actions{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+.btn{background:transparent;border:1px solid var(--line-2);border-radius:var(--r);padding:7px 13px;cursor:pointer;font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--paper);transition:border-color .12s,background .12s,color .12s}
+.btn:hover{border-color:var(--straw);color:var(--straw)}
+.btn:focus-visible{outline:2px solid var(--alu);outline-offset:2px}
+.btn-key{border-color:var(--straw-deep);color:var(--straw)}
+.btn-key:hover{background:var(--straw);color:var(--void);border-color:var(--straw)}
+.btn-mini{padding:4px 9px;font-size:10.5px}
+.btn-del{border-color:transparent;color:var(--muted);padding:4px 8px}
+.btn-del:hover{color:var(--err);border-color:var(--err)}
+.shell{display:grid;grid-template-columns:392px minmax(0,1fr);align-items:start}
+.rail{border-right:1px solid var(--line);background:var(--surface);padding:0 0 60px;position:sticky;top:53px;max-height:calc(100vh - 53px);overflow-y:auto}
+.stage{padding:24px 26px 90px;min-width:0}
+.sect{border-bottom:1px solid var(--line)}
+.sect-h{display:flex;align-items:center;gap:10px;padding:12px 18px;cursor:pointer;user-select:none}
+.sect-h:hover .sect-t{color:var(--straw)}
+.sect-n{font-family:var(--mono);font-size:10.5px;color:var(--straw-deep);min-width:20px}
+.sect-t{font-family:var(--disp);font-weight:600;font-size:12.5px;letter-spacing:.11em;text-transform:uppercase;transition:color .12s}
+.sect-arrow{margin-left:auto;color:var(--muted);font-size:10px;transition:transform .15s}
+.sect.closed .sect-arrow{transform:rotate(-90deg)}
+.sect-b{padding:2px 18px 18px}
+.sect.closed .sect-b{display:none}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.row-1{grid-template-columns:1fr}
+.f{display:flex;flex-direction:column;gap:4px;min-width:0}
+.f > label{font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.f input[type=number],.f input[type=text],.f select{background:var(--void);border:1px solid var(--line);border-radius:var(--r);padding:7px 9px;width:100%;font-family:var(--mono);font-size:13px}
+.f input:focus,.f select:focus{outline:none;border-color:var(--alu)}
+.f input[type=number]{-moz-appearance:textfield}
+.f input::-webkit-outer-spin-button,.f input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.unit{font-family:var(--mono);font-size:9.5px;color:var(--line-2);align-self:flex-end;margin-top:-20px;margin-right:8px;pointer-events:none}
+.chk{display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer}
+.chk input{accent-color:var(--straw);width:14px;height:14px;cursor:pointer}
+.chk span{font-size:12.5px}
+.chk-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+.hint{font-size:11.5px;color:var(--muted);line-height:1.4;margin:6px 0 0}
+.sub-l{font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);display:block;margin:10px 0 4px}
+.wall-tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px}
+.wall-tab{background:transparent;border:1px solid var(--line-2);border-radius:var(--r);padding:5px 11px;cursor:pointer;font-family:var(--mono);font-size:11px;color:var(--muted)}
+.wall-tab:hover{border-color:var(--straw);color:var(--straw)}
+.wall-tab.on{background:var(--straw);color:var(--void);border-color:var(--straw);font-weight:600}
+.wall-scheme{display:none}
+.wall-scheme.on{display:block}
+.wall-scheme-h{display:none;font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:10px 0 6px}
+.mat-h{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--paper);padding:6px 10px;margin:14px 0 6px;background:var(--void);border-radius:var(--r)}
+.shelf-zone{border:1px dashed var(--line-2);border-radius:var(--r);padding:10px 12px;margin-bottom:12px;background:var(--void);transition:border-color .15s,background .15s}
+.shelf-zone.shelf-zone-over{border-color:var(--ok);background:color-mix(in srgb, var(--ok) 12%, var(--void))}
+.shelf-h{font-family:var(--mono);font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+.shelf-items{display:flex;flex-wrap:wrap;gap:8px;min-height:52px}
+.shelf-empty{font-size:12px;color:var(--muted);align-self:center}
+.shelf-piece{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-width:78px;padding:8px 10px;border-radius:6px;cursor:grab;font-family:var(--mono);font-size:11px;text-align:center;user-select:none}
+.shelf-piece.k-w{background:var(--straw-face);color:var(--ink-face);border:1px solid var(--straw-deep)}
+.shelf-piece.k-o{background:var(--alu-face);color:var(--ink-alu);border:1px solid var(--alu-deep)}
+.shelf-piece b{font-size:11.5px}
+.shelf-rot{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:var(--void);border:1px solid var(--line-2);color:var(--paper);font-size:12px;line-height:18px;cursor:pointer}
+@media print{ .shelf-zone{display:none !important} }
+.mini-scheme{margin:6px 0 8px;border:1px solid var(--line);border-radius:var(--r);background:var(--void)}
+.mini-scheme svg{display:block;width:100%}
+.op-btns{display:flex;gap:6px;margin-left:auto}
+.opening{border:1px solid var(--line);border-radius:var(--r);padding:10px 11px 4px;margin-bottom:10px;background:var(--surface-2)}
+.opening-h{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.opening-h .tag{font-family:var(--mono);font-size:10px;letter-spacing:.06em;color:var(--straw);text-transform:uppercase}
+.opening-h .btn-del{margin-left:auto}
+.stage-h{display:flex;align-items:baseline;gap:12px;margin:0 0 16px}
+.stage-h h2{font-family:var(--disp);font-weight:700;font-size:14px;letter-spacing:.13em;text-transform:uppercase;margin:0}
+.stage-h .meta{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.rule{flex:1;height:1px;background:var(--line);align-self:center}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;margin-bottom:26px}
+.card{background:var(--surface);padding:13px 15px 14px}
+.card-k{font-family:var(--mono);font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin-bottom:7px}
+.card-v{font-family:var(--disp);font-weight:700;font-size:27px;line-height:1;letter-spacing:-.01em}
+.card-v small{font-family:var(--mono);font-weight:400;font-size:12px;color:var(--muted);margin-left:3px;letter-spacing:0}
+.card-hero .card-v{color:var(--straw)}
+.card-sub{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:6px}
+.block{margin-bottom:30px}
+.svg-wrap{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:16px;overflow:auto}
+svg{display:block;max-width:100%;height:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{font-family:var(--mono);font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);text-align:left;font-weight:400;padding:0 10px 7px;border-bottom:1px solid var(--line)}
+td{padding:8px 10px;border-bottom:1px solid var(--line)}
+tbody tr:hover td{background:var(--surface)}
+.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.tot td{border-top:1px solid var(--line-2);border-bottom:none;padding-top:12px;font-weight:600}
+.tot .num{font-family:var(--disp);font-size:19px;color:var(--straw)}
+.dim{color:var(--muted)}
+.notes{display:flex;flex-direction:column;gap:7px;margin-bottom:26px}
+.note{display:flex;gap:10px;align-items:flex-start;border-left:2px solid var(--line-2);padding:7px 12px;background:var(--surface);border-radius:0 var(--r) var(--r) 0;font-size:12.5px}
+.note b{font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;flex-shrink:0;padding-top:1px}
+.note.warn{border-left-color:var(--warn)} .note.warn b{color:var(--warn)}
+.note.err{border-left-color:var(--err)} .note.err b{color:var(--err)}
+.note.ok{border-left-color:var(--ok)} .note.ok b{color:var(--ok)}
+.note.info{border-left-color:var(--alu-deep)} .note.info b{color:var(--alu)}
+.legend{display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend svg{flex:none;display:block}
+@media print{
+  .wall-scheme{display:block !important;break-inside:avoid;page-break-inside:avoid}
+  .wall-scheme-h{display:block !important}
+  [data-resize],[data-cmrot]{display:none !important}
+  *{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important }
+  .svg-wrap{overflow:visible}
+  svg{max-height:none !important}
+  .legend{break-inside:avoid}
+  table{break-inside:auto} tr{break-inside:avoid}
+  :root{--bg:#fff;--surface:#fff;--surface-2:#fff;--line:#c9c4bb;--line-2:#8d887f;--paper:#111;--muted:#5c574f;--void:#fff;
+    --straw:#8a6d16;--straw-face:#e8d49f;--straw-deep:#8a6d16;--alu:#3d5768;--alu-deep:#3d5768;--alu-face:#b9cbd6;
+    --ink-face:#2A2317;--ink-alu:#14222B;--ink-cut:#2F4A2A}
+  .rail,.topbar-actions,.sect-arrow{display:none !important}
+  .shell{display:block}
+  .stage{padding:0}
+  .topbar{position:static}
+  .block{break-inside:avoid;page-break-inside:avoid}
+  .cards{grid-template-columns:repeat(4,1fr)}
+  body{font-size:11px}
+}
+@media (max-width:960px){
+  .shell{grid-template-columns:1fr}
+  .rail{position:static;max-height:none;border-right:none;border-bottom:1px solid var(--line)}
+  .stage{padding:20px 16px 70px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none !important;animation:none !important}}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div>
+    <div class="brand">Рас<span>крой</span></div>
+    <div class="brand-sub">панели · профиль · клей · led</div>
+  </div>
+  <div class="topbar-actions">
+    <button class="btn" id="btn-load">Открыть проект</button>
+    <button class="btn" id="btn-save">Сохранить проект</button>
+    <button class="btn btn-key" id="btn-print">Печать / PDF</button>
+    <input type="file" id="file-load" accept="application/json" hidden>
+  </div>
+</header>
+<div class="shell">
+<aside class="rail" id="rail">
+  <section class="sect" data-sect>
+    <div class="sect-h"><span class="sect-n">01</span><span class="sect-t">Объект</span><span class="sect-arrow">▾</span></div>
+    <div class="sect-b">
+      <div class="row row-1"><div class="f"><label>Клиент / объект</label><input type="text" id="i-client" placeholder="Иванов, гостиная"></div></div>
+      <div class="wall-tabs" id="wall-tabs"></div>
+      <div class="row row-1"><div class="f"><label>Название стены</label><input type="text" id="i-wname"></div></div>
+      <div class="row">
+        <div class="f"><label>Ширина области</label><input type="number" id="i-w" value="4000"><span class="unit">мм</span></div>
+        <div class="f"><label>Высота области</label><input type="number" id="i-h" value="2300"><span class="unit">мм</span></div>
+      </div>
+      <div class="row row-1">
+        <div class="f"><label>Высота потолка</label><input type="number" id="i-ceil" value="2700"><span class="unit">мм</span></div>
+      </div>
+      <label class="sub-l">Поперечные стыки активной стены</label>
+      <div id="seams-list"></div>
+      <button class="btn btn-mini" id="btn-add-seam" style="margin-bottom:4px">+ добавить стык</button>
+      <p class="hint">Дизайнерские швы в точных отметках от пола. Стык можно перетаскивать прямо на схеме; перетаскивание автоматического стыка превращает его в ручной. Профиль на стыке (соединитель / встык / LED) — клик по линии на схеме, либо в разделе «LED».</p>
+      <div class="row row-1" style="margin-top:4px">
+        <button class="btn btn-mini btn-del" id="btn-del-wall" style="justify-self:start">Удалить эту стену</button>
+      </div>
+    </div>
+  </section>
+  <section class="sect" data-sect>
+    <div class="sect-h"><span class="sect-n">02</span><span class="sect-t">Панель</span><span class="sect-arrow">▾</span></div>
+    <div class="sect-b">
+      <div class="row row-1"><div class="f"><label>Материал</label><select id="i-preset"></select></div></div>
+      <div class="row">
+        <div class="f"><label>Длина листа</label><input type="number" id="i-pl" value="2900"><span class="unit">мм</span></div>
+        <div class="f"><label>Ширина листа</label><input type="number" id="i-pw" value="1150"><span class="unit">мм</span></div>
+      </div>
+      <div class="row row-1"><div class="f"><label>Ориентация</label>
+        <select id="i-orient">
+          <option value="v">Вертикально — рейка вверх</option>
+          <option value="h">Горизонтально</option>
+        </select></div></div>
+      <label class="chk"><input type="checkbox" id="i-sym" checked><span>Симметричная раскладка</span></label>
+      <label class="chk"><input type="checkbox" id="i-offcut" checked><span>Использовать обрезки</span></label>
+      <div class="row">
+        <div class="f"><label>Мин. полезный обрезок</label><input type="number" id="i-minoff" value="300"><span class="unit">мм</span></div>
+        <div class="f"><label>Пропил</label><input type="number" id="i-kerf" value="5"><span class="unit">мм</span></div>
+      </div>
+      <label class="chk"><input type="checkbox" id="i-rot"><span>Однотонная панель — рисунок ненаправленный</span></label>
+      <label class="chk"><input type="checkbox" id="i-splice"><span>Разрешить стыковку деталей откоса</span></label>
+      <p class="hint">Стыковка откосов позволяет добрать их из мелких остатков и часто экономит целую панель, но на откосе появится поперечный шов.</p>
+      <p class="hint">Проверьте длину листа: если она равна высоте стены, обрезков не будет вовсе — обычно это опечатка.</p>
+    </div>
+  </section>
+  <section class="sect" data-sect>
+    <div class="sect-h"><span class="sect-n">03</span><span class="sect-t">Проёмы и откосы</span><span class="sect-arrow">▾</span></div>
+    <div class="sect-b">
+      <div id="openings"></div>
+      <button class="btn btn-mini" id="btn-add-op">+ Добавить проём</button>
+      <p class="hint">X — от левого края области, Y — от низа. Откос считается настоящими деталями и раскладывается в остатки листов.</p>
+    </div>
+  </section>
+  <section class="sect" data-sect>
+    <div class="sect-h"><span class="sect-n">04</span><span class="sect-t">Профили</span><span class="sect-arrow">▾</span></div>
+    <div class="sect-b">
+      <div class="row row-1"><div class="f"><label>Длина хлыста</label><input type="number" id="i-stock" value="3000"><span class="unit">мм</span></div></div>
+      <label class="sub-l">Стыки между панелями</label>
+      <label class="chk"><input type="checkbox" id="i-joint-v" checked><span>Профиль на продольных стыках полос</span></label>
+      <label class="chk"><input type="checkbox" id="i-joint-h" checked><span>Профиль на поперечных стыках (лист короче стены)</span></label>
+      <p class="hint">Края стены, поперечные и продольные стыки, LED — в разделе «LED».</p>
+      <label class="sub-l">Профили на контуре проёмов (Г-образные)</label>
+      <label class="chk"><input type="checkbox" id="i-edgeops" checked><span>Окантовка торцов у проёмов без откосов</span></label>
+      <div class="row">
+        <div class="f"><label>Углы внешние</label><input type="number" id="i-cout" value="0"><span class="unit">шт</span></div>
+        <div class="f"><label>Углы внутренние</label><input type="number" id="i-cin" value="0"><span class="unit">шт</span></div>
+      </div>
+    </div>
+  </section>
+  <section class="sect" data-sect>
+    <div class="sect-h"><span class="sect-n">05</span><span class="sect-t">LED</span><span class="sect-arrow">▾</span></div>
+    <div class="sect-b">
+      <p class="hint">Всё про свет — в одном месте. Быстрее переключать прямо на схеме: клик по краю стены или по линии стыка открывает то же меню на месте.</p>
+      <label class="sub-l">Края стены</label>
+      <div class="row">
+        <div class="f"><label>Верх</label><select id="i-e-top" class="edge-sel"><option value="none">— нет</option><option value="cap" selected>Заглушка</option><option value="led">LED-стартовый</option></select></div>
+        <div class="f"><label>Низ</label><select id="i-e-bot" class="edge-sel"><option value="none" selected>— нет</option><option value="cap">Заглушка</option><option value="led">LED-стартовый</option></select></div>
+      </div>
+      <div class="row">
+        <div class="f"><label>Слева</label><select id="i-e-left" class="edge-sel"><option value="none">— нет</option><option value="cap" selected>Заглушка</option><option value="led">LED-стартовый</option></select></div>
+        <div class="f"><label>Справа</label><select id="i-e-right" class="edge-sel"><option value="none">— нет</option><option value="cap" selected>Заглушка</option><option value="led">LED-стартовый</option></select></div>
+      </div>
+      <label class="sub-l">Продольные стыки активной стены</label>
+      <div id="jointsv-list"></div>
+      <p class="hint">Между полосами всегда либо соединитель, либо (если отмечено) светящийся соединитель — то же самое можно переключить кликом по линии на схеме. Поперечные стыки — в разделе «Объект».</p>
+      <label class="sub-l">Итого по проекту</label>
+      <div id="led-summary"></div>
+      <div class="row">
+        <div class="f"><label>Доп. лента вручную</label><input type="number" id="i-ledlen" value="0" step="0.1"><span class="unit">м</span></div>
+        <div class="f"><label>Мощность ленты</label><input type="number" id="i-ledw" value="14.4" step="0.1"><span class="unit">Вт/м</span></div>
+      </div>
+      <div class="row row-1"><div class="f"><label>Запас БП</label><input type="number" id="i-psur" value="30"><span class="unit">%</span></div></div>
+    </div>
+  </section>
+  <section class="sect" data-sect>
+    <div class="sect-h"><span class="sect-n">06</span><span class="sect-t">Клей</span><span class="sect-arrow">▾</span></div>
+    <div class="sect-b">
+      <div class="row">
+        <div class="f"><label>Клея на панель</label><input type="number" id="i-glue" value="1.5" step="0.1"><span class="unit">туб/лист</span></div>
+        <div class="f"><label>Запас клея</label><input type="number" id="i-gluer" value="0"><span class="unit">%</span></div>
+      </div>
+      <p class="hint">Норма: 1,5 тубы (300 мл) на каждую купленную бамбуковую панель. Клей считается по числу листов каждого материала; у заполнений своя норма пропорционально размеру листа.</p>
+    </div>
+  </section>
+  <section class="sect closed" data-sect>
+    <div class="sect-h"><span class="sect-n">07</span><span class="sect-t">Цены</span><span class="sect-arrow">▾</span></div>
+    <div class="sect-b">
+      <div class="row">
+        <div class="f"><label>Панель, шт</label><input type="number" id="p-panel" value="4500"></div>
+        <div class="f"><label>Клей, туба</label><input type="number" id="p-glue" value="450"></div>
+      </div>
+      <div class="row">
+        <div class="f"><label>Заглушка, хлыст</label><input type="number" id="p-edge" value="900"></div>
+        <div class="f"><label>Соединитель, хлыст</label><input type="number" id="p-joint" value="950"></div>
+      </div>
+      <div class="row">
+        <div class="f"><label>Угол внеш., хлыст</label><input type="number" id="p-cout" value="1100"></div>
+        <div class="f"><label>Угол внутр., хлыст</label><input type="number" id="p-cin" value="1100"></div>
+      </div>
+      <div class="row">
+        <div class="f"><label>LED-стартовый, хлыст</label><input type="number" id="p-ledprof" value="1200"></div>
+        <div class="f"><label>LED-соединительный, хлыст</label><input type="number" id="p-ledjoint" value="1400"></div>
+      </div>
+      <div class="row">
+        <div class="f"><label>LED-лента, м</label><input type="number" id="p-led" value="600"></div>
+        <div class="f"><label>Блок питания, шт</label><input type="number" id="p-psu" value="2200"></div>
+      </div>
+      <div class="row row-1"><div class="f"><label>Наценка / работа, %</label><input type="number" id="p-markup" value="0"></div></div>
+    </div>
+  </section>
+</aside>
+<main class="stage" id="stage">
+  <div id="notes" class="notes"></div>
+  <div class="cards" id="cards"></div>
+  <div class="block">
+    <div class="stage-h"><h2>Схема раскладки</h2><span class="meta" id="scheme-meta"></span><span class="rule"></span></div>
+    <div class="svg-wrap" id="scheme"></div>
+    <div class="legend">
+      <span><svg width="12" height="12"><rect width="12" height="12" fill="var(--straw-face)" stroke="var(--straw-deep)"/></svg>панель</span>
+      <span><svg width="12" height="12"><rect width="12" height="12" fill="var(--void)" stroke="var(--line-2)"/></svg>проём</span>
+      <span><svg width="14" height="12"><line x1="1" y1="6" x2="13" y2="6" stroke="var(--alu)" stroke-width="3"/></svg>заглушка (край панели)</span>
+      <span><svg width="14" height="12"><line x1="7" y1="0" x2="7" y2="12" stroke="var(--straw-deep)" stroke-width="3"/></svg>продольный стык (соединитель)</span>
+      <span><svg width="14" height="12"><line x1="0" y1="6" x2="14" y2="6" stroke="var(--err)" stroke-width="3"/></svg>поперечный стык (соединитель)</span>
+      <span><svg width="14" height="12"><line x1="0" y1="6" x2="14" y2="6" stroke="var(--warn)" stroke-width="4"/></svg>LED-профиль (стартовый / соединительный)</span>
+      <span><svg width="14" height="12"><line x1="0" y1="6" x2="14" y2="6" stroke="var(--ok)" stroke-width="4"/></svg>изгиб панели (без детали откоса)</span>
+      <span><svg width="14" height="12"><line x1="0" y1="6" x2="14" y2="6" stroke="var(--muted)" stroke-width="3" stroke-dasharray="3 2"/></svg>откос встык (без профиля)</span>
+    </div>
+  </div>
+  <div class="block">
+    <div class="stage-h"><h2>Карта раскроя</h2><span class="meta" id="cut-meta"></span><span class="rule"></span></div>
+    <div id="shelf-zone" class="shelf-zone" data-shelfzone="1">
+      <div class="shelf-h">Верстак — временно отложенные детали</div>
+      <div id="shelf-items" class="shelf-items"><span class="shelf-empty">перетащите сюда деталь с карты, чтобы освободить для неё место</span></div>
+    </div>
+    <div class="svg-wrap" id="cutmap"></div>
+    <div class="legend">
+      <span><svg width="12" height="12"><rect width="12" height="12" fill="var(--straw-face)" stroke="var(--straw-deep)"/></svg>деталь стены</span>
+      <span><svg width="12" height="12"><rect width="12" height="12" fill="var(--alu-face)" stroke="var(--alu-deep)"/></svg>деталь откоса</span>
+      <span><svg width="12" height="12"><rect width="12" height="12" fill="var(--void)" stroke="var(--alu)" stroke-dasharray="3 2"/></svg>вырез под проём</span>
+      <span><svg width="12" height="12"><rect width="12" height="12" fill="var(--warn)" fill-opacity=".16" stroke="var(--warn)" stroke-dasharray="3 2"/></svg>запас на изгиб панели (не отрезается)</span>
+      <span><svg width="12" height="12"><rect width="12" height="12" fill="var(--ok)" fill-opacity=".25" stroke="var(--ok)" stroke-dasharray="3 2"/></svg>материал из выреза</span>
+      <span><svg width="12" height="12"><rect width="12" height="12" fill="var(--line)"/></svg>обрезок / отход</span>
+    </div>
+  </div>
+  <div class="block" id="cuts-block">
+    <div class="stage-h"><h2>Вырезы под проёмы</h2><span class="meta">размечать на детали до монтажа</span><span class="rule"></span></div>
+    <table id="cuts"></table>
+  </div>
+  <div class="block">
+    <div class="stage-h"><h2>Спецификация</h2><span class="rule"></span></div>
+    <table id="spec"></table>
+  </div>
+  <div class="block">
+    <div class="stage-h"><h2>Смета</h2><span class="rule"></span></div>
+    <table id="estimate"></table>
+  </div>
+</main>
+</div>
+<script>
+/* =====================================================================
+   МАТЕРИАЛЫ. Добавить гибкий камень / 3D-гипс — дописать строку сюда.
+   ===================================================================== */
+const PRESETS = [
+  {id:'bamboo29', name:'Бамбуковая панель 2900×1150', pl:2900, pw:1150, price:4500, tubesPerSheet:1.5},
+  {id:'marble',   name:'Гибкий мрамор 2800×1200',     pl:2800, pw:1200, price:4500, tubesPerSheet:1.5},
+  {id:'slat',     name:'Реечная панель 2900×150',     pl:2900, pw:150,  price:4500, tubesPerSheet:0.2},
+  {id:'rockL',    name:'Скала большая 2900×1200',     pl:2900, pw:1200, price:4500, tubesPerSheet:1.55},
+  {id:'rockS',    name:'Скала маленькая 2900×600',    pl:2900, pw:600,  price:4500, tubesPerSheet:0.8},
+  {id:'custom',   name:'Свой размер',                 pl:2900, pw:1150, price:4500, tubesPerSheet:1.5},
+];
+// цвет заливки материала на схеме (тёмная и светлая темы читаются одинаково)
+const MATCOLORS={bamboo29:'#C9A455',marble:'#AEBFCE',slat:'#9FBF93',rockL:'#C2A18F',rockS:'#C6ADD6',custom:'#C9A455'};
+const matColor=id=>MATCOLORS[id]||'#C9A455';
+const PSU_NOMINALS = [12,24,36,48,60,100,150,200,250,300,350,400,500];
+
+const $ = s => document.querySelector(s);
+const num = id => { const v = parseFloat($(id).value); return isFinite(v) ? v : 0; };
+const chk = id => $(id).checked;
+const m2 = (a,b) => (a*b)/1e6;
+const fmt = (v,d=0) => Number(v).toLocaleString('ru-RU',{minimumFractionDigits:d,maximumFractionDigits:d});
+const money = v => Math.round(v).toLocaleString('ru-RU') + ' ₽';
+const plu=(n,a,b,c)=>{const n1=n%10,n2=n%100;return (n2>=11&&n2<=19)?c:(n1===1)?a:(n1>=2&&n1<=4)?b:c;};
+const esc = s => String(s).replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+
+/* ===================== СТЕНЫ И ПРОЁМЫ ===================== */
+let walls=[], wallSeq=0, active=0;
+let manualMoves={};   // ручные перестановки на карте раскроя: {pool:{uid:{sheet,x,y}}}
+let LAST=null;        // последний расчёт — нужен drag'у карты
+function newWall(){
+  wallSeq++;
+  return {id:wallSeq, name:'Стена '+wallSeq, W:4000, H:2300, ceil:2700, rowH:0,
+          ops:[], opSeq:0, seamsU:[], seamSeq:0, jointsVLed:[], jointModes:{},
+          edges:{top:'cap',bot:'none',left:'cap',right:'cap'}, cout:0, cin:0};
+}
+const AW=()=>walls[active];
+// старые проекты хранили края булевыми: true -> заглушка
+const edgeMode=v=>v===true?'cap':(v===false||v==null)?'none':v;
+
+function renderWallTabs(){
+  $('#wall-tabs').innerHTML = walls.map((w,i)=>
+    `<button class="wall-tab${i===active?' on':''}" data-wall="${i}">${esc(w.name)}</button>`
+  ).join('') + `<button class="wall-tab" data-wall="add">+ стена</button>`;
+}
+$('#wall-tabs').addEventListener('click',e=>{
+  const v=e.target.dataset.wall; if(v===undefined) return;
+  if(v==='add'){ walls.push(newWall()); active=walls.length-1; }
+  else active=+v;
+  renderWallTabs(); wallToForm(); renderOpenings(); run();
+});
+$('#btn-del-wall').addEventListener('click',()=>{
+  if(walls.length<=1) return;
+  walls.splice(active,1); active=Math.max(0,active-1);
+  renderWallTabs(); wallToForm(); renderOpenings(); run();
+});
+
+// поля стены <-> форма
+function wallToForm(){
+  const w=AW();
+  $('#i-wname').value=w.name;
+  $('#i-w').value=w.W; $('#i-h').value=w.H; $('#i-ceil').value=w.ceil;
+  $('#i-e-top').value=edgeMode(w.edges.top); $('#i-e-bot').value=edgeMode(w.edges.bot);
+  $('#i-e-left').value=edgeMode(w.edges.left); $('#i-e-right').value=edgeMode(w.edges.right);
+  $('#i-cout').value=w.cout; $('#i-cin').value=w.cin;
+  renderSeams();
+}
+function formToWall(){
+  const w=AW();
+  w.name=$('#i-wname').value.trim()||w.name;
+  w.W=num('#i-w'); w.H=num('#i-h'); w.ceil=num('#i-ceil');
+  w.edges={top:$('#i-e-top').value,bot:$('#i-e-bot').value,left:$('#i-e-left').value,right:$('#i-e-right').value};
+  w.cout=num('#i-cout'); w.cin=num('#i-cin');
+}
+const WALL_FIELDS=['i-wname','i-w','i-h','i-ceil','i-e-top','i-e-bot','i-e-left','i-e-right','i-cout','i-cin'];
+$('#i-wname').addEventListener('input',()=>{ AW().name=$('#i-wname').value.trim()||AW().name; renderWallTabs(); });
+function renderSeams(){
+  const w=AW();
+  $('#seams-list').innerHTML=(w.seamsU||[]).map(sm=>`
+    <div class="row" data-seamrow="${sm.id}" style="align-items:center;margin-bottom:4px">
+      <div class="f"><label>Отметка от пола</label><input type="number" data-seampos value="${Math.round(sm.pos)}"><span class="unit">мм</span></div>
+      <div class="f" style="display:flex;gap:8px;align-items:center;margin-top:14px">
+        <span class="hint" style="margin:0">профиль — клик по линии на схеме</span>
+        <button class="btn btn-del btn-mini" data-seamdel="${sm.id}">удалить</button>
+      </div>
+    </div>`).join('');
+}
+$('#seams-list').addEventListener('input',e=>{
+  const row=e.target.closest('[data-seamrow]'); if(!row) return;
+  const w=AW(); const sm=(w.seamsU||[]).find(x=>x.id==row.dataset.seamrow); if(!sm) return;
+  if(e.target.hasAttribute('data-seampos')) sm.pos=parseFloat(e.target.value)||0;
+  else return;
+  run();
+});
+$('#seams-list').addEventListener('click',e=>{
+  const id=e.target.dataset.seamdel; if(!id) return;
+  const w=AW(); w.seamsU=(w.seamsU||[]).filter(x=>x.id!=id);
+  renderSeams(); run();
+});
+$('#btn-add-seam').addEventListener('click',()=>{
+  const w=AW(); w.seamsU=w.seamsU||[]; w.seamSeq=(w.seamSeq||0)+1;
+  // новая отметка — посередине, не совпадая с существующими
+  let pos=Math.round(w.H/2/10)*10;
+  while(w.seamsU.some(x=>Math.abs(x.pos-pos)<20)) pos+=100;
+  w.seamsU.push({id:w.seamSeq,pos});
+  renderSeams(); run();
+});
+
+/* ---- продольные стыки активной стены: список с подсветкой (раздел LED) ---- */
+function renderJointsV(R){
+  const box=$('#jointsv-list'); if(!box) return;
+  const w=AW(); const G=collect();
+  const L=R&&R.layouts?R.layouts[active]:null;
+  const joints=L?L.joints:[];
+  if(!joints.length){
+    box.innerHTML='<p class="hint" style="margin:4px 0">На этой стене нет продольных стыков — она укладывается одной полосой.</p>';
+    return;
+  }
+  const rows=[];
+  joints.forEach(j=>{
+    j.segs.forEach(sg=>{
+      const cur=jointSegMode(w,G,'v',j.pos,sg[0]);
+      const label=j.segs.length>1?`${fmt(j.pos)} мм · участок ${fmt(sg[0])}–${fmt(sg[1])}`:`${fmt(j.pos)} мм`;
+      rows.push(`<div class="row" style="align-items:center;margin-bottom:4px">
+        <div class="f"><label>Стык ${label}</label>
+          <select data-jvpos="${Math.round(j.pos)}" data-jvseg="${Math.round(sg[0])}">
+            <option value="cap"${cur==='cap'?' selected':''}>Соединитель</option>
+            <option value="butt"${cur==='butt'?' selected':''}>Встык (без профиля)</option>
+            <option value="led"${cur==='led'?' selected':''}>LED-соединитель</option>
+          </select>
+        </div>
+      </div>`);
+    });
+  });
+  box.innerHTML=rows.join('');
+}
+$('#jointsv-list').addEventListener('change',e=>{
+  const pos=e.target.dataset.jvpos, seg=e.target.dataset.jvseg;
+  if(pos===undefined||seg===undefined) return;
+  const w=AW(); w.jointModes=w.jointModes||{};
+  w.jointModes[jointSegKey('v',+pos,+seg)]=e.target.value;
+  run();
+});
+/* ---- сводка LED по проекту (раздел LED) ---- */
+function renderLedSummary(R){
+  const el=$('#led-summary'); if(!el) return;
+  if(!R||!R.led){
+    el.innerHTML='<p class="hint" style="margin:0 0 8px">Подсветка сейчас не выбрана — нигде нет краёв «LED-стартовый» и подсвеченных стыков.</p>';
+    return;
+  }
+  el.innerHTML=`<p class="hint" style="margin:0 0 8px"><b style="color:var(--paper)">${fmt(R.led.len,1)} м ленты</b>`+
+    ` · нагрузка ${fmt(R.led.watt,0)} Вт · блок питания ${R.led.psuW} Вт`+
+    (R.led.auto>0&&R.led.manual>0?` <span style="color:var(--muted)">(${fmt(R.led.auto,1)} из профилей + ${fmt(R.led.manual,1)} вручную)</span>`:'')+
+    `</p>`;
+}
+
+/* ---- проёмы активной стены ---- */
+// стандартные размеры проёмов (РФ): дверной проём под полотно 800, типовое окно
+const OP_DEFAULTS={
+  window:{w:1300,h:1450,y:800},
+  door:  {w:900, h:2070,y:0}
+};
+function addOpening(d){
+  const w=AW(); w.opSeq++;
+  w.ops.push(Object.assign({id:w.opSeq,kind:'window',w:1300,h:1450,x:1350,y:800,
+    otkos:true,depth:200,anchorH:'left',otkosMode:{}}, d||{}));
+  renderOpenings();
+}
+// отступ по текущей привязке (для отображения)
+function offsetOf(o,W){
+  if(o.anchorH==='right')  return Math.round(W-o.x-o.w);
+  if(o.anchorH==='center') return 0;
+  return Math.round(o.x);
+}
+function miniSvg(o,W,H){
+  if(W<=0||H<=0) return '';
+  const pad=Math.max(W,H)*0.04;
+  const bad=o.x<0||o.y<0||o.x+o.w>W+1||o.y+o.h>H+1;
+  return `<svg viewBox="${-pad} ${-pad} ${W+pad*2} ${H+pad*2}" style="max-height:110px">
+    <rect x="0" y="0" width="${W}" height="${H}" fill="var(--straw-face)" fill-opacity=".35" stroke="var(--line-2)" stroke-width="${pad*0.35}"/>
+    <rect x="${o.x}" y="${H-o.y-o.h}" width="${o.w}" height="${o.h}" fill="var(--void)" stroke="${bad?'var(--err)':'var(--alu)'}" stroke-width="${pad*0.5}"/>
+  </svg>`;
+}
+function renderOpenings(){
+  const w=AW();
+  $('#openings').innerHTML = w.ops.map((o,i)=>`
+    <div class="opening" data-op="${o.id}">
+      <div class="opening-h">
+        <span class="tag">${o.kind==='door'?'Дверь':o.kind==='niche'?'Ниша':'Окно'} ${i+1}</span>
+        <span class="op-btns">
+          <button class="btn btn-mini" data-dup="${o.id}">дублировать</button>
+          <button class="btn btn-del" data-rm="${o.id}">удалить</button>
+        </span>
+      </div>
+      <div class="mini-scheme" data-mini>${miniSvg(o,w.W,w.H)}</div>
+      <div class="row row-1"><div class="f"><label>Тип</label><select data-k="kind">
+        <option value="window"${o.kind==='window'?' selected':''}>Окно</option>
+        <option value="door"${o.kind==='door'?' selected':''}>Дверь</option>
+        <option value="niche"${o.kind==='niche'?' selected':''}>Ниша / вырез</option>
+      </select></div></div>
+      <div class="row">
+        <div class="f"><label>Привязка по горизонтали</label><select data-k="anchorH">
+          <option value="left"${o.anchorH==='left'?' selected':''}>От левой стены</option>
+          <option value="right"${o.anchorH==='right'?' selected':''}>От правой стены</option>
+          <option value="center"${o.anchorH==='center'?' selected':''}>По центру</option>
+        </select></div>
+        <div class="f"><label>Отступ от стены</label><input type="number" data-k="off" value="${offsetOf(o,w.W)}"${o.anchorH==='center'?' disabled':''}><span class="unit">мм</span></div>
+      </div>
+      <div class="row">
+        <div class="f"><label>Ширина проёма</label><input type="number" data-k="w" value="${o.w}"><span class="unit">мм</span></div>
+        <div class="f"><label>&nbsp;</label><span class="hint" style="margin:0">x = ${fmt(o.x)} мм от левого края</span></div>
+      </div>
+      <div class="row">
+        <div class="f"><label>Низ — отметка от пола</label><input type="number" data-k="ylow" value="${Math.round(o.y)}"><span class="unit">мм</span></div>
+        <div class="f"><label>Верх — отметка от пола</label><input type="number" data-k="yhigh" value="${Math.round(o.y+o.h)}"><span class="unit">мм</span></div>
+      </div>
+      <div class="row row-1"><div class="f"><label>Заполнение проёма материалом</label><select data-k="fillMat">
+        <option value="">— без заполнения —</option>
+        ${PRESETS.filter(pp=>pp.id!=='custom').map(pp=>`<option value="${pp.id}"${o.fillMat===pp.id?' selected':''}>${pp.name}</option>`).join('')}
+      </select></div></div>
+      <label class="chk"><input type="checkbox" data-k="otkos"${o.otkos?' checked':''}><span>Отделывать откосы</span></label>
+      <div class="row row-1" ${o.otkos?'':'hidden'}>
+        <div class="f"><label>Глубина откоса</label><input type="number" data-k="depth" value="${o.depth}"><span class="unit">мм</span></div>
+      </div>
+      <div ${o.otkos?'':'hidden'} style="margin-bottom:8px">
+        <p class="hint" style="margin:0 0 4px">Как отделана каждая сторона — то же самое можно кликом по контуру на схеме</p>
+        <div class="row">
+          ${otkosSideSelect(o,'left','Слева')}
+          ${otkosSideSelect(o,'right','Справа')}
+        </div>
+        <div class="row">
+          ${otkosSideSelect(o,'top','Сверху')}
+          ${o.kind!=='door'?otkosSideSelect(o,'bottom','Снизу'):''}
+        </div>
+      </div>
+    </div>`).join('');
+}
+function otkosSideSelect(o,side,label){
+  const cur=otkosModeJs(o,side);
+  return `<div class="f"><label>${label}</label><select data-k="otkosMode" data-side="${side}">
+    <optgroup label="С материалом откоса">
+      <option value="corner"${cur==='corner'?' selected':''}>Г-образный угол</option>
+      <option value="butt"${cur==='butt'?' selected':''}>Встык (без профиля)</option>
+      <option value="bend"${cur==='bend'?' selected':''}>Изгиб панели</option>
+    </optgroup>
+    <optgroup label="Без откоса (напр. подоконник)">
+      <option value="none"${cur==='none'?' selected':''}>Открытый край, без профиля</option>
+      <option value="cap"${cur==='cap'?' selected':''}>Заглушка на краю панели</option>
+      <option value="led"${cur==='led'?' selected':''}>LED-профиль на краю панели</option>
+    </optgroup>
+  </select></div>`;
+}
+function otkosModeJs(o,side){ return (o.otkosMode&&o.otkosMode[side])||'corner'; }
+// пересчёт x по привязке
+function applyAnchor(o,W,off){
+  if(o.anchorH==='right')       o.x=W-off-o.w;
+  else if(o.anchorH==='center') o.x=(W-o.w)/2;
+  else                          o.x=off;
+}
+$('#openings').addEventListener('input', e=>{
+  const wrap=e.target.closest('[data-op]'); if(!wrap) return;
+  const wa=AW();
+  const o=wa.ops.find(x=>x.id==wrap.dataset.op); if(!o) return;
+  const k=e.target.dataset.k; if(!k) return;
+  const v=e.target.type==='checkbox'?e.target.checked
+        : e.target.type==='number'?(parseFloat(e.target.value)||0):e.target.value;
+  if(k==='off'){ applyAnchor(o,wa.W,v); }
+  else if(k==='anchorH'){ o.anchorH=v; applyAnchor(o,wa.W,v==='center'?0:offsetOf(o,wa.W)); renderOpenings(); run(); return; }
+  else if(k==='w'){ const off=offsetOf(o,wa.W); o.w=v; applyAnchor(o,wa.W,off); }
+  else if(k==='ylow'){ const top=o.y+o.h; o.y=v; o.h=Math.max(top-v,50); }
+  else if(k==='yhigh'){ o.h=Math.max(v-o.y,50); }
+  else if(k==='fillMat'){ o.fillMat=v||null; }
+  else if(k==='otkosMode'){
+    const side=e.target.dataset.side; if(!side) return;
+    o.otkosMode=o.otkosMode||{}; o.otkosMode[side]=v;
+    run(); return;
+  }
+  else if(k==='kind'){
+    // размеры не менялись (совпадают со стандартом какого-либо типа) -> подставляем стандарт нового типа
+    const untouched=Object.values(OP_DEFAULTS).some(df=>Math.abs(o.w-df.w)<1&&Math.abs(o.h-df.h)<1);
+    o.kind=v;
+    const df=OP_DEFAULTS[v];
+    if(untouched&&df){ const top=df.y+df.h; o.w=df.w; o.h=df.h; o.y=df.y;
+      if(o.anchorH==='center') o.x=(wa.W-o.w)/2; else if(o.anchorH==='right'){} else {}
+      applyAnchor(o,wa.W,o.anchorH==='center'?0:offsetOf(o,wa.W)); }
+  }
+  else o[k]=v;
+  if(k==='otkos'||k==='kind'||k==='fillMat'){ renderOpenings(); run(); return; }
+  // живое обновление мини-схемы и подписи x без полного перерендера (не теряем фокус)
+  const mini=wrap.querySelector('[data-mini]'); if(mini) mini.innerHTML=miniSvg(o,wa.W,wa.H);
+  const xlbl=wrap.querySelector('.hint'); if(xlbl) xlbl.textContent='x = '+fmt(o.x)+' мм от левого края';
+  run();
+});
+$('#openings').addEventListener('click', e=>{
+  const wa=AW();
+  if(e.target.dataset.rm){ wa.ops=wa.ops.filter(o=>o.id!=e.target.dataset.rm); renderOpenings(); run(); return; }
+  if(e.target.dataset.dup){
+    const src=wa.ops.find(o=>o.id==e.target.dataset.dup); if(!src) return;
+    wa.opSeq++;
+    const cp=Object.assign({},src,{id:wa.opSeq, x:Math.min(src.x+src.w+200, Math.max(0,wa.W-src.w))});
+    wa.ops.push(cp); renderOpenings(); run();
+  }
+});
+$('#btn-add-op').addEventListener('click', ()=>{ addOpening(); run(); });
+document.addEventListener('click',e=>{
+  if(e.target&&e.target.id==='btn-mreset'){ manualMoves={}; run(); }
+});
+
+/* ===================== ГЕОМЕТРИЯ ===================== */
+function subRanges(total,gaps){
+  gaps=gaps.slice().sort((a,b)=>a[0]-b[0]);
+  let segs=[],p=0;
+  gaps.forEach(g=>{
+    const g0=Math.min(Math.max(g[0],0),total), g1=Math.min(Math.max(g[1],0),total);
+    if(g1<=g0) return;                 // промежуток вырожден или лежит вне отрезка
+    if(g0>p) segs.push([p,g0]);
+    p=Math.max(p,g1);
+  });
+  if(p<total)segs.push([p,total]);
+  return segs.filter(s=>s[1]-s[0]>1);
+}
+function subIn(lo,hi,gaps){
+  const segs=subRanges(hi-lo, gaps.map(g=>[g[0]-lo,g[1]-lo]));
+  return segs.map(g=>[g[0]+lo,g[1]+lo]);
+}
+function buildLayout(S){
+  const vert=S.orient==='v', across=vert?S.W:S.H, along=vert?S.H:S.W, bandW=S.pw;
+  const oA=o=>vert?[o.x,o.w]:[o.y,o.h], oB=o=>vert?[o.y,o.h]:[o.x,o.w];
+
+  // Проём во всю длину полос рассекает область на независимые участки:
+  // материал слева и справа от него не связан, сетку надо строить в каждом отдельно.
+  const dividers=[];
+  S.ops.forEach(o=>{
+    const [b0,bL]=oB(o), [a0,aL]=oA(o);
+    if(b0<=1 && b0+bL>=along-1) dividers.push([a0,a0+aL]);
+  });
+  const regions=subRanges(across,dividers);
+
+  // раскладка полос внутри одного участка
+  const layoutRegion=rw=>{
+    const nFull=Math.floor(rw/bandW), rest=rw-nFull*bandW;
+    if(rest<1) return Array(Math.max(nFull,1)).fill(bandW);
+    if(S.sym&&nFull>=1){ const e=(rw-(nFull-1)*bandW)/2; return [e,...Array(Math.max(nFull-1,0)).fill(bandW),e]; }
+    return [...Array(nFull).fill(bandW),rest];
+  };
+  const strips=[]; let si=0;
+  regions.forEach((rg,ri)=>{
+    let cur=rg[0];
+    layoutRegion(rg[1]-rg[0]).forEach(w=>{
+      strips.push({i:si++,region:ri,start:cur,w,end:cur+w,segs:[],cuts:[]});
+      cur+=w;
+    });
+  });
+  // Изгиб панели («развёртка»): бок проёма без отдельной детали откоса — вместо неё соседняя
+  // деталь физически шире/длиннее на глубину откоса. «Лево/право» и «верх/низ» — это ВСЕГДА
+  // физические стороны проёма (x- и y-ось соответственно), а не «поперёк/вдоль полосы» — эти
+  // два понятия совпадают только при вертикальной раскладке. При горизонтальной («рейка лёжа»)
+  // полосы идут поперёк по Y, и ролями меняются местами: верх/низ становится «через полосу»
+  // (соседняя лежащая полоса), а лево/право — «внутри полосы» (растёт длина куска).
+  const crossIsLR = vert;   // true: лево/право = соседняя полоса; false: верх/низ = соседняя полоса
+  const bendExtraPts={};           // strip.i -> точки, по которым принудительно режем сегмент
+  const bendWiden=[];              // {stripI,y0,y1,depth,op,side} — расширение по ширине (w)
+  const bendLenSides=[];           // {op,side,a0,aL,b0,bL,depth} — расширение по длине
+  const bendRejectedEarly=[];      // изгиб запрошен, но геометрически не за что зацепиться —
+                                    // отмечаем сразу, иначе деталь откоса потеряется молча
+  S.ops.forEach((o,oi)=>{
+    if(!o.otkos||!(o.depth>0)) return;
+    const crossSides = (crossIsLR ? ['left','right'] : ['top','bottom']).filter(s=>!(s==='bottom'&&o.kind==='door'));
+    const alongSides  = (crossIsLR ? ['top','bottom'] : ['left','right']).filter(s=>!(s==='bottom'&&o.kind==='door'));
+    // у двери нет нижнего откоса вообще (проём уходит в пол) — «низ» тут не кандидат на изгиб,
+    // как и на обычную деталь откоса (см. buildOtkosParts) — иначе загнём материал в несуществующий проём
+    const wantCross=crossSides.filter(s=>otkosMode(o,s)==='bend');
+    const wantAlong=alongSides.filter(s=>otkosMode(o,s)==='bend');
+    // конфликт углов одного проёма: смежные стороны (через полосу + вдоль полосы разом)
+    // спорят за один и тот же уголок материала — «через полосу» в приоритете, «вдоль» отклоняем
+    // ДО попытки любого механизма (иначе конфликт можно пропустить, если «через полосу»
+    // успеет решиться одним способом, а «вдоль» другим — они всё равно физически столкнутся).
+    const activeAlong = (wantCross.length && wantAlong.length) ? [] : wantAlong;
+    if(wantCross.length && wantAlong.length) wantAlong.forEach(side=>bendRejectedEarly.push({op:oi,side,final:true}));
+    // «через полосу»: сторона лежит на оси, вдоль которой раскладываются сами полосы (across)
+    const [ac0,acL] = crossIsLR ? [o.x,o.w] : [o.y,o.h];
+    // «вдоль полосы»: перпендикулярная ось — диапазон, который нужно принудительно вырезать в сегменте
+    const [al0,alL] = crossIsLR ? [o.y,o.h] : [o.x,o.w];
+    wantCross.forEach(side=>{
+      const atStart = side==='left'||side==='bottom';   // 'left'/'bottom' — меньшая координата (начало проёма)
+      const st = atStart
+        ? strips.find(s=>Math.abs(s.end-ac0)<2)
+        : strips.find(s=>Math.abs(s.start-(ac0+acL))<2);
+      if(st){ (bendExtraPts[st.i]=bendExtraPts[st.i]||[]).push(al0,al0+alL);
+              bendWiden.push({stripI:st.i,y0:al0,y1:al0+alL,depth:o.depth,op:oi,side}); }
+      else bendRejectedEarly.push({op:oi,side});   // край проёма не совпадает с границей полосы
+    });
+    activeAlong.forEach(side=>{
+      bendLenSides.push({op:oi,side,a0:ac0,aL:acL,b0:al0,bL:alL,depth:o.depth});
+    });
+  });
+  strips.forEach(st=>{
+    const gaps=[];
+    S.ops.forEach((o,oi)=>{
+      const [a0,aL]=oA(o),[b0,bL]=oB(o);
+      if(a0<=st.start+1 && a0+aL>=st.end-1){ gaps.push([b0,b0+bL]); return; }
+      const x0=Math.max(st.start,a0), x1=Math.min(st.end,a0+aL);
+      if(x1-x0>1) st.cuts.push({op:oi,ax:x0-st.start,aw:x1-x0,b0,bL});
+    });
+    st.segs=subRanges(along,gaps);
+  });
+  // Точки поперечных резов внутри сегмента [a,b].
+  // rowH=0: резы каждые pl от начала сегмента (как раньше).
+  // rowH>0: абсолютная серия отметок rowH, rowH+pl, rowH+2pl... от нуля оси;
+  //         любой получившийся кусок длиннее листа дорезается шагом pl.
+  const splitSeg=(a,b,stI)=>{
+    const rowH=(S.rowH>0 && S.rowH<=S.pl+0.5) ? S.rowH : 0;
+    let pts=[];
+    if(rowH>0){ let q=rowH; while(q<=a+0.5) q+=S.pl; for(;q<b-0.5;q+=S.pl) pts.push(q); }
+    (S.userSeams||[]).forEach(us=>{ if(us>a+0.5 && us<b-0.5) pts.push(us); });
+    (bendExtraPts[stI]||[]).forEach(v=>{ if(v>a+0.5 && v<b-0.5) pts.push(v); });
+    pts=[...new Set(pts.map(v=>Math.round(v)))].sort((x,y)=>x-y);
+    const out=[]; let prev=a;
+    [...pts,b].forEach(pt=>{
+      while(pt-prev>S.pl+0.5){ prev+=S.pl; out.push(prev); }
+      if(pt<b-0.5) out.push(pt);
+      prev=pt;
+    });
+    return out;
+  };
+  const pieces=[]; const seams=[];
+  strips.forEach(st=>{
+    st.segs.forEach((sg,si)=>{
+      const bounds=[sg[0],...splitSeg(sg[0],sg[1],st.i),sg[1]];
+      for(let k=0;k<bounds.length-1;k++){
+        const from=bounds[k], to=bounds[k+1], len=to-from;
+        if(len<=0.5) continue;
+        if(k>0) seams.push({strip:st.i, pos:from, a0:st.start, a1:st.end});
+        const p={strip:st.i,len,w:st.w,from,to,cuts:[],
+          label:'П'+(st.i+1)+((st.segs.length>1||bounds.length>2)?'.'+(si+k+1):'')};
+        st.cuts.forEach(c=>{
+          const y0=Math.max(from,c.b0), y1=Math.min(to,c.b0+c.bL);
+          if(y1-y0>1) p.cuts.push({op:c.op,ax:c.ax,aw:c.aw,by:y0-from,bh:y1-y0});
+        });
+        pieces.push(p);
+      }
+    });
+  });
+  // Развёртка изгиба: у выбранных деталей увеличиваем габарит на глубину проёма —
+  // лево/право прибавляют к ширине, верх/низ (только если проём во всю ширину полосы) — к длине.
+  // Если развёрнутая деталь не влезет ни в лист по длине, ни по ширине материала — изгиб
+  // физически невозможен (не бывает панели длиннее хлыста материала); откатываемся к «Г-образному»
+  // углу для этой стороны и сообщаем об этом наружу, чтобы деталь откоса не потерялась.
+  let bendExtraArea=0; const bendRejected=bendRejectedEarly.slice();
+  bendWiden.forEach(bw=>{
+    const p=pieces.find(pp=>pp.strip===bw.stripI && Math.abs(pp.from-bw.y0)<2 && Math.abs(pp.to-bw.y1)<2);
+    if(!p){ bendRejected.push({op:bw.op,side:bw.side}); return; }
+    if(p.w+bw.depth>S.pw+0.5){ bendRejected.push({op:bw.op,side:bw.side}); return; }
+    p.w+=bw.depth; p.bend=(p.bend||[]).concat([{side:bw.side,op:bw.op,depth:bw.depth,extra:m2(bw.depth,p.len)}]);
+    bendExtraArea+=m2(bw.depth,p.len);
+  });
+  // «через полосу» — «всё или ничего»: если проём не покрывает КАКУЮ-ТО из задетых полос на всю
+  // её ширину (или для неё не находится подходящая деталь, или та не влезет по длине листа),
+  // изгиб отклоняется целиком по этой стороне — иначе часть проёма осталась бы без материала.
+  bendLenSides.forEach(bl=>{
+    const touched=strips.filter(st=>Math.min(st.end,bl.a0+bl.aL)-Math.max(st.start,bl.a0)>1);
+    let ok=touched.length>0;
+    const targets=[];
+    // 'bottom'/'left' лежат на МЕНЬШЕЙ координате вдоль своей оси (низ проёма, левый край) —
+    // им нужна деталь, что кончается ровно там, где проём начинается (pp.to≈b0).
+    // 'top'/'right' — деталь, что начинается ровно там, где проём заканчивается (pp.from≈b0+bL).
+    const isSmallerSide = bl.side==='bottom' || bl.side==='left';
+    touched.forEach(st=>{
+      if(!ok) return;
+      const fullyInside=bl.a0<=st.start+1 && bl.a0+bl.aL>=st.end-1;
+      if(!fullyInside){ ok=false; return; }
+      const target=isSmallerSide
+        ? pieces.find(pp=>pp.strip===st.i && Math.abs(pp.to-bl.b0)<2)
+        : pieces.find(pp=>pp.strip===st.i && Math.abs(pp.from-(bl.b0+bl.bL))<2);
+      if(!target || target.len+bl.depth>S.pl+0.5){ ok=false; return; }
+      targets.push(target);
+    });
+    if(!ok){ bendRejected.push({op:bl.op,side:bl.side}); return; }
+    targets.forEach(target=>{
+      target.len+=bl.depth;
+      target.bend=(target.bend||[]).concat([{side:bl.side,op:bl.op,depth:bl.depth,extra:m2(target.w,bl.depth)}]);
+      bendExtraArea+=m2(target.w,bl.depth);
+    });
+  });
+  const joints=[];
+  strips.forEach((st,k)=>{
+    const next=strips[k+1];
+    if(!next||next.region!==st.region) return;   // через проём-разделитель стыка нет
+    const gaps=[];
+    S.ops.forEach(o=>{const [a0,aL]=oA(o),[b0,bL]=oB(o); if(a0<st.end-1&&a0+aL>st.end+1) gaps.push([b0,b0+bL]);});
+    joints.push({pos:st.end,segs:subRanges(along,gaps)});
+  });
+  // ---- «Изгиб недорезом»: если у стороны нет соседней полосы (край проёма пришёлся
+  // в СЕРЕДИНУ детали, а не на её границу), пробуем ВТОРОЙ способ — не дорезать вырез до
+  // конца, оставить запас в глубину откоса на этой же самой детали и загнуть его внутрь.
+  // Материал для этого уже вырезался бы как обрезок — тут он просто не отрезается совсем.
+  // Конфликт смежных сторон одного угла уже решён выше (до попытки любого механизма),
+  // поэтому здесь достаточно попробовать каждую оставшуюся (op,side) независимо.
+  const allRejected=bendRejected.splice(0,bendRejected.length);
+  const stillOpen=allRejected.filter(r=>!r.final);
+  bendRejected.push(...allRejected.filter(r=>r.final).map(r=>({op:r.op,side:r.side})));
+  const marginOf=(p,c,side)=>{
+    const smaller=side==='left'||side==='bottom';
+    const cross=(side==='left'||side==='right')===crossIsLR;   // сторона лежит на «поперечной» оси?
+    if(cross) return smaller?c.ax:(p.w-(c.ax+c.aw));
+    return smaller?c.by:(p.len-(c.by+c.bh));
+  };
+  const shrinkCut=(p,c,side,depth)=>{
+    const smaller=side==='left'||side==='bottom';
+    const cross=(side==='left'||side==='right')===crossIsLR;
+    if(cross){ if(smaller){ c.ax+=depth; } c.aw-=depth; }
+    else     { if(smaller){ c.by+=depth; } c.bh-=depth; }
+  };
+  stillOpen.forEach(({op:oi,side})=>{
+    const o=S.ops[oi];
+    const cross=(side==='left'||side==='right')===crossIsLR;
+    const withCut=pieces.filter(p=>p.cuts.some(c=>c.op===oi));
+    const eligible=withCut.filter(p=>{
+      const c=p.cuts.find(cc=>cc.op===oi);
+      // запаса вокруг выреза должно хватать на глубину отгиба, И у самого выреза в этом
+      // направлении должно быть достаточно размера — иначе загиб «съедает» больше, чем
+      // есть в вырезе, и он уходит в отрицательные размеры (деталь физически не existует).
+      const selfSize=cross?c.aw:c.bh;
+      return marginOf(p,c,side)>=o.depth-0.5 && selfSize>=o.depth-0.5;
+    });
+    // «через полосу» (лево/право при верт. раскладке): сторона касается ровно ОДНОЙ детали —
+    // той, что владеет настоящим краем проёма; остальные задетые проёмом детали тут ни при чём.
+    // «вдоль полосы» (верх/низ): край тянется через ВСЕ полосы, что проём затрагивает по ширине —
+    // запас должен найтись у КАЖДОЙ. Если проём перекрывает какую-то полосу НА ВСЮ её ширину —
+    // там образуется не вырез, а сквозной разрыв (материала нет вообще, откосу неоткуда взяться) —
+    // сплошной загиб через такую полосу физически невозможен, вся сторона отклоняется.
+    let gapInMiddle=false;
+    if(!cross){
+      const [ac0,acL]=crossIsLR?[o.x,o.w]:[o.y,o.h];
+      const touchedStrips=strips.filter(st=>Math.min(st.end,ac0+acL)-Math.max(st.start,ac0)>1);
+      gapInMiddle=touchedStrips.some(st=>!pieces.some(p=>p.strip===st.i&&p.cuts.some(c=>c.op===oi)));
+    }
+    if(!eligible.length || gapInMiddle || (!cross && eligible.length<withCut.length)){ bendRejected.push({op:oi,side}); return; }
+    eligible.forEach(p=>{
+      const c=p.cuts.find(cc=>cc.op===oi);
+      const flapLen=cross?c.bh:c.aw;   // соседнее измерение выреза, этим сдвигом не затронуто
+      if(!c.orig) c.orig={ax:c.ax,aw:c.aw,by:c.by,bh:c.bh};   // для отрисовки клапана на карте раскроя
+      shrinkCut(p,c,side,o.depth);
+      c.fold=(c.fold||[]).concat([side]);
+      p.bend=(p.bend||[]).concat([{side,op:oi,depth:o.depth,inner:true}]);
+      bendExtraArea+=m2(o.depth,flapLen);
+    });
+  });
+  return {vert,strips,pieces,joints,seams,regions,splices:seams.length,along,across,bendExtraArea,bendRejected};
+}
+function packSheets(pieces,S){
+  const order=[...pieces].sort((a,b)=>b.len-a.len), sheets=[];
+  order.forEach(p=>{
+    let put=null;
+    if(S.offcut) for(const sh of sheets){
+      const need=p.len+(sh.list.length?S.kerf:0);
+      if(sh.rem>=need){sh.rem-=need;sh.list.push(p);put=sh;break;}
+    }
+    if(!put) sheets.push({rem:S.pl-p.len,list:[p]});
+  });
+  sheets.forEach((sh,i)=>{
+    sh.no=i+1; sh.free=[]; sh.otk=[]; let y=0;
+    sh.list.forEach((p,k)=>{
+      if(k) y+=S.kerf;
+      p.x=0; p.y=y;
+      const side=S.pw-p.w-S.kerf;
+      if(side>=20) sh.free.push({x:p.w+S.kerf,y,w:side,h:p.len});
+      y+=p.len;
+    });
+    const tail=S.pl-y-(sh.list.length?S.kerf:0);
+    if(tail>=20) sh.free.push({x:0,y:y+S.kerf,w:S.pw,h:tail});
+    sh.used=y;
+    sh.list.forEach((p,k)=>{ p.sheet=sh.no; p.fromOffcut=k>0; });
+    // Вынутая из выреза середина — цельный кусок материала, он идёт в дело.
+    // Но если у детали несколько вырезов, они могут сливаться в отверстие сложной формы —
+    // тогда прямоугольные куски из них перекрываются. Берём только вырезы, не пересекающиеся
+    // с другими вырезами той же детали; форму-конгломерат в дело не пускаем.
+    sh.list.forEach(p=>{
+      p.cuts.forEach((c,ci)=>{
+        const overlaps=p.cuts.some((d,di)=>{
+          if(di===ci) return false;
+          const ox=Math.min(c.ax+c.aw,d.ax+d.aw)-Math.max(c.ax,d.ax);
+          const oy=Math.min(c.by+c.bh,d.by+d.bh)-Math.max(c.by,d.by);
+          return ox>1 && oy>1;
+        });
+        if(overlaps) return;
+        const w=c.aw-S.kerf, h=c.bh-S.kerf;
+        if(w>=20&&h>=20) sh.free.push({
+          x:p.x+c.ax+S.kerf/2, y:p.y+(p.len-(c.by+c.bh))+S.kerf/2, w, h, fromCut:true});
+      });
+    });
+  });
+  return sheets;
+}
+/* Колоночная укладка: узкие детали ставятся на лист рядом (колонками),
+   а не только друг над другом. Каждая колонка — гильотинный рез по вертикали. */
+function packSheetsCols(pieces,S){
+  const order=[...pieces].sort((a,b)=>b.len-a.len||b.w-a.w);
+  const sheets=[];
+  order.forEach(p=>{
+    let best=null;
+    sheets.forEach(sh=>{
+      sh.cols.forEach(col=>{
+        if(col.w>=p.w && S.pl-col.used-(col.used?S.kerf:0)>=p.len){
+          const sc=(col.w-p.w)*1e7+(S.pl-col.used-p.len);
+          if(!best||best.tier>0||sc<best.sc) if(!best||best.tier>0||(best.tier===0&&sc<best.sc)) best={tier:0,sc,sh,col};
+        }
+      });
+      if((!best||best.tier>0) && S.pw-sh.nextX>=p.w){
+        const sc=(S.pw-sh.nextX-p.w);
+        if(!best||best.tier>1||(best.tier===1&&sc<best.sc)) best={tier:1,sc,sh,col:null};
+      }
+    });
+    if(!best){
+      const sh={no:sheets.length+1,cols:[],nextX:0,list:[],otk:[],free:[]};
+      sheets.push(sh); best={tier:2,sh,col:null};
+    }
+    const sh=best.sh;
+    let col=best.col;
+    if(!col){ col={x:sh.nextX,w:p.w,used:0,pieces:[]}; sh.cols.push(col); sh.nextX=col.x+p.w+S.kerf; }
+    if(col.used) col.used+=S.kerf;
+    p.x=col.x; p.y=col.used; p.sheet=sh.no; p.fromOffcut=sh.list.length>0;
+    col.used+=p.len;
+    col.pieces.push(p);
+    sh.list.push(p);
+  });
+  // свободные зоны
+  sheets.forEach(sh=>{
+    sh.cols.forEach(col=>{
+      col.pieces.forEach(pp=>{
+        const sliver=col.w-pp.w-S.kerf;
+        if(sliver>=20) sh.free.push({x:col.x+pp.w+S.kerf,y:pp.y,w:sliver,h:pp.len});
+      });
+      const tail=S.pl-col.used-S.kerf;
+      if(tail>=20) sh.free.push({x:col.x,y:col.used+S.kerf,w:col.w,h:tail});
+    });
+    const rightW=S.pw-sh.nextX;
+    if(rightW>=20) sh.free.push({x:sh.nextX,y:0,w:rightW,h:S.pl});
+    // материал из вырезов — как в packSheets, с защитой от слившихся отверстий
+    sh.list.forEach(pp=>{
+      pp.cuts.forEach((c,ci)=>{
+        const overlaps=pp.cuts.some((d2,di)=>{
+          if(di===ci) return false;
+          const ox=Math.min(c.ax+c.aw,d2.ax+d2.aw)-Math.max(c.ax,d2.ax);
+          const oy=Math.min(c.by+c.bh,d2.by+d2.bh)-Math.max(c.by,d2.by);
+          return ox>1&&oy>1;
+        });
+        if(overlaps) return;
+        const w2=c.aw-S.kerf, h2=c.bh-S.kerf;
+        if(w2>=20&&h2>=20) sh.free.push({
+          x:pp.x+c.ax+S.kerf/2, y:pp.y+(pp.len-(c.by+c.bh))+S.kerf/2, w:w2, h:h2, fromCut:true});
+      });
+    });
+  });
+  return sheets;
+}
+
+function buildOtkosParts(S){
+  const parts=[];
+  S.ops.forEach((o,i)=>{
+    if(!o.otkos||o.depth<=0) return;
+    const t='О'+(i+1);
+    // деталь откоса режется, только если сторона реально отделывается материалом
+    // («Г-образный» и «встык»). «Изгиб» материал берёт из удлинённой панели стены — отдельной
+    // детали не режем. Остальные режимы («нет», «заглушка на краю», «LED на краю») — это про
+    // то, ЧЕМ закрыт голый торец панели, когда откоса вообще нет — материала там нет никакого.
+    const has=k=>{ const m=otkosMode(o,k); return m==='corner'||m==='butt'; };
+    if(has('left'))   parts.push({name:t+'·лев', len:o.h, dep:o.depth, op:i, side:'left'});
+    if(has('right'))  parts.push({name:t+'·прав',len:o.h, dep:o.depth, op:i, side:'right'});
+    if(has('top'))    parts.push({name:t+'·верх',len:o.w, dep:o.depth, op:i, side:'top'});
+    if(o.kind!=='door' && has('bottom')) parts.push({name:t+'·низ',len:o.w, dep:o.depth, op:i, side:'bottom'});
+  });
+  return parts;
+}
+const otkosMode=(o,side)=>(o.otkosMode&&o.otkosMode[side])||'corner';
+function packOtkos(parts,sheets,S,opt){
+  opt=opt||{};
+  const cmps={
+    cur:(a,b)=>b.len-a.len||b.dep-a.dep,
+    dep:(a,b)=>b.dep-a.dep||b.len-a.len,
+    area:(a,b)=>b.len*b.dep-a.len*a.dep,
+    asc:(a,b)=>a.len-b.len||a.dep-b.dep
+  };
+  const order=[...parts].sort(cmps[opt.order||'cur']);
+  let extra=0; const failed=[], spliced=[], forced=[];
+  const MIN=300;                                   // короче этого куска откос не собираем
+  const fits=(f,pt)=>{
+    if(f.w>=pt.dep && f.h>=pt.len) return {dw:pt.dep,dh:pt.len,rot:false};
+    if(S.rot && f.w>=pt.len && f.h>=pt.dep) return {dw:pt.len,dh:pt.dep,rot:true};
+    return null;
+  };
+  const cutFree=(sh,f,dw,dh)=>{
+    const right={x:f.x+dw+S.kerf,y:f.y,w:f.w-dw-S.kerf,h:dh,fromCut:f.fromCut};
+    const bot  ={x:f.x,y:f.y+dh+S.kerf,w:f.w,h:f.h-dh-S.kerf,fromCut:f.fromCut};
+    if(right.w>=20&&right.h>=20) sh.free.push(right);
+    if(bot.w>=20&&bot.h>=20) sh.free.push(bot);
+  };
+
+  order.forEach(pt=>{
+    // по ширине деталь не спасёт никакая стыковка
+    if(pt.dep>S.pw && !(S.rot && pt.dep<=S.pl)){ failed.push(pt); return; }
+
+    const whole = S.rot
+      ? ((pt.len<=S.pl&&pt.dep<=S.pw)||(pt.dep<=S.pl&&pt.len<=S.pw))
+      : (pt.len<=S.pl && pt.dep<=S.pw);
+
+    let done=false;
+    if(whole){
+      let best=null;
+      for(const sh of sheets){
+        for(const f of sh.free){
+          const fit=fits(f,pt); if(!fit) continue;
+          if(opt.fit!=='best'){ best={sh,f,fit}; break; }
+          const slack=(f.h-fit.dh)*1e7+(f.w-fit.dw);   // теснее по длине, потом по ширине
+          if(!best||slack<best.slack) best={sh,f,fit,slack};
+        }
+        if(best&&opt.fit!=='best') break;
+      }
+      if(best){
+        const {sh,f,fit}=best;
+        pt.x=f.x; pt.y=f.y; pt.sheet=sh.no;
+        pt.dw=fit.dw; pt.dh=fit.dh; pt.rot=fit.rot; pt.fromCut=!!f.fromCut;
+        sh.otk.push(pt);
+        sh.free.splice(sh.free.indexOf(f),1);
+        cutFree(sh,f,fit.dw,fit.dh);
+        done=true;
+      }
+    }
+
+    // Стыковка: либо по выбору пользователя, либо вынужденно —
+    // деталь длиннее листа цельной быть не может в принципе.
+    if(!done && (S.splice || !whole)){
+      const newSheets=!whole;                      // вынужденной стыковке можно добирать листы
+      const chunks=[]; let rest=pt.len, ok=true;
+      const taken=[];                              // куски, изъятые из пулов на время подбора
+      const removeFree=(sh,f)=>{ const j=sh.free.indexOf(f); if(j>=0) sh.free.splice(j,1); };
+      while(rest>1){
+        let best=null,bSh=null;
+        sheets.forEach(sh=>sh.free.forEach(f=>{
+          if(f.w>=pt.dep && f.h>=Math.min(rest,MIN) && (!best||f.h>best.h)){ best=f;bSh=sh; }
+        }));
+        if(!best){
+          if(!newSheets){ ok=false; break; }
+          const sh={no:sheets.length+1,list:[],otk:[],rem:S.pl,used:0,extra:true,
+                    free:[{x:0,y:0,w:S.pw,h:S.pl}]};
+          sheets.push(sh); extra++;
+          best=sh.free[0]; bSh=sh;
+        }
+        let take=Math.min(rest,best.h);
+        if(rest-take>0 && rest-take<MIN){          // не оставляем огрызок короче минимума
+          const t2=rest-MIN;
+          if(t2>=MIN) take=Math.min(t2,best.h);
+        }
+        chunks.push({f:best,sh:bSh,take});
+        removeFree(bSh,best);                       // изымаем ПО ССЫЛКЕ, не по индексу
+        taken.push({sh:bSh,f:best});
+        rest-=take;
+      }
+      if(ok && chunks.length){
+        chunks.forEach((c,k)=>{
+          const part={...pt, len:c.take, x:c.f.x, y:c.f.y, sheet:c.sh.no,
+                      dw:pt.dep, dh:c.take, rot:false, fromCut:!!c.f.fromCut,
+                      name:pt.name+(chunks.length>1?` (${k+1}/${chunks.length})`:''), spliced:chunks.length>1};
+          c.sh.otk.push(part);
+          cutFree(c.sh,c.f,pt.dep,c.take);           // остатки этого куска возвращаются в пул
+        });
+        if(chunks.length>1) (whole?spliced:forced).push(`${pt.name} — ${chunks.map(c=>fmt(c.take)).join(' + ')}`);
+        done=true;
+      } else {
+        taken.forEach(t=>t.sh.free.push(t.f));       // неудача: вернуть изъятые куски в пул
+      }
+    }
+
+    if(!done && whole){
+      const sh={no:sheets.length+1,list:[],otk:[pt],rem:S.pl,used:0,extra:true,free:[]};
+      pt.x=0; pt.y=0; pt.sheet=sh.no; pt.dw=pt.dep; pt.dh=pt.len; pt.rot=false;
+      sh.free=[{x:pt.dep+S.kerf,y:0,w:S.pw-pt.dep-S.kerf,h:pt.len},
+               {x:0,y:pt.len+S.kerf,w:S.pw,h:S.pl-pt.len-S.kerf}].filter(f=>f.w>=20&&f.h>=20);
+      sheets.push(sh); extra++; done=true;
+    }
+    if(!done) failed.push(pt);
+  });
+  return {extra,failed,spliced,forced};
+}
+function nestProfile(runs,stock,kerf){
+  const cuts=[];
+  runs.forEach(L=>{let r=L; while(r>stock+1){cuts.push(stock);r-=stock;} if(r>1)cuts.push(r);});
+  const sticks=[];
+  [...cuts].sort((a,b)=>b-a).forEach(c=>{
+    let put=null;
+    for(const s of sticks){const need=c+(s.cuts.length?kerf:0); if(s.rem>=need){s.rem-=need;s.cuts.push(c);put=s;break;}}
+    if(!put) sticks.push({rem:stock-c,cuts:[c]});
+  });
+  return {sticks:sticks.length,total:runs.reduce((a,b)=>a+b,0),detail:sticks};
+}
+
+/* ===================== СБОР ВВОДА И РАСЧЁТ ===================== */
+function collect(){
+  const preset=PRESETS.find(p=>p.id===$('#i-preset').value)||PRESETS[0];
+  return {
+    client:$('#i-client').value.trim(),
+    pl:num('#i-pl'), pw:num('#i-pw'), orient:$('#i-orient').value,
+    sym:chk('#i-sym'), offcut:chk('#i-offcut'), splice:chk('#i-splice'), rot:chk('#i-rot'), minoff:num('#i-minoff'), kerf:num('#i-kerf'),
+    stock:num('#i-stock'),
+    jointV:chk('#i-joint-v'), jointH:chk('#i-joint-h'), edgeOps:chk('#i-edgeops'),
+    tubesPerSheet:num('#i-glue'), glueR:num('#i-gluer'),
+    ledLen:num('#i-ledlen'), ledW:num('#i-ledw'), psuR:num('#i-psur'),
+    price:{panel:num('#p-panel'),glue:num('#p-glue'),edge:num('#p-edge'),joint:num('#p-joint'),
+           cout:num('#p-cout'),cin:num('#p-cin'),ledstart:num('#p-ledprof'),ledjoint:num('#p-ledjoint'),
+           led:num('#p-led'),psu:num('#p-psu'),markup:num('#p-markup')},
+    presetName:preset.name
+  };
+}
+/* Вычитание прямоугольников: base минус занятые -> непересекающиеся свободные зоны */
+function subtractRects(base,rects){
+  let free=[Object.assign({},base)];
+  rects.forEach(r=>{
+    const out=[];
+    free.forEach(f=>{
+      const ix0=Math.max(f.x,r.x), iy0=Math.max(f.y,r.y);
+      const ix1=Math.min(f.x+f.w,r.x+r.w), iy1=Math.min(f.y+f.h,r.y+r.h);
+      if(ix1-ix0<=0.5||iy1-iy0<=0.5){ out.push(f); return; }
+      if(iy0-f.y>0.5)      out.push({x:f.x,y:f.y,   w:f.w,        h:iy0-f.y});
+      if(f.y+f.h-iy1>0.5)  out.push({x:f.x,y:iy1,   w:f.w,        h:f.y+f.h-iy1});
+      if(ix0-f.x>0.5)      out.push({x:f.x,y:iy0,   w:ix0-f.x,    h:iy1-iy0});
+      if(f.x+f.w-ix1>0.5)  out.push({x:ix1,y:iy0,   w:f.x+f.w-ix1,h:iy1-iy0});
+    });
+    free=out;
+  });
+  return free.filter(f=>f.w>=20&&f.h>=20);
+}
+// отверстия детали в координатах листа
+function holeRects(p){
+  return (p.cuts||[]).map(c=>({x:p.x+c.ax, y:p.y+(p.len-(c.by+c.bh)), w:c.aw, h:c.bh}));
+}
+const insideRect=(r,h,tol)=>r.x>=h.x-tol && r.y>=h.y-tol && r.x+r.w<=h.x+h.w+tol && r.y+r.h<=h.y+h.h+tol;
+
+/* Ручные перестановки деталей на карте раскроя.
+   mv: {uid:{sheet,x,y,rot?}}. rot=true — повернуть на 90° от текущей (свежей автоматической) ориентации.
+   Поворот разрешён только деталям без вырезов под проём (иначе пришлось бы поворачивать и вырез,
+   и связанные с ним «из выреза» откосы — слишком легко получить физически некорректный раскрой).
+   Возвращает статистику; чистит несовместимые правки. */
+function applyManual(sheets,mv,G,pl,pw,shelfList){
+  shelfList=shelfList||[];
+  // стабильные метки: имя + порядковый номер одноимённых (детерминировано при тех же входных)
+  const seq={};
+  const items=[];
+  sheets.forEach((sh,si)=>{
+    sh.list.forEach(o=>{ const k='w:'+o.label; const n=(seq[k]=(seq[k]||0)+1);
+      o._uid=k+'#'+n; items.push({uid:o._uid,kind:'w',o,homeSheetIdx:si}); });
+    sh.otk.forEach(o=>{ const k='o:'+o.name; const n=(seq[k]=(seq[k]||0)+1);
+      o._uid=k+'#'+n; items.push({uid:o._uid,kind:'o',o,homeSheetIdx:si}); });
+  });
+  const byUid={}; items.forEach(it=>byUid[it.uid]=it);
+  const rectOf=it=>it.kind==='w'
+    ?{x:it.o.x,y:it.o.y,w:it.o.w,h:it.o.len}
+    :{x:it.o.x,y:it.o.y,w:it.o.dw||it.o.dep,h:it.o.dh||it.o.len};
+  const canRotate=it=>it.kind==='o'||!(it.o.cuts&&it.o.cuts.length);
+
+  // деталь на верстаке — не на листе; правки её позиции (если остались от прошлого) отбрасываем
+  const shelfUids=new Set(shelfList.map(s=>s.uid).filter(u=>byUid[u]));
+  if(mv) shelfUids.forEach(u=>{ delete mv[u]; });
+
+  if((!mv||!Object.keys(mv).length) && !shelfUids.size) return {moved:0,dropped:0,shelf:[]};
+
+  // ---- Шаг 1: для каждой ручной записи строим ГРУППУ (сама деталь + «из выреза» компаньоны)
+  //      на основе неизменной свежей автораскладки — независимо от того, в каком порядке
+  //      правки вводились пользователем. Это устраняет застарелую ошибку: раньше правки
+  //      применялись одна за другой по порядку вставки, и ранняя правка проверялась против
+  //      ЕЩЁ НЕ применённых поздних — после долгой серии перестановок это иногда приводило
+  //      к ложному отказу и откату сразу нескольких деталей разом. ----
+  const groups=[]; mv=mv||{}; const totalKeys=Object.keys(mv).length;
+  Object.keys(mv).forEach(uid=>{
+    const t=mv[uid]; const it=byUid[uid];
+    if(!it||!sheets[t.sheet]){ delete mv[uid]; return; }
+    if(t.rot&&!canRotate(it)){ delete mv[uid]; return; }  // деталь с проёмом — поворот не поддержан
+    const r0=rectOf(it);
+    const rot=!!t.rot, w2=rot?r0.h:r0.w, h2=rot?r0.w:r0.h;
+    const rects={ [uid]:{x:t.x,y:t.y,w:w2,h:h2,rot} };
+    const memberUids=[uid];
+    // «из выреза» откосы, сидящие в отверстиях перемещаемой детали, едут вместе с ней —
+    // если только у них самих нет своей отдельной ручной правки (та имеет приоритет)
+    if(it.kind==='w'&&it.o.cuts&&it.o.cuts.length){
+      const holes=holeRects(it.o), dx=t.x-r0.x, dy=t.y-r0.y;
+      items.forEach(x=>{
+        if(x.kind==='o'&&x.homeSheetIdx===it.homeSheetIdx&&!mv[x.uid]&&!shelfUids.has(x.uid)){
+          const xr=rectOf(x);
+          if(holes.some(h=>insideRect(xr,h,3))){ memberUids.push(x.uid); rects[x.uid]={x:xr.x+dx,y:xr.y+dy,w:xr.w,h:xr.h,rot:false}; }
+        }
+      });
+    }
+    groups.push({primaryUid:uid,memberUids,destSheetIdx:t.sheet,rects});
+  });
+
+  // ---- Шаг 2: итеративно отбрасываем конфликтующие группы, пока не останется устойчивый набор.
+  //      На каждом шаге занятость листа считается ЦЕЛИКОМ: ещё живые группы — по целевому месту,
+  //      остальные детали — по их месту в свежей автораскладке. Так правка №1 всегда видит
+  //      правку №5 и наоборот, а не только то, что было применено раньше по времени. ----
+  let alive=groups.slice(), changed=true;
+  while(changed){
+    changed=false;
+    const groupOf={}; alive.forEach(g=>g.memberUids.forEach(u=>groupOf[u]=g));
+    const bySheet=sheets.map(()=>[]);
+    items.forEach(it=>{
+      const g=groupOf[it.uid];
+      if(g) bySheet[g.destSheetIdx].push({uid:it.uid,r:g.rects[it.uid]});
+      else  bySheet[it.homeSheetIdx].push({uid:it.uid,r:rectOf(it)});
+    });
+    // при конфликте выгоняем ПОЗДНЕЕ вставленную правку, а не раннюю: уже устоявшееся место
+    // не должно вытесняться новой попыткой перетаскивания — наоборот, новая попытка отклоняется
+    for(let gi=alive.length-1;gi>=0;gi--){
+      const g=alive[gi];
+      let ok=true;
+      for(const u of g.memberUids){
+        const r=g.rects[u];
+        if(r.x<-0.5||r.y<-0.5||r.x+r.w>pw+0.5||r.y+r.h>pl+0.5){ ok=false; break; }
+      }
+      if(ok){
+        const mine=new Set(g.memberUids), occ=bySheet[g.destSheetIdx];
+        outer: for(const u of g.memberUids){
+          const r=g.rects[u];
+          for(const o2 of occ){
+            if(mine.has(o2.uid)) continue;
+            const gx=Math.min(r.x+r.w,o2.r.x+o2.r.w)-Math.max(r.x,o2.r.x);
+            const gy=Math.min(r.y+r.h,o2.r.y+o2.r.h)-Math.max(r.y,o2.r.y);
+            if(gx>-G.kerf+1&&gy>-G.kerf+1){        // требуем зазор под пропил
+              // допустимо, только если один целиком в отверстии другого
+              const occIt=byUid[o2.uid], uIt=byUid[u];
+              const inHole = occIt.kind==='w'&&holeRects(occIt.o).some(h=>insideRect(r,h,3));
+              const revHole= uIt.kind==='w'&&uIt.o.cuts&&uIt.o.cuts.length&&
+                             holeRects({x:r.x,y:r.y,len:r.h,cuts:uIt.o.cuts}).some(h=>insideRect(o2.r,h,3));
+              if(!inHole&&!revHole){ ok=false; break outer; }
+            }
+          }
+        }
+      }
+      if(!ok){ alive.splice(gi,1); delete mv[g.primaryUid]; changed=true; break; }
+    }
+  }
+
+  // ---- Шаг 3: применяем выжившие группы ----
+  alive.forEach(g=>{
+    const dst=sheets[g.destSheetIdx];
+    g.memberUids.forEach(u=>{
+      const it=byUid[u], r=g.rects[u];
+      if(r.rot){
+        if(it.kind==='w'){ const ow=it.o.w; it.o.w=it.o.len; it.o.len=ow; it.o.rot=!it.o.rot; }
+        else { const odw=it.o.dw, odh=it.o.dh; it.o.dw=odh; it.o.dh=odw; it.o.rot=!it.o.rot; }
+      }
+      it.o.x=r.x; it.o.y=r.y;
+      const src=sheets[it.homeSheetIdx];
+      if(src!==dst){
+        const arr=it.kind==='w'?src.list:src.otk;
+        const idx=arr.indexOf(it.o); if(idx>=0) arr.splice(idx,1);
+        (it.kind==='w'?dst.list:dst.otk).push(it.o);
+      }
+    });
+  });
+  const moved=alive.length, dropped=totalKeys-moved;
+
+  // ---- Шаг 4: снимаем с листов детали, отложенные на верстак (плюс их «из выреза» компаньоны,
+  //      если у тех нет своего выжившего места) — они больше не занимают ни один лист ----
+  const shelfOut=[];
+  if(shelfUids.size){
+    const fullShelf=[]; shelfList.forEach(s=>{ if(byUid[s.uid]&&!fullShelf.some(x=>x.uid===s.uid)) fullShelf.push(s); });
+    fullShelf.slice().forEach(({uid})=>{
+      const it=byUid[uid];
+      if(it.kind==='w'&&it.o.cuts&&it.o.cuts.length){
+        const holes=holeRects(it.o);
+        items.forEach(x=>{
+          if(x.kind==='o'&&x.homeSheetIdx===it.homeSheetIdx&&!mv[x.uid]&&!shelfUids.has(x.uid)){
+            if(holes.some(h=>insideRect(rectOf(x),h,3))){ shelfUids.add(x.uid); fullShelf.push({uid:x.uid,rot:false}); }
+          }
+        });
+      }
+    });
+    fullShelf.forEach(({uid,rot})=>{
+      const it=byUid[uid];
+      const src=sheets[it.homeSheetIdx];
+      const arr=it.kind==='w'?src.list:src.otk;
+      const idx=arr.indexOf(it.o); if(idx>=0) arr.splice(idx,1);
+      if(rot&&canRotate(it)){
+        if(it.kind==='w'){ const ow=it.o.w; it.o.w=it.o.len; it.o.len=ow; it.o.rot=!it.o.rot; }
+        else { const odw=it.o.dw, odh=it.o.dh; it.o.dw=odh; it.o.dh=odw; it.o.rot=!it.o.rot; }
+      }
+      const r=rectOf(it);
+      shelfOut.push({uid,kind:it.kind,w:r.w,h:r.h,rot:!!it.o.rot,
+        label:it.kind==='w'?it.o.label:it.o.name, cuts:it.kind==='w'?it.o.cuts:null});
+    });
+  }
+
+  if(moved||shelfUids.size){
+    // свободные зоны заново: лист минус занятое, отверстия минус сидящие в них откосы
+    sheets.forEach(sh=>{
+      const solids=[...sh.list.map(o=>({x:o.x,y:o.y,w:o.w,h:o.len})),
+                    ...sh.otk.map(o=>({x:o.x,y:o.y,w:o.dw||o.dep,h:o.dh||o.len}))];
+      const free=subtractRects({x:0,y:0,w:pw,h:pl},solids);
+      sh.list.forEach(o=>holeRects(o).forEach(h=>{
+        const hh={x:h.x+G.kerf/2,y:h.y+G.kerf/2,w:h.w-G.kerf,h:h.h-G.kerf};
+        if(hh.w<20||hh.h<20) return;
+        // из дыры вычитаем ВСЁ, что в ней стоит: и откосы, и детали, переставленные туда вручную
+        const occ=[
+          ...sh.otk.map(k=>({x:k.x,y:k.y,w:k.dw||k.dep,h:k.dh||k.len})),
+          ...sh.list.filter(k=>k!==o).map(k=>({x:k.x,y:k.y,w:k.w,h:k.len}))
+        ].filter(r=>{
+          const ox=Math.min(r.x+r.w,h.x+h.w)-Math.max(r.x,h.x);
+          const oy=Math.min(r.y+r.h,h.y+h.h)-Math.max(r.y,h.y);
+          return ox>1&&oy>1;
+        });
+        subtractRects(hh,occ).forEach(z=>free.push(Object.assign(z,{fromCut:true})));
+      }));
+      sh.free=free;
+    });
+    // пустые листы убираем, номера сдвигаем
+    for(let i=sheets.length-1;i>=0;i--)
+      if(!sheets[i].list.length&&!sheets[i].otk.length) sheets.splice(i,1);
+    sheets.forEach((sh,i)=>{ sh.no=i+1;
+      sh.list.forEach(o=>o.sheet=sh.no); sh.otk.forEach(o=>o.sheet=sh.no); });
+  }
+  return {moved,dropped,shelf:shelfOut};
+}
+
+function wallS(G,w){
+  return Object.assign({},G,{W:w.W,H:w.H,ceil:w.ceil,rowH:w.rowH||0,
+    userSeams:(w.seamsU||[]).map(x=>x.pos),ops:w.ops,
+    edges:w.edges,cout:w.cout,cin:w.cin});
+}
+// ---- Режим стыка по отрезкам: 'cap' (соединитель) | 'butt' (встык, профиль не считается) | 'led' ----
+// Ключ отрезка стабилен, пока не меняется геометрия стены (позиция стыка + начало отрезка).
+const jointSegKey=(kind,pos,segStart)=>kind+'|'+Math.round(pos)+'|'+Math.round(segStart);
+function jointSegMode(w,G,kind,pos,segStart){
+  const key=jointSegKey(kind,pos,segStart);
+  const explicit=(w.jointModes||{})[key];
+  if(explicit) return explicit;
+  // резервный сигнал от старых полей (миграция без явной перезаписи данных)
+  if(kind==='v' && (w.jointsVLed||[]).some(v=>Math.abs(v-pos)<1.5)) return 'led';
+  if(kind==='h' && (w.seamsU||[]).some(u=>u.led&&Math.abs(u.pos-pos)<1.5)) return 'led';
+  const globalOn = kind==='v' ? G.jointV : G.jointH;
+  return globalOn ? 'cap' : 'butt';
+}
+function computeProject(G,walls,manual){
+  manual=manual||{};
+  const multi=walls.length>1;
+  const tag=i=>'С'+(i+1);
+
+  // --- раскладка каждой стены ---
+  const layouts=walls.map((w,i)=>{
+    const L=buildLayout(wallS(G,w));
+    L.wall=i;
+    L.pieces.forEach(p=>{ p.wall=i; if(multi) p.label=tag(i)+'·'+p.label; });
+    return L;
+  });
+
+  // --- общий раскрой: куски всех стен в один пул листов ---
+  const allPieces=layouts.flatMap(L=>L.pieces);
+
+  // Если «изгиб» геометрически не влез (см. buildLayout) — на эту сторону возвращаем
+  // обычный «Г-образный» угол, иначе деталь откоса потеряется без замены (и опустится
+  // площадь материала). effOps — то же самое w.ops, но с точечной правкой otkosMode,
+  // исходные данные проекта при этом не трогаем.
+  const effOps=walls.map((w,i)=>{
+    const rej=layouts[i].bendRejected;
+    if(!rej||!rej.length) return w.ops;
+    return w.ops.map((o,oi)=>{
+      const bad=rej.filter(r=>r.op===oi);
+      if(!bad.length||!o.otkosMode) return o;
+      const om=Object.assign({},o.otkosMode);
+      bad.forEach(r=>{ om[r.side]='corner'; });
+      return Object.assign({},o,{otkosMode:om});
+    });
+  });
+
+  // --- откосы всех стен (детали строим до выбора укладки) ---
+  let parts=[];
+  walls.forEach((w,i)=>{
+    const ps=buildOtkosParts({ops:effOps[i]});
+    ps.forEach(pp=>{ pp.wall=i; if(multi) pp.name=tag(i)+'·'+pp.name; });
+    parts=parts.concat(ps);
+  });
+
+  // --- Перебор: 2 укладки деталей × 5 стратегий откосов; берём комбинацию
+  //     с минимумом листов (затем минимум неразмещённых, затем максимум годных обрезков).
+  //     Комбинация №1 — прежнее поведение, поэтому итог никогда не хуже старого. ---
+  const packers=[packSheets,packSheetsCols];
+  const strats=[{order:'cur',fit:'first'},{order:'cur',fit:'best'},{order:'dep',fit:'best'},
+                {order:'area',fit:'best'},{order:'asc',fit:'best'}];
+  const cloneSheets=arr=>arr.map(sh=>({no:sh.no,list:sh.list,otk:[],extra:sh.extra,
+    free:sh.free.map(f=>({...f}))}));
+  const goodFree=arr=>arr.reduce((a,sh)=>a+sh.free.reduce((b,f)=>b+(Math.min(f.w,f.h)>=G.minoff?f.w*f.h:0),0),0);
+  let best=null;
+  packers.forEach((pk,pi)=>{
+    const sh0=pk(allPieces,G);
+    strats.forEach((st,si)=>{
+      const shT=cloneSheets(sh0);
+      const ptT=parts.map(pp=>({...pp}));
+      const otT=packOtkos(ptT,shT,G,st);
+      const score=[shT.length, otT.failed.length, -goodFree(shT)];
+      const lt=(a,b)=>{for(let k=0;k<a.length;k++){if(a[k]!==b[k])return a[k]<b[k];}return false;};
+      if(!best||lt(score,best.score)) best={score,pi,si};
+    });
+  });
+  const sheets=packers[best.pi](allPieces,G);   // повторный прогон победителя — детерминирован
+  const mainSheets=sheets.length;
+  const ot=packOtkos(parts,sheets,G,strats[best.si]);
+  manual.main=manual.main||{}; manual.shelf=manual.shelf||[];
+  const man=applyManual(sheets,manual.main,G,G.pl,G.pw,manual.shelf.filter(s=>s.pool==='main'));
+  const sheetArea=m2(G.pl,G.pw);
+
+  // --- площади ---
+  let grossArea=0, opsArea=0, otkosArea=0;
+  walls.forEach(w=>{
+    grossArea+=m2(w.W,w.H);
+    w.ops.forEach(o=>{ opsArea+=m2(o.w,o.h); });
+  });
+  const lost=new Set(ot.failed);
+  parts.forEach(pp=>{ if(!lost.has(pp)) otkosArea+=m2(pp.dep,pp.len); });
+  // изгиб панели не даёт отдельной детали, но материал под него реально расходуется —
+  // считаем его в той же категории «откосы», иначе площадь отделки занизится
+  otkosArea+=layouts.reduce((a,L)=>a+(L.bendExtraArea||0),0);
+  const netArea=Math.max(grossArea-opsArea,0);
+
+  let offArea=0, offBest={w:0,h:0};
+  sheets.forEach(sh=>sh.free.forEach(f=>{
+    if(Math.min(f.w,f.h)>=G.minoff){
+      offArea+=m2(f.w,f.h);
+      if(f.w*f.h>offBest.w*offBest.h) offBest={w:f.w,h:f.h};
+    }
+  }));
+  const sheetsTotal=sheets.length;
+  const usedArea=sheetsTotal*sheetArea;
+  const useful=netArea+otkosArea;
+  const waste=usedArea>0 ? Math.max(0,1-(useful+offArea)/usedArea) : 0;
+  const wasteGross=usedArea>0 ? 1-useful/usedArea : 0;
+
+  // --- профили: отрезки собираются со всех стен, нестинг общий ---
+  const PGROUP={
+    edge:'Край области',
+    jointV:'Стыки продольные',
+    jointH:'Стыки поперечные',
+    ops:'Контур проёмов',
+    frame:'Контур проёмов',
+    cout:'Углы',
+    cin:'Углы',
+    ledstart:'LED',
+    ledjoint:'LED'
+  };
+  const prof=[];
+  const push=(key,name,runs,price)=>{
+    const runs2=runs.filter(r=>r>1);
+    if(!runs2.length) return;
+    const n=nestProfile(runs2,G.stock,G.kerf);
+    prof.push({key,name,runs:runs2,sticks:n.sticks,total:n.total,detail:n.detail,price,group:PGROUP[key]||'Прочее'});
+  };
+
+  const capRuns=[], ledStartRuns=[], jvRuns=[], jhRuns=[], ledJointRuns=[], opsRuns=[], frameRuns=[];
+  const cornerRuns={cout:[],cin:[]};
+  walls.forEach((w,i)=>{
+    const W=w.W,H=w.H,L=layouts[i];
+    // край области: каждая сторона — нет / заглушка / LED-стартовый
+    const sides=[
+      ['top',  W, w.ops.filter(o=>o.y+o.h>=H-1).map(o=>[o.x,o.x+o.w])],
+      ['bot',  W, w.ops.filter(o=>o.y<=1).map(o=>[o.x,o.x+o.w])],
+      ['left', H, w.ops.filter(o=>o.x<=1).map(o=>[o.y,o.y+o.h])],
+      ['right',H, w.ops.filter(o=>o.x+o.w>=W-1).map(o=>[o.y,o.y+o.h])]
+    ];
+    sides.forEach(([k,len,gaps])=>{
+      const mode=edgeMode(w.edges[k]); if(mode==='none') return;
+      const dst=mode==='led'?ledStartRuns:capRuns;
+      subRanges(len,gaps).forEach(sg=>dst.push(sg[1]-sg[0]));
+    });
+
+    // продольный стык: режим выбирается по каждому отрезку независимо (проём мог разбить стык на части)
+    L.joints.forEach(j=>{
+      j.segs.forEach(sg=>{
+        const mode=jointSegMode(w,G,'v',j.pos,sg[0]);
+        const dst=mode==='led'?ledJointRuns:(mode==='cap'?jvRuns:null);
+        if(dst) dst.push(sg[1]-sg[0]);
+      });
+    });
+
+    // поперечный шов: то же самое — режим на каждый видимый отрезок отдельно
+    L.seams.forEach(sm=>{
+      const gaps=[];
+      w.ops.forEach(o=>{
+        const [a0,aL]=L.vert?[o.x,o.w]:[o.y,o.h];
+        const [b0,bL]=L.vert?[o.y,o.h]:[o.x,o.w];
+        if(b0<sm.pos-1 && b0+bL>sm.pos+1){ gaps.push([Math.max(sm.a0,a0),Math.min(sm.a1,a0+aL)]); }
+      });
+      subIn(sm.a0,sm.a1,gaps.filter(g=>g[1]>g[0])).forEach(g=>{
+        const mode=jointSegMode(w,G,'h',sm.pos,g[0]);
+        const dst=mode==='led'?ledJointRuns:(mode==='cap'?jhRuns:null);
+        if(dst) dst.push(g[1]-g[0]);
+      });
+    });
+
+    if(G.edgeOps) w.ops.forEach(o=>{
+      if(o.otkos) return;
+      if(o.y>1)       opsRuns.push(o.w);
+      if(o.y+o.h<H-1) opsRuns.push(o.w);
+      if(o.x>1)       opsRuns.push(o.h);
+      if(o.x+o.w<W-1) opsRuns.push(o.h);
+    });
+    for(let k=0;k<Math.round(w.cout||0);k++) cornerRuns.cout.push(H);
+    for(let k=0;k<Math.round(w.cin||0);k++)  cornerRuns.cin.push(H);
+
+    // проём с откосами: переход стена->откос закрывает НАРУЖНЫЙ УГОЛ по контуру (режим «Г-образный»),
+    // либо шов остаётся без профиля («встык», «изгиб» — деталь неразрывна, угла физически нет).
+    // Примыкание к раме — ЗАГЛУШКА той же длины, она нужна при любом режиме с материалом
+    // (рама — отдельная кромка, тут её не трогаем; заглушка ставится, где есть материал у рамы).
+    // Без материала откоса («нет», «заглушка на краю», «LED на краю») угла и рамы не бывает —
+    // но голый торец САМОЙ ПАНЕЛИ на этой стороне всё равно можно закрыть заглушкой или LED,
+    // даже если откоса там нет вообще (например, вместо него подоконник).
+    effOps[i].forEach(o=>{ if(!o.otkos||!(o.depth>0)) return;
+      const sides=[['left',o.h],['right',o.h],['top',o.w]]; if(o.kind!=='door') sides.push(['bottom',o.w]);
+      sides.forEach(([k,len])=>{
+        const md=otkosMode(o,k);
+        if(md==='cap'){ opsRuns.push(len); return; }
+        if(md==='led'){ ledStartRuns.push(len); return; }
+        if(md==='none') return;
+        if(md==='corner') cornerRuns.cout.push(len);
+        frameRuns.push(len);
+      });
+    });
+  });
+
+  push('edge','Заглушка · край области',capRuns,G.price.edge);
+  push('jointV','Соединитель · продольные швы',jvRuns,G.price.joint);
+  push('jointH','Соединитель · поперечные швы',jhRuns,G.price.joint);
+  push('ops','Заглушка · торцы у проёмов без откосов',opsRuns,G.price.edge);
+  push('frame','Заглушка · примыкание откосов к раме',frameRuns,G.price.edge);
+  push('cout','Угол внешний (стены и контуры откосов)',cornerRuns.cout,G.price.cout);
+  push('cin','Угол внутренний',cornerRuns.cin,G.price.cin);
+  push('ledstart','LED-профиль стартовый',ledStartRuns,G.price.ledstart);
+  push('ledjoint','LED-профиль соединительный',ledJointRuns,G.price.ledjoint);
+  const ledAutoM=(ledStartRuns.reduce((a,b)=>a+b,0)+ledJointRuns.reduce((a,b)=>a+b,0))/1000;
+
+  // --- заполнение проёмов другими материалами: свой пул листов на каждый материал ---
+  const fills=[];
+  {
+    const byMat={};
+    walls.forEach((w,i)=>w.ops.forEach((o,k)=>{
+      if(!o.fillMat) return;
+      const mp=PRESETS.find(x=>x.id===o.fillMat); if(!mp) return;
+      (byMat[mp.id]=byMat[mp.id]||{mat:mp,items:[]}).items.push({w,wi:i,o,k});
+    }));
+    Object.values(byMat).forEach(({mat,items})=>{
+      const Gm=Object.assign({},G,{pl:mat.pl,pw:mat.pw});
+      const pieces=[];
+      const fillLayouts=[];
+      items.forEach(({wi,o,k})=>{
+        const L=buildLayout(Object.assign({},Gm,{W:o.w,H:o.h,rowH:0,userSeams:[],ops:[]}));
+        const pref=(multi?tag(wi)+'·':'')+'О'+(k+1);
+        L.pieces.forEach(pp=>{ pp.label=pref+'·'+pp.label; });
+        fillLayouts.push({wi,k,L});
+        pieces.push(...L.pieces);
+      });
+      const sA=packSheets(pieces,Gm), a=sA.length;
+      const sB=packSheetsCols(pieces,Gm), b=sB.length;
+      const sheetsM=(a<=b)?packSheets(pieces,Gm):sB;   // повторный прогон победителя детерминирован
+      const area=items.reduce((x,{o})=>x+m2(o.w,o.h),0);
+      manual[mat.id]=manual[mat.id]||{};
+      const manF=applyManual(sheetsM,manual[mat.id],Gm,mat.pl,mat.pw,manual.shelf.filter(s=>s.pool===mat.id));
+      man.moved+=manF.moved; man.dropped+=manF.dropped;
+      fills.push({matId:mat.id,matName:mat.name,pl:mat.pl,pw:mat.pw,price:mat.price,
+                  tubesPerSheet:mat.tubesPerSheet,sheets:sheetsM,layouts:fillLayouts,area,shelf:manF.shelf});
+    });
+  }
+
+  // --- клей: строго по норме на купленный лист (1,5 тубы на бамбуковую панель),
+  //     по каждому материалу своя норма; округление вверх один раз по сумме ---
+  const glueArea=netArea+otkosArea+fills.reduce((a,f)=>a+f.area,0);   // справочно: реальная площадь приклейки
+  let tubesRaw=sheetsTotal*G.tubesPerSheet;
+  const glueParts=[`${sheetsTotal} × ${fmt(G.tubesPerSheet,1)}`];
+  fills.forEach(f=>{
+    tubesRaw += f.sheets.length*f.tubesPerSheet;
+    glueParts.push(`${f.sheets.length} × ${fmt(f.tubesPerSheet,1)}`);
+  });
+  tubesRaw *= (1+G.glueR/100);
+  const tubes=Math.ceil(tubesRaw);
+  const glueDetail=`${glueParts.join(' + ')} туб/лист`+(G.glueR>0?` · запас ${fmt(G.glueR)}%`:'');
+
+  let led=null;
+  const ledTotal=ledAutoM+(G.ledLen>0?G.ledLen:0);
+  if(ledTotal>0.01){
+    const need=ledTotal*G.ledW*(1+G.psuR/100);
+    const psuW=PSU_NOMINALS.find(n=>n>=need)||Math.ceil(need/100)*100;
+    led={len:ledTotal,auto:ledAutoM,manual:G.ledLen,watt:ledTotal*G.ledW,need,psuW};
+  }
+
+  const fillArea=fills.reduce((a,f)=>a+f.area,0);
+  return {layouts,L:layouts[0],sheets,fills,fillArea,mainSheets,extraSheets:ot.extra,failed:ot.failed,
+          spliced:ot.spliced,forced:ot.forced,parts,sheetArea,
+          grossArea,opsArea,netArea,otkosArea,offArea,offBest,sheetsTotal,usedArea,waste,wasteGross,
+          prof,tubes,glueArea,glueDetail,led,manual:man,shelf:man.shelf};
+}
+// Обёртка для одностеновых расчётов (тесты, аудит)
+function compute(S){
+  return computeProject(S,[{W:S.W,H:S.H,ceil:S.ceil,rowH:S.rowH||0,ops:S.ops,
+    edges:S.edges,cout:S.cout,cin:S.cin}]);
+}
+
+/* ===================== ЧЕРТЁЖНЫЕ ПРИМИТИВЫ ===================== */
+// ширина строки моноширинного шрифта ~0.6em — этого хватает, чтобы решить, влезет ли подпись
+const tw=(str,size)=>str.length*0.6*size;
+// текст с ореолом цвета подложки: остаётся читаемым, на что бы ни попал
+function txt(x,y,str,size,ink,halo,opt){
+  const o=opt||{};
+  const base=`x="${x}" y="${y}" font-size="${size}" text-anchor="${o.anchor||'middle'}"`+
+    ` font-family="var(--mono)"${o.bold?' font-weight="600"':''}`+
+    `${o.rot!==undefined?` transform="rotate(${o.rot} ${x} ${y})"`:''}`;
+  // подложка отдельным проходом: paint-order поддержан не везде, два <text> — всегда
+  return `<text ${base} fill="none" stroke="${halo}" stroke-width="${size*0.34}" stroke-linejoin="round" stroke-opacity=".92">${str}</text>`+
+         `<text ${base} fill="${ink}">${str}</text>`;
+}
+function dimH(x0,x1,y,fs,color,bold,text){
+  const t=fs*0.38, lbl=text!==undefined?text:fmt(x1-x0);
+  return `<line x1="${x0}" y1="${y}" x2="${x1}" y2="${y}" stroke="${color}" stroke-width="${fs*0.045}"/>`+
+    `<line x1="${x0}" y1="${y-t}" x2="${x0}" y2="${y+t}" stroke="${color}" stroke-width="${fs*0.045}"/>`+
+    `<line x1="${x1}" y1="${y-t}" x2="${x1}" y2="${y+t}" stroke="${color}" stroke-width="${fs*0.045}"/>`+
+    `<text x="${(x0+x1)/2}" y="${y-fs*0.32}" fill="${color}" font-size="${fs*(bold?0.95:0.72)}" text-anchor="middle" font-family="var(--mono)"${bold?' font-weight="600"':''}>${lbl}</text>`;
+}
+function dimV(y0,y1,x,fs,color,bold,text){
+  const t=fs*0.38, cy=(y0+y1)/2, lbl=text!==undefined?text:fmt(Math.abs(y1-y0));
+  return `<line x1="${x}" y1="${y0}" x2="${x}" y2="${y1}" stroke="${color}" stroke-width="${fs*0.045}"/>`+
+    `<line x1="${x-t}" y1="${y0}" x2="${x+t}" y2="${y0}" stroke="${color}" stroke-width="${fs*0.045}"/>`+
+    `<line x1="${x-t}" y1="${y1}" x2="${x+t}" y2="${y1}" stroke="${color}" stroke-width="${fs*0.045}"/>`+
+    `<text x="${x-fs*0.32}" y="${cy}" fill="${color}" font-size="${fs*(bold?0.95:0.72)}" text-anchor="middle" font-family="var(--mono)"${bold?' font-weight="600"':''} transform="rotate(-90 ${x-fs*0.32} ${cy})">${lbl}</text>`;
+}
+const ext=(x1,y1,x2,y2,fs)=>`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--line-2)" stroke-width="${fs*0.035}" stroke-dasharray="${fs*0.25} ${fs*0.2}"/>`;
+
+/* ===================== СХЕМА СТЕНЫ ===================== */
+function schemeFor(G,R,wi){
+  const wall=walls[wi];
+  const S=wallS(G,wall);
+  const L=R.layouts[wi], W=S.W, H=S.H;
+  const fs=Math.max(W,H)/48;
+  const padL=fs*7.2, padR=fs*2.4, padT=fs*3.2, padB=fs*9.4;
+  let g='';
+
+  L.strips.forEach(st=>{
+    const x=L.vert?st.start:0, y=L.vert?0:H-st.end, w=L.vert?st.w:W, h=L.vert?H:st.w;
+    g+=`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="var(--straw-face)" fill-opacity=".92" stroke="var(--straw-deep)" stroke-width="${fs*0.07}"/>`;
+    for(let p=40;p<(L.vert?w:h);p+=40){
+      g+=L.vert
+        ?`<line x1="${x+p}" y1="${y}" x2="${x+p}" y2="${y+h}" stroke="var(--straw-deep)" stroke-opacity=".22" stroke-width="${fs*0.025}"/>`
+        :`<line x1="${x}" y1="${y+p}" x2="${x+w}" y2="${y+p}" stroke="var(--straw-deep)" stroke-opacity=".22" stroke-width="${fs*0.025}"/>`;
+    }
+  });
+  // стыки между полосами — только вне проёмов; режим (соединитель/встык/LED) выбирается по отрезку
+  L.joints.forEach(j=>{
+    j.segs.forEach(s=>{
+      const mode=jointSegMode(wall,S,'v',j.pos,s[0]);
+      const col=mode==='led'?'var(--warn)':mode==='butt'?'var(--muted)':'var(--straw-deep)';
+      const wgt=mode==='led'?0.24:mode==='butt'?0.08:0.14;
+      g+=L.vert
+        ?`<line x1="${j.pos}" y1="${H-s[1]}" x2="${j.pos}" y2="${H-s[0]}" stroke="${col}" stroke-width="${fs*wgt}"${mode==='butt'?` stroke-dasharray="${fs*0.15} ${fs*0.2}"`:''}/>`
+        :`<line x1="${s[0]}" y1="${H-j.pos}" x2="${s[1]}" y2="${H-j.pos}" stroke="${col}" stroke-width="${fs*wgt}"${mode==='butt'?` stroke-dasharray="${fs*0.15} ${fs*0.2}"`:''}/>`;
+      // широкая невидимая зона захвата под клик (подсветку продольного стыка не двигают, только переключают)
+      g+=L.vert
+        ?`<rect x="${j.pos-fs*0.5}" y="${H-s[1]}" width="${fs*1}" height="${s[1]-s[0]}" fill="transparent" data-jvclick="${Math.round(j.pos)}" data-jvseg="${Math.round(s[0])}" style="cursor:pointer"/>`
+        :`<rect x="${s[0]}" y="${H-j.pos-fs*0.5}" width="${s[1]-s[0]}" height="${fs*1}" fill="transparent" data-jvclick="${Math.round(j.pos)}" data-jvseg="${Math.round(s[0])}" style="cursor:pointer"/>`;
+    });
+  });
+
+  // ПОПЕРЕЧНЫЕ стыки внутри полосы (лист короче стены) — тоже вне проёмов
+  L.seams.forEach(sm=>{
+    const gaps=[];
+    S.ops.forEach(o=>{
+      const [a0,aL]=L.vert?[o.x,o.w]:[o.y,o.h];
+      const [b0,bL]=L.vert?[o.y,o.h]:[o.x,o.w];
+      if(b0<sm.pos-1 && b0+bL>sm.pos+1) gaps.push([Math.max(sm.a0,a0),Math.min(sm.a1,a0+aL)]);
+    });
+    const isUser=(wall.seamsU||[]).some(u=>Math.abs(u.pos-sm.pos)<1.5);
+    subIn(sm.a0,sm.a1,gaps.filter(x=>x[1]>x[0])).forEach(seg=>{
+      const mode=jointSegMode(wall,S,'h',sm.pos,seg[0]);
+      const col=mode==='led'?'var(--warn)':mode==='butt'?'var(--muted)':'var(--err)';
+      const wgt=mode==='led'?0.22:mode==='butt'?0.08:0.16;
+      g+=L.vert
+        ?`<line x1="${seg[0]}" y1="${H-sm.pos}" x2="${seg[1]}" y2="${H-sm.pos}" stroke="${col}" stroke-width="${fs*wgt}"${isUser&&mode!=='led'?` stroke-dasharray="${fs*0.5} ${fs*0.28}"`:''}/>`
+        :`<line x1="${sm.pos}" y1="${H-seg[1]}" x2="${sm.pos}" y2="${H-seg[0]}" stroke="${col}" stroke-width="${fs*wgt}"${isUser&&mode!=='led'?` stroke-dasharray="${fs*0.5} ${fs*0.28}"`:''}/>`;
+      // широкая невидимая зона захвата для перетаскивания
+      g+=L.vert
+        ?`<rect x="${seg[0]}" y="${H-sm.pos-fs*0.55}" width="${seg[1]-seg[0]}" height="${fs*1.1}" fill="transparent" data-seamdrag="${Math.round(sm.pos)}" data-seamseg="${Math.round(seg[0])}" style="cursor:ns-resize"/>`
+        :`<rect x="${sm.pos-fs*0.55}" y="${H-seg[1]}" width="${fs*1.1}" height="${seg[1]-seg[0]}" fill="transparent" data-seamdrag="${Math.round(sm.pos)}" data-seamseg="${Math.round(seg[0])}" style="cursor:ew-resize"/>`;
+    });
+    const vis=subIn(sm.a0,sm.a1,gaps.filter(x=>x[1]>x[0])).sort((a,b)=>(b[1]-b[0])-(a[1]-a[0]));
+    if(vis.length){
+      const mid=(vis[0][0]+vis[0][1])/2, room=vis[0][1]-vis[0][0];
+      const lbl=`стык ${fmt(sm.pos)}`;
+      if(tw(lbl,fs*0.62)<room*0.92){
+        g+=L.vert
+          ? txt(mid,H-sm.pos-fs*0.4,lbl,fs*0.62,'var(--err)','var(--straw-face)')
+          : txt(sm.pos+fs*0.55,H-mid,lbl,fs*0.62,'var(--err)','var(--straw-face)',{rot:-90});
+      }
+    }
+  });
+
+  // проёмы
+  S.ops.forEach((o,i)=>{
+    const x=o.x, y=H-o.y-o.h;
+    if(o.fillMat){
+      const mp=PRESETS.find(pp=>pp.id===o.fillMat);
+      const mc=matColor(o.fillMat);
+      g+=`<rect x="${x}" y="${y}" width="${o.w}" height="${o.h}" fill="${mc}" fill-opacity=".55" stroke="${mc}" stroke-width="${fs*0.1}" data-drag="${o.id}" style="cursor:move"/>`;
+      // полосы заполнения — раскладка материала внутри проёма
+      if(mp&&mp.pw>0){
+        const nb=Math.floor(o.w/mp.pw);
+        for(let bi=1;bi<=nb;bi++){
+          const bx=x+bi*mp.pw; if(bx<x+o.w-1)
+          g+=`<line x1="${bx}" y1="${y}" x2="${bx}" y2="${y+o.h}" stroke="${mc}" stroke-width="${fs*0.05}" stroke-opacity=".8"/>`;
+        }
+      }
+    } else {
+      g+=`<rect x="${x}" y="${y}" width="${o.w}" height="${o.h}" fill="var(--void)" stroke="var(--line-2)" stroke-width="${fs*0.08}" data-drag="${o.id}" style="cursor:move"/>`;
+    }
+    g+=`<rect x="${x+o.w-fs*0.9}" y="${y+o.h-fs*0.9}" width="${fs*0.9}" height="${fs*0.9}" fill="var(--alu)" data-resize="${o.id}" style="cursor:nwse-resize"/>`;
+    const onm=`${o.kind==='door'?'ДВЕРЬ':o.kind==='niche'?'НИША':'ОКНО'} ${i+1}`;
+    if(tw(onm,fs*0.8)<o.w*0.9 && o.h>fs*2.4){
+      const ink=o.fillMat?'var(--ink-face)':'var(--muted)';
+      const halo=o.fillMat?matColor(o.fillMat):'var(--void)';
+      g+=txt(x+o.w/2,y+o.h/2,onm,fs*0.8,ink,halo);
+      g+=txt(x+o.w/2,y+o.h/2+fs,`${fmt(o.w)}×${fmt(o.h)}`,fs*0.7,ink,halo);
+      if(o.fillMat){
+        const mp=PRESETS.find(pp=>pp.id===o.fillMat);
+        if(mp&&o.h>fs*4.4&&tw(mp.name,fs*0.58)<o.w*0.92)
+          g+=txt(x+o.w/2,y+o.h/2+fs*2,mp.name,fs*0.58,ink,halo);
+      }
+    }
+    if(o.otkos){
+      // контур откоса — каждая сторона своим цветом по режиму: угол (стандарт) / встык / изгиб
+      const om=side=>(o.otkosMode&&o.otkosMode[side])||'corner';
+      const oy=y-fs*0.16, ox=x-fs*0.16, ow=o.w+fs*0.32, oh=o.h+fs*0.32;
+      const sideLine=(side,x1,y1,x2,y2)=>{
+        const md=om(side);
+        if(md==='none') return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--muted)" stroke-width="${fs*0.05}" stroke-opacity=".35" stroke-dasharray="${fs*0.08} ${fs*0.22}"/>`;
+        if(md==='led')  return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--warn)" stroke-width="${fs*0.1}"/>`;
+        if(md==='cap')  return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--alu)" stroke-width="${fs*0.07}" stroke-dasharray="${fs*0.08} ${fs*0.1}"/>`;
+        const col=md==='bend'?'var(--ok)':md==='butt'?'var(--muted)':'var(--alu)';
+        const dash=md==='butt'?` stroke-dasharray="${fs*0.18} ${fs*0.14}"`:'';
+        return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${col}" stroke-width="${fs*0.12}"${dash}/>`;
+      };
+      g+=sideLine('top',ox,oy,ox+ow,oy);
+      if(o.kind!=='door') g+=sideLine('bottom',ox,oy+oh,ox+ow,oy+oh);
+      g+=sideLine('left',ox,oy,ox,oy+oh);
+      g+=sideLine('right',ox+ow,oy,ox+ow,oy+oh);
+      // невидимые зоны захвата по контуру откоса — клик открывает меню режима (встык/угол/изгиб)
+      const oz=fs*0.8;
+      g+=`<rect x="${x}" y="${y-oz/2}" width="${o.w}" height="${oz}" fill="transparent" data-otkosop="${o.id}" data-otkosside="top" style="cursor:pointer"/>`;
+      if(o.kind!=='door') g+=`<rect x="${x}" y="${y+o.h-oz/2}" width="${o.w}" height="${oz}" fill="transparent" data-otkosop="${o.id}" data-otkosside="bottom" style="cursor:pointer"/>`;
+      g+=`<rect x="${x-oz/2}" y="${y}" width="${oz}" height="${o.h}" fill="transparent" data-otkosop="${o.id}" data-otkosside="left" style="cursor:pointer"/>`;
+      g+=`<rect x="${x+o.w-oz/2}" y="${y}" width="${oz}" height="${o.h}" fill="transparent" data-otkosop="${o.id}" data-otkosside="right" style="cursor:pointer"/>`;
+    }
+  });
+
+  // окантовка
+  const e=S.edges, ew=fs*0.2;
+  const edgeLine=(x1,y1,x2,y2,led)=>`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${led?'var(--warn)':'var(--alu)'}" stroke-width="${led?ew*1.6:ew}"/>`;
+  const em=k=>edgeMode(e[k]);
+  if(em('top')!=='none')   g+=edgeLine(0,0,W,0,   em('top')==='led');
+  if(em('bot')!=='none')   g+=edgeLine(0,H,W,H,   em('bot')==='led');
+  if(em('left')!=='none')  g+=edgeLine(0,0,0,H,   em('left')==='led');
+  if(em('right')!=='none') g+=edgeLine(W,0,W,H,   em('right')==='led');
+  // невидимые зоны захвата под клик — рисуются всегда, даже когда край сейчас «нет»,
+  // чтобы можно было назначить заглушку/подсветку одним кликом по пустому краю
+  const eh=fs*0.9;
+  g+=`<rect x="0" y="${-eh/2}" width="${W}" height="${eh}" fill="transparent" data-edgeclick="top" style="cursor:pointer"/>`;
+  g+=`<rect x="0" y="${H-eh/2}" width="${W}" height="${eh}" fill="transparent" data-edgeclick="bot" style="cursor:pointer"/>`;
+  g+=`<rect x="${-eh/2}" y="0" width="${eh}" height="${H}" fill="transparent" data-edgeclick="left" style="cursor:pointer"/>`;
+  g+=`<rect x="${W-eh/2}" y="0" width="${eh}" height="${H}" fill="transparent" data-edgeclick="right" style="cursor:pointer"/>`;
+
+  // подписи полос по краю чертежа
+  L.strips.forEach(st=>{
+    const cx=L.vert?st.start+st.w/2:-fs*0.9;
+    const cy=L.vert?-fs*0.7:H-st.start-st.w/2;
+    g+=`<text x="${cx}" y="${cy}" fill="var(--straw)" font-size="${fs*0.85}" text-anchor="middle" font-family="var(--mono)" font-weight="600"${L.vert?'':` transform="rotate(-90 ${cx} ${cy})"`}>П${st.i+1}</text>`;
+  });
+
+  // подписи каждой детали: имя, размер, из какого листа
+  L.pieces.forEach(p=>{
+    const st=L.strips[p.strip];
+    const axis=st.start+st.w/2;               // осевая линия полосы
+    const gaps=[];
+    S.ops.forEach(o=>{
+      const [a0,aL]=L.vert?[o.x,o.w]:[o.y,o.h];
+      const [b0,bL]=L.vert?[o.y,o.h]:[o.x,o.w];
+      if(a0<axis && a0+aL>axis) gaps.push([b0,b0+bL]);   // проём режет ось — подпись туда нельзя
+    });
+    let free=subIn(p.from,p.to,gaps);
+    if(!free.length) free=[[p.from,p.to]];
+    free.sort((a,b)=>(b[1]-b[0])-(a[1]-a[0]));
+    const spot=(free[0][0]+free[0][1])/2, room=free[0][1]-free[0][0];
+    const wLim=L.vert?st.w:room;              // место под длину строки
+    const hLim=L.vert?room:st.w;              // место под высоту строк
+    if(hLim<fs*1.5 || wLim<fs*1.4) return;
+    const cx=L.vert?axis:spot;
+    const cy=L.vert?H-spot:H-axis;
+    const src=p.sheet?`лист ${p.sheet}${p.fromOffcut?' · из обрезка':''}`:'';
+    const dims=`${fmt(p.w)}×${fmt(p.len)}`;
+    if(tw(p.label,fs*0.9)>wLim*0.94){
+      // узкая деталь: разворачиваем имя вдоль неё, чтобы она не осталась безымянной
+      if(tw(p.label,fs*0.7)<hLim*0.9 && wLim>fs*0.8)
+        g+=txt(cx,cy,p.label,fs*0.7,'var(--ink-face)','var(--straw-face)',{bold:1,rot:-90});
+      return;
+    }
+    g+=txt(cx,cy,p.label,fs*0.9,'var(--ink-face)','var(--straw-face)',{bold:1});
+    if(hLim>fs*2.7 && tw(dims,fs*0.66)<wLim*0.94)
+      g+=txt(cx,cy+fs*1.05,dims,fs*0.66,'var(--ink-face)','var(--straw-face)');
+    if(hLim>fs*4 && src && tw(src,fs*0.62)<wLim*0.94)
+      g+=txt(cx,cy+fs*1.95,src,fs*0.62,p.fromOffcut?'var(--alu-deep)':'var(--ink-face)','var(--straw-face)');
+  });
+
+  // размеры снизу: полосы -> привязки проёмов -> габарит
+  const rowA=H+fs*2.0, rowB=H+fs*4.4, rowC=H+fs*7.0;
+  if(L.vert) L.strips.forEach(st=>{ g+=dimH(st.start,st.end,rowA,fs,'var(--muted)'); g+=ext(st.end,H,st.end,rowA+fs*0.4,fs); });
+  else g+=dimH(0,W,rowA,fs,'var(--muted)');
+  // единая размерная цепочка по границам всех проёмов, а не отдельная на каждый
+  if(S.ops.length){
+    const xs=[0,W]; S.ops.forEach(o=>{ xs.push(o.x,o.x+o.w); });
+    const xu=[...new Set(xs.map(v=>Math.round(v)))].sort((a,b)=>a-b).filter(v=>v>=0&&v<=W);
+    for(let i=0;i<xu.length-1;i++) if(xu[i+1]-xu[i]>1) g+=dimH(xu[i],xu[i+1],rowB,fs,'var(--alu)');
+    S.ops.forEach(o=>{ g+=ext(o.x,H,o.x,rowB+fs*0.4,fs); g+=ext(o.x+o.w,H,o.x+o.w,rowB+fs*0.4,fs); });
+  }
+  g+=dimH(0,W,rowC,fs,'var(--paper)',true);
+
+  // размеры слева: привязки проёмов -> габарит
+  const colA=-fs*2.2, colB=-fs*5.0;
+  if(S.ops.length){
+    const ys=[0,H]; S.ops.forEach(o=>{ ys.push(o.y,o.y+o.h); });
+    const yu=[...new Set(ys.map(v=>Math.round(v)))].sort((a,b)=>a-b).filter(v=>v>=0&&v<=H);
+    for(let i=0;i<yu.length-1;i++) if(yu[i+1]-yu[i]>1) g+=dimV(H-yu[i+1],H-yu[i],colA,fs,'var(--alu)');
+    S.ops.forEach(o=>{
+      g+=ext(0,H-o.y-o.h,colA-fs*0.4,H-o.y-o.h,fs);
+      g+=ext(0,H-o.y,colA-fs*0.4,H-o.y,fs);
+    });
+  }
+  g+=dimV(0,H,colB,fs,'var(--paper)',true);
+
+  const vb=`${-padL} ${-padT} ${W+padL+padR} ${H+padT+padB}`;
+  return {
+    svg:`<svg viewBox="${vb}" style="width:100%;max-height:76vh" role="img" aria-label="Схема раскладки панелей — ${esc(wall.name)}">${g}</svg>`,
+    meta:`${esc(wall.name)} · ${G.presetName} · ${L.vert?'вертикально':'горизонтально'} · полос ${L.strips.length}`
+  };
+}
+function renderScheme(G,R){
+  const parts=walls.map((w,wi)=>({w,wi,sc:schemeFor(G,R,wi)}));
+  $('#scheme').innerHTML=parts.map(({w,wi,sc})=>
+    `<div class="wall-scheme${wi===active?' on':''}" data-wallscheme="${wi}">`+
+    `<div class="wall-scheme-h">${esc(w.name)}</div>${sc.svg}</div>`).join('');
+  $('#scheme-meta').textContent=parts[active].sc.meta;
+}
+
+/* ===================== КАРТА РАСКРОЯ ===================== */
+function cutmapSvg(sheets,S){
+  const cols=Math.min(sheets.length,5), rows=Math.ceil(sheets.length/cols);
+  const gapX=S.pw*0.30, gapY=S.pl*0.13;
+  const cw=S.pw+gapX, ch=S.pl+gapY;
+  const fs=S.pl/28;
+  let g='';
+  sheets.forEach((sh,i)=>{
+    const cx=(i%cols)*cw, cy=Math.floor(i/cols)*ch;
+    g+=txt(cx,cy-fs*0.6,`ЛИСТ ${sh.no}${sh.extra?' · добор под откосы':''}`,fs*0.85,
+          sh.extra?'var(--warn)':'var(--muted)','var(--surface)',{anchor:'start'});
+    g+=`<rect x="${cx}" y="${cy}" width="${S.pw}" height="${S.pl}" fill="var(--void)" stroke="var(--line-2)" stroke-width="${fs*0.08}"/>`;
+    // свободные зоны (материал из вырезов рисуем позже — поверх детали)
+    sh.free.filter(f=>!f.fromCut).forEach(f=>{
+      const useful=Math.min(f.w,f.h)>=S.minoff;
+      g+=`<rect x="${cx+f.x}" y="${cy+f.y}" width="${f.w}" height="${f.h}" fill="var(--line)" fill-opacity="${useful?.55:.3}"/>`;
+      const lbl=`${useful?'обрезок':'отход'} ${fmt(f.w)}×${fmt(f.h)}`;
+      const vert=f.h>f.w, along=vert?f.h:f.w, thick=vert?f.w:f.h;
+      if(thick>fs*1.1 && tw(lbl,fs*0.62)<along*0.92)
+        g+=txt(cx+f.x+f.w/2,cy+f.y+f.h/2,lbl,fs*0.62,useful?'var(--ok)':'var(--muted)','var(--surface)',vert?{rot:-90}:{});
+    });
+    // детали стены
+    sh.list.forEach(p=>{
+      g+=`<rect x="${cx+p.x}" y="${cy+p.y}" width="${p.w}" height="${p.len}" fill="var(--straw-face)" fill-opacity=".9" stroke="var(--straw-deep)" stroke-width="${fs*0.07}"${p._uid?` data-cmdrag="${p._uid}" style="cursor:grab"`:''}/>`;
+      // отверстия: только контур, без подписи — текст даёт зелёная зона «из выреза»
+      p.cuts.forEach(c=>{
+        const yTop=cy+p.y+(p.len-(c.by+c.bh));
+        g+=`<rect x="${cx+p.x+c.ax}" y="${yTop}" width="${c.aw}" height="${c.bh}" fill="var(--void)" stroke="var(--alu)" stroke-width="${fs*0.07}" stroke-dasharray="${fs*0.35} ${fs*0.25}"/>`;
+        // изгиб панели («недорез»): вырез специально сделан МЕНЬШЕ проёма — запас между
+        // фактическим (сжатым) вырезом и номинальной границей проёма остаётся материалом
+        // детали и загибается внутрь. Показываем этот запас отдельно: штриховка + пунктир
+        // по линии сгиба + подпись с глубиной — иначе на карте он неотличим от случайного
+        // недостающего куска.
+        if(c.fold && c.fold.length && c.orig){
+          const oyTop=cy+p.y+(p.len-(c.orig.by+c.orig.bh));
+          const flaps=[];
+          if(c.ax>c.orig.ax+0.5) flaps.push({x:cx+p.x+c.orig.ax,y:oyTop,w:c.ax-c.orig.ax,h:c.orig.bh,foldX:cx+p.x+c.ax});
+          if((c.orig.ax+c.orig.aw)>(c.ax+c.aw)+0.5) flaps.push({x:cx+p.x+c.ax+c.aw,y:oyTop,w:(c.orig.ax+c.orig.aw)-(c.ax+c.aw),h:c.orig.bh,foldX:cx+p.x+c.ax+c.aw});
+          if(c.by>c.orig.by+0.5) flaps.push({x:cx+p.x+c.orig.ax,y:yTop+c.bh,w:c.orig.aw,h:c.by-c.orig.by,foldY:yTop+c.bh});
+          if((c.orig.by+c.orig.bh)>(c.by+c.bh)+0.5) flaps.push({x:cx+p.x+c.orig.ax,y:oyTop,w:c.orig.aw,h:(c.orig.by+c.orig.bh)-(c.by+c.bh),foldY:yTop});
+          const fid='fold'+Math.random().toString(36).slice(2,8);
+          g+=`<pattern id="${fid}" width="${fs*0.5}" height="${fs*0.5}" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">`+
+             `<rect width="${fs*0.5}" height="${fs*0.5}" fill="var(--warn)" fill-opacity=".16"/>`+
+             `<line x1="0" y1="0" x2="0" y2="${fs*0.5}" stroke="var(--warn)" stroke-width="${fs*0.09}" stroke-opacity=".6"/></pattern>`;
+          flaps.forEach(f=>{
+            g+=`<rect x="${f.x}" y="${f.y}" width="${f.w}" height="${f.h}" fill="url(#${fid})" stroke="var(--warn)" stroke-width="${fs*0.05}"/>`;
+            g+=f.foldX!==undefined
+              ? `<line x1="${f.foldX}" y1="${f.y}" x2="${f.foldX}" y2="${f.y+f.h}" stroke="var(--warn)" stroke-width="${fs*0.1}" stroke-dasharray="${fs*0.22} ${fs*0.16}"/>`
+              : `<line x1="${f.x}" y1="${f.foldY}" x2="${f.x+f.w}" y2="${f.foldY}" stroke="var(--warn)" stroke-width="${fs*0.1}" stroke-dasharray="${fs*0.22} ${fs*0.16}"/>`;
+            const depth=f.foldX!==undefined?f.w:f.h;   // толщина клапана в направлении сгиба = глубина откоса
+            const lblTxt=`загиб, ${fmt(depth)} мм`;
+            const vert=f.h>f.w, along=vert?f.h:f.w;
+            if(along>fs*2.2 && tw(lblTxt,fs*0.52)<along*0.9)
+              g+=txt(f.x+f.w/2,f.y+f.h/2,lblTxt,fs*0.52,'var(--warn)','var(--void)',vert?{rot:-90}:{});
+          });
+        }
+      });
+      // подпись ставим в самую большую полосу детали, свободную от отверстий
+      const gaps=p.cuts.map(c=>[p.len-(c.by+c.bh), p.len-c.by]);
+      const bands=subIn(0,p.len,gaps).sort((a,b)=>(b[1]-b[0])-(a[1]-a[0]));
+      const band=bands.length?bands[0]:[0,p.len];
+      const room=band[1]-band[0];
+      const lx=cx+p.x+p.w/2;
+      const dims=`${fmt(p.w)}×${fmt(p.len)}${p.rot?' ↻':''}`;
+      if(room>=fs*1.6 && tw(p.label,fs*0.95)<p.w*0.92){
+        const two=room>=fs*3;
+        const ly=cy+p.y+band[0]+(two?room/2-fs*0.35:room/2+fs*0.32);
+        g+=txt(lx,ly,p.label,fs*0.95,'var(--ink-face)','var(--straw-face)',{bold:1});
+        if(two && tw(dims,fs*0.72)<p.w*0.92)
+          g+=txt(lx,ly+fs*1.15,dims,fs*0.72,'var(--ink-face)','var(--straw-face)');
+      }
+      // кнопка поворота — только у деталей без выреза под проём, и только если развёрнутая деталь
+      // в принципе способна лечь на лист (иначе кнопка обманывала бы — клик всегда бы отклонялся)
+      if(p._uid && !(p.cuts&&p.cuts.length) && p.len<=S.pw+0.5 && p.w<=S.pl+0.5){
+        const minSide=Math.min(p.w,p.len);
+        if(minSide>fs*0.7){
+          const ir=Math.min(fs*0.6,minSide/2.8), mg=ir*0.32;
+          const icx=cx+p.x+p.w-ir-mg, icy=cy+p.y+ir+mg;
+          g+=`<g data-cmrot="${p._uid}" style="cursor:pointer">`+
+             `<circle cx="${icx}" cy="${icy}" r="${ir}" fill="var(--void)" fill-opacity=".6" stroke="var(--straw-deep)" stroke-width="${fs*0.06}"/>`+
+             `<text x="${icx}" y="${icy+ir*0.36}" font-size="${ir*1.3}" text-anchor="middle" fill="var(--straw)" font-family="var(--mono)">↻</text>`+
+             `</g>`;
+        }
+      }
+    });
+    // материал, вынутый из выреза, — тоже пригодный кусок
+    sh.free.filter(f=>f.fromCut).forEach(f=>{
+      const useful=Math.min(f.w,f.h)>=S.minoff;
+      g+=`<rect x="${cx+f.x}" y="${cy+f.y}" width="${f.w}" height="${f.h}" fill="var(--ok)" fill-opacity="${useful?.22:.1}" stroke="var(--ok)" stroke-opacity=".5" stroke-width="${fs*0.05}" stroke-dasharray="${fs*0.3} ${fs*0.22}"/>`;
+      const lbl=`из выреза ${fmt(f.w)}×${fmt(f.h)}`;
+      const vert=f.h>f.w, along=vert?f.h:f.w, thick=vert?f.w:f.h;
+      if(thick>fs*1.1 && tw(lbl,fs*0.62)<along*0.92)
+        g+=txt(cx+f.x+f.w/2,cy+f.y+f.h/2,lbl,fs*0.62,'var(--ink-cut)','var(--void)',vert?{rot:-90}:{});
+    });
+    // детали откосов
+    sh.otk.forEach(o=>{
+      const dw=o.dw||o.dep, dh=o.dh||o.len;
+      g+=`<rect x="${cx+o.x}" y="${cy+o.y}" width="${dw}" height="${dh}" fill="var(--alu-face)" fill-opacity=".9" stroke="var(--alu-deep)" stroke-width="${fs*0.07}"${o._uid?` data-cmdrag="${o._uid}" style="cursor:grab"`:''}/>`;
+      const mid=cy+o.y+dh/2, mx=cx+o.x+dw/2;
+      const cap=`${o.name} ${fmt(o.dep)}×${fmt(o.len)}${o.rot?' ↻':''}`;
+      const vert=dh>dw, along=vert?dh:dw, thick=vert?dw:dh;
+      if(thick>fs*0.9 && tw(cap,fs*0.68)<along*0.94)
+        g+=txt(mx,mid,cap,fs*0.68,'var(--ink-alu)','var(--alu-face)',vert?{rot:-90,bold:1}:{bold:1});
+      // кнопка поворота: та же геометрическая проверка — развёрнутая деталь должна помещаться на лист.
+      // «из выреза» пропускаем: такая деталь сидит в узком гнезде вместе с соседями, и развёрнутая
+      // почти никогда туда не попадает — кнопка, которая всегда отказывает, хуже её отсутствия.
+      if(o._uid && !o.fromCut && dh<=S.pw+0.5 && dw<=S.pl+0.5){
+        const minSide=Math.min(dw,dh);
+        if(minSide>fs*0.7){
+          const ir=Math.min(fs*0.6,minSide/2.8), mg=ir*0.32;
+          const icx=cx+o.x+dw-ir-mg, icy=cy+o.y+ir+mg;
+          g+=`<g data-cmrot="${o._uid}" style="cursor:pointer">`+
+             `<circle cx="${icx}" cy="${icy}" r="${ir}" fill="var(--void)" fill-opacity=".6" stroke="var(--alu-deep)" stroke-width="${fs*0.06}"/>`+
+             `<text x="${icx}" y="${icy+ir*0.36}" font-size="${ir*1.3}" text-anchor="middle" fill="var(--alu)" font-family="var(--mono)">↻</text>`+
+             `</g>`;
+        }
+      }
+    });
+  });
+  const vb=`${-S.pw*0.08} ${-fs*2} ${cols*cw} ${rows*ch+fs*1.5}`;
+  return `<svg viewBox="${vb}" style="width:100%;max-height:82vh" role="img" aria-label="Карта раскроя листов" data-cw="${cw}" data-ch="${ch}" data-cols="${cols}" data-n="${sheets.length}" data-pl="${S.pl}" data-pw="${S.pw}">${g}</svg>`;
+}
+function renderCutmap(G,R){
+  if(!R.sheets.length && !R.fills.length){ $('#cutmap').innerHTML='<p class="hint">Нет деталей для раскроя.</p>'; return; }
+  const multiMat=R.fills.length>0;
+  let html='';
+  if(R.sheets.length){
+    if(multiMat) html+=`<div class="mat-h" style="border-left:4px solid ${matColor($('#i-preset').value)}">Материал: ${esc(G.presetName)} — ${R.sheets.length} ${plu(R.sheets.length,'лист','листа','листов')} ${fmt(G.pl)}×${fmt(G.pw)}</div>`;
+    html+=cutmapSvg(R.sheets,{pl:G.pl,pw:G.pw,minoff:G.minoff}).replace('<svg ','<svg data-pool="main" ');
+  }
+  R.fills.forEach(f=>{
+    html+=`<div class="mat-h" style="border-left:4px solid ${matColor(f.matId)}">Материал: ${esc(f.matName)} — ${f.sheets.length} ${plu(f.sheets.length,'лист','листа','листов')} ${fmt(f.pl)}×${fmt(f.pw)} · заполнение проёмов</div>`;
+    html+=cutmapSvg(f.sheets,{pl:f.pl,pw:f.pw,minoff:G.minoff}).replace('<svg ','<svg data-pool="'+f.matId+'" ');
+  });
+  $('#cutmap').innerHTML=html;
+  const placed=R.parts.length-R.failed.length;
+  const seams=R.spliced.length+R.forced.length;
+  const nPieces=R.layouts.reduce((a,L)=>a+L.pieces.length,0);
+  const sheets=R.sheets;
+  const fillSheets=R.fills.reduce((a,f)=>a+f.sheets.length,0);
+  const totalShelf=(R.shelf?R.shelf.length:0)+R.fills.reduce((a,f)=>a+(f.shelf?f.shelf.length:0),0);
+  const manTxt=(R.manual&&R.manual.moved)||totalShelf
+    ? ` · вручную передвинуто ${R.manual?R.manual.moved:0}${totalShelf?` · на верстаке ${totalShelf}`:''} <button class="btn btn-mini" id="btn-mreset" style="margin-left:6px">сбросить</button>`
+    : '';
+  $('#cut-meta').innerHTML=esc((R.fills.length?`материалов ${1+R.fills.length} · `:'')+
+    `${sheets.length+fillSheets} ${plu(sheets.length+fillSheets,'лист','листа','листов')} · `+
+    `${nPieces} ${plu(nPieces,'деталь','детали','деталей')} стены`+
+    (R.parts.length?` · откосов ${placed} из ${R.parts.length}`:'')+
+    (seams?` · ${seams} со стыком`:'')+
+    (R.failed.length?` · ${R.failed.length} не размещено`:''))+manTxt;
+}
+function renderShelf(R){
+  const box=$('#shelf-items'); if(!box) return;
+  const items=[...(R.shelf||[]).map(s=>({...s,pool:'main'})),
+               ...R.fills.flatMap(f=>(f.shelf||[]).map(s=>({...s,pool:f.matId})))];
+  if(!items.length){
+    box.innerHTML='<span class="shelf-empty">перетащите сюда деталь с карты, чтобы освободить для неё место</span>';
+    return;
+  }
+  box.innerHTML=items.map(it=>{
+    const canRot=!(it.cuts&&it.cuts.length);
+    return `<div class="shelf-piece k-${it.kind}" data-shelfpiece="${it.uid}" data-pool="${it.pool}">`+
+      (canRot?`<button class="shelf-rot" data-shelfrot="${it.uid}" title="повернуть">↻</button>`:'')+
+      `<b>${esc(it.label)}</b><span>${fmt(it.w)}×${fmt(it.h)}${it.rot?' ↻':''}</span></div>`;
+  }).join('');
+}
+
+/* ===================== ТАБЛИЦЫ ===================== */
+function renderCuts(G,R){
+  const rows=[];
+  R.layouts.forEach((L,wi)=>{
+    L.pieces.forEach(p=>p.cuts.forEach(c=>{
+      const o=walls[wi].ops[c.op];
+      const wtag=walls.length>1?esc(walls[wi].name)+' · ':'';
+      rows.push([p.label, `${fmt(c.aw)} × ${fmt(c.bh)}`, fmt(c.ax), fmt(c.by),
+        wtag+(o?(o.kind==='door'?'дверь':o.kind==='niche'?'ниша':'окно'):'')+' '+(c.op+1)]);
+    }));
+  });
+  $('#cuts-block').hidden = rows.length===0;
+  if(!rows.length){ $('#cuts').innerHTML=''; return; }
+  $('#cuts').innerHTML=`<thead><tr><th>Деталь</th><th class="num">Вырез Ш×В</th><th class="num">От левого края детали</th><th class="num">От низа детали</th><th>Проём</th></tr></thead><tbody>`+
+    rows.map(r=>`<tr><td>${esc(r[0])}</td><td class="num">${r[1]}</td><td class="num">${r[2]}</td><td class="num">${r[3]}</td><td class="dim">${esc(r[4])}</td></tr>`).join('')+`</tbody>`;
+}
+function renderSpec(G,R){const S=G;
+  const rows=[];
+  rows.push(['Панель '+S.presetName, R.sheetsTotal+' шт',
+    `${R.mainSheets} на плоскость`+(R.extraSheets?` + ${R.extraSheets} на откосы`:R.parts.length?', откосы из обрезков':'')]);
+  R.fills.forEach(f=>{
+    const nP=f.layouts.reduce((a,x)=>a+x.L.pieces.length,0);
+    rows.push(['Панель '+f.matName, f.sheets.length+' шт', `заполнение проёмов · ${nP} ${plu(nP,'деталь','детали','деталей')} · ${fmt(f.area,2)} м²`]);
+  });
+  if(R.failed.length)
+    rows.push(['⚠ Откосы не выкроены', R.failed.length+' шт', 'не помещаются в лист — в смете не учтены']);
+  // профили сгруппированы по назначению, внутри группы — построчно
+  const groupsOrder=['Край области','Стыки продольные','Стыки поперечные','Контур проёмов','Углы','LED'];
+  const byGroup={};
+  R.prof.forEach(p=>{ (byGroup[p.group]=byGroup[p.group]||[]).push(p); });
+  groupsOrder.forEach(g=>{
+    const list=byGroup[g]; if(!list) return;
+    rows.push(['GROUP:'+g, '', '']);
+    list.forEach(p=>{
+      const cuts=p.runs.length<=8?` · отрезки ${p.runs.map(r=>fmt(r)).join(', ')}`:'';
+      rows.push([p.name, p.sticks+' хл', `${fmt(p.total/1000,2)} пог. м${cuts}`]);
+    });
+  });
+  rows.push(['GROUP:Расходники и подсветка','','']);
+  rows.push(['Клей «жидкие гвозди»', R.tubes+' туб', `${R.glueDetail} · приклеивается ${fmt(R.glueArea,2)} м²`]);
+  if(R.led){
+    rows.push(['LED-лента', fmt(R.led.len,1)+' м', `${R.led.auto>0?`из профилей ${fmt(R.led.auto,1)} м`:''}${R.led.manual>0?`${R.led.auto>0?' + ':''}вручную ${fmt(R.led.manual,1)} м`:''} · ${fmt(S.ledW,1)} Вт/м · ${fmt(R.led.watt,0)} Вт`]);
+    rows.push(['Блок питания', `1 шт · ${R.led.psuW} Вт`, `нужно ${fmt(R.led.need,0)} Вт с запасом ${fmt(S.psuR)}%`]);
+  }
+  $('#spec').innerHTML=`<thead><tr><th>Позиция</th><th class="num">Кол-во</th><th>Примечание</th></tr></thead><tbody>`+
+    rows.map(r=>{
+      if(String(r[0]).startsWith('GROUP:'))
+        return `<tr><td colspan="3" style="padding-top:12px;font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--straw-deep);border-bottom:none">${esc(r[0].slice(6))}</td></tr>`;
+      return `<tr><td>${esc(r[0])}</td><td class="num">${esc(r[1])}</td><td class="dim">${esc(r[2])}</td></tr>`;
+    }).join('')+`</tbody>`;
+}
+function renderEstimate(G,R){const S=G;
+  const rows=[];
+  const add=(n,q,u,p)=>{ if(q>0) rows.push({n,q,u,p,s:q*p}); };
+  add('Панель '+S.presetName,R.sheetsTotal,'шт',S.price.panel);
+  R.fills.forEach(f=>add('Панель '+f.matName+' (заполнение)',f.sheets.length,'шт',f.price));
+  const gOrder=['Край области','Стыки продольные','Стыки поперечные','Контур проёмов','Углы','LED'];
+  const grp={}; R.prof.forEach(p=>{(grp[p.group]=grp[p.group]||[]).push(p);});
+  gOrder.forEach(g=>{ (grp[g]||[]).forEach(p=>add(p.name,p.sticks,'хл',p.price)); });
+  add('Клей «жидкие гвозди»',R.tubes,'туба',S.price.glue);
+  if(R.led){ add('LED-лента',Math.ceil(R.led.len),'м',S.price.led); add(`Блок питания ${R.led.psuW} Вт`,1,'шт',S.price.psu); }
+  const sub=rows.reduce((a,r)=>a+r.s,0), mk=sub*S.price.markup/100;
+  $('#estimate').innerHTML=`<thead><tr><th>Наименование</th><th class="num">Кол-во</th><th class="num">Цена</th><th class="num">Сумма</th></tr></thead><tbody>`+
+    rows.map(r=>`<tr><td>${esc(r.n)}</td><td class="num">${fmt(r.q)} ${r.u}</td><td class="num dim">${money(r.p)}</td><td class="num">${money(r.s)}</td></tr>`).join('')+
+    (mk>0?`<tr><td>Наценка / работа ${fmt(S.price.markup)}%</td><td></td><td></td><td class="num">${money(mk)}</td></tr>`:'')+
+    `<tr class="tot"><td>Итого${S.client?' · '+esc(S.client):''}</td><td></td><td></td><td class="num">${money(sub+mk)}</td></tr></tbody>`;
+}
+function renderCards(G,R){const S=G;
+  $('#cards').innerHTML=`
+    <div class="card card-hero"><div class="card-k">Панелей купить</div>
+      <div class="card-v">${R.sheetsTotal+R.fills.reduce((a,f)=>a+f.sheets.length,0)}<small>шт</small></div>
+      <div class="card-sub">${R.mainSheets} на плоскость${R.extraSheets?` + ${R.extraSheets} на откосы`:(R.parts.length?' · откосы из обрезков':'')}</div></div>
+    <div class="card"><div class="card-k">Площадь отделки</div>
+      <div class="card-v">${fmt(R.netArea+R.otkosArea,2)}<small>м²</small></div>
+      <div class="card-sub">стена ${fmt(R.netArea,2)} · откосы ${fmt(R.otkosArea,2)}</div></div>
+    <div class="card"><div class="card-k">Чистый отход</div>
+      <div class="card-v" style="color:${R.waste>0.2?'var(--warn)':'var(--paper)'}">${fmt(R.waste*100,1)}<small>%</small></div>
+      <div class="card-sub">годных обрезков ${fmt(R.offArea,2)} м² остаётся на складе</div></div>
+    <div class="card"><div class="card-k">Профиль</div>
+      <div class="card-v">${R.prof.reduce((a,p)=>a+p.sticks,0)}<small>хл</small></div>
+      <div class="card-sub">${fmt(R.prof.reduce((a,p)=>a+p.total,0)/1000,1)} пог. м</div></div>
+    <div class="card"><div class="card-k">Клей</div>
+      <div class="card-v">${R.tubes}<small>туб</small></div>
+      <div class="card-sub">${R.glueDetail}</div></div>
+    ${R.led?`<div class="card"><div class="card-k">LED</div>
+      <div class="card-v">${fmt(R.led.len,1)}<small>м</small></div>
+      <div class="card-sub">БП ${R.led.psuW} Вт · нагрузка ${fmt(R.led.watt,0)} Вт</div></div>`:''}`;
+}
+function renderNotes(G,R){
+  const n=[]; const multi=walls.length>1;
+  const wt=i=>multi?esc(walls[i].name)+': ':'';
+  walls.forEach((w,i)=>{
+    const L=R.layouts[i];
+    if(w.H>w.ceil&&w.ceil>0) n.push(['warn','Проверьте',wt(i)+'высота области больше высоты потолка.']);
+    if(G.orient==='v'&&Math.abs(G.pl-w.H)<1)
+      n.push(['warn','Длина листа',wt(i)+`длина листа (${fmt(G.pl)}) в точности равна высоте стены. Обрезков не будет вовсе — обычно это опечатка.`]);
+    if(w.rowH>G.pl+0.5)
+      n.push(['warn','Отметка стыка',wt(i)+`отметка ${fmt(w.rowH)} мм больше длины листа (${fmt(G.pl)}) — лист туда не дотянется, отметка игнорируется.`]);
+    if(L.seams.length)
+      n.push(['info','Поперечные стыки',wt(i)+`швы на отметках ${[...new Set(L.seams.map(x=>fmt(x.pos)))].join(', ')} мм.`+(G.jointH?' Профиль заложен.':' Профиль на поперечные швы ВЫКЛЮЧЕН — проверьте, так ли задумано.')]);
+    const last=L.strips[L.strips.length-1];
+    if(L.strips.length>1&&last.w<150&&!G.sym)
+      n.push(['warn','Раскладка',wt(i)+`крайняя полоса всего ${fmt(last.w)} мм. Включите симметричную раскладку.`]);
+    w.ops.forEach((o,k)=>{
+      if(o.x<0||o.y<0||o.x+o.w>w.W+1||o.y+o.h>w.H+1)
+        n.push(['err','Проём '+(k+1),wt(i)+'выходит за границы области — проверьте отступ и отметки.']);
+      if(o.h<=50)
+        n.push(['err','Проём '+(k+1),wt(i)+'отметка верха ниже отметки низа — высота проёма нулевая.']);
+    });
+    const withCuts=L.pieces.filter(p=>p.cuts.length).map(p=>p.label);
+    if(withCuts.length)
+      n.push(['info','Проёмы',wt(i)+`детали ${withCuts.join(', ')} ставятся целым листом с вырезом — количество панелей от проёма не уменьшается.`]);
+    if(L.bendRejected&&L.bendRejected.length){
+      const names={left:'слева',right:'справа',top:'сверху',bottom:'снизу'};
+      const list=L.bendRejected.map(r=>{
+        const idx=w.ops.findIndex((o,oi)=>oi===r.op);
+        return `проём ${idx+1} ${names[r.side]||r.side}`;
+      });
+      n.push(['warn','Изгиб не применился',wt(i)+`край проёма не совпал с границей полосы (или загнутая деталь не влезла в лист) — ${list.join(', ')}. Вернулся обычный Г-образный угол.`]);
+    }
+  });
+  if(R.parts.length){
+    const onExtra=R.sheets.filter(sh=>sh.extra).flatMap(sh=>sh.otk);
+    if(onExtra.length){
+      const need=Math.max(...onExtra.map(p=>p.len));
+      n.push(['warn','Откосы',`В остатки не влезли ${onExtra.length} ${plu(onExtra.length,'деталь','детали','деталей')}: ${onExtra.map(p=>p.name).join(', ')}. Самому длинному нужен кусок ${fmt(need)} мм, крупнейший остаток — ${fmt(R.offBest.w)}×${fmt(R.offBest.h)} мм. Добор ${R.extraSheets} ${plu(R.extraSheets,'листа','листов','листов')}.`]);
+    } else if(!R.failed.length) n.push(['ok','Откосы',`Все ${R.parts.length} ${plu(R.parts.length,'деталь','детали','деталей')} откоса легли в остатки листов — доборных панелей не нужно.`]);
+    if(R.forced.length) n.push(['warn','Откос длиннее панели',`Собран из кусков: ${R.forced.join('; ')}. Поперечный шов на откосе неизбежен.`]);
+    if(R.spliced.length) n.push(['warn','Шов на откосе',`Собраны из нескольких кусков: ${R.spliced.join('; ')}. Это сэкономило панель — согласуйте шов с клиентом или снимите галочку «Разрешить стыковку».`]);
+    if(!R.spliced.length&&R.extraSheets&&!G.splice) n.push(['info','Можно сэкономить','Включите «Разрешить стыковку деталей откоса» — вероятно, добор панели не понадобится.']);
+  }
+  if(R.failed.length) n.push(['err','Откосы не размещены',`Не выкроены: ${[...new Set(R.failed.map(f=>`${f.name} ${fmt(f.dep)}×${fmt(f.len)}`))].join(', ')}. Глубина больше ширины листа (${fmt(G.pw)} мм). В смете не учтены.`]);
+  if(R.waste>0.2) n.push(['warn','Отход',`Чистый отход ${fmt(R.waste*100,1)}% (валовый ${fmt(R.wasteGross*100,1)}%). Попробуйте сменить ориентацию листа.`]);
+  if(R.fills.length) n.push(['info','Несколько материалов',`Заполнения проёмов кроятся из своих листов: ${R.fills.map(f=>`${f.matName} — ${f.sheets.length} ${plu(f.sheets.length,'лист','листа','листов')}`).join('; ')}. Карта раскроя разбита по материалам.`]);
+  if(walls.length>1) n.push(['info','Общий раскрой',`Детали всех ${walls.length} стен кроятся из общего пула листов — обрезки одной стены идут на другую.`]);
+  {
+    const totalShelf=(R.shelf?R.shelf.length:0)+R.fills.reduce((a,f)=>a+(f.shelf?f.shelf.length:0),0);
+    if(totalShelf) n.push(['warn','На верстаке',`${totalShelf} ${plu(totalShelf,'деталь временно отложена','детали временно отложены','деталей временно отложены')} и не входит в лист/материал/смету, пока не будет возвращена на карту раскроя.`]);
+  }
+  $('#notes').innerHTML=n.map(([t,b,x])=>`<div class="note ${t}"><b>${b}</b><span>${esc(x)}</span></div>`).join('');
+}
+
+/* ===================== ЗАПУСК ===================== */
+function run(){
+  formToWall();
+  const G=collect();
+  const bad=walls.some(w=>w.W<=0||w.H<=0);
+  if(bad||G.pw<=0||G.pl<=0){
+    $('#notes').innerHTML=`<div class="note err"><b>Ввод</b><span>Заполните размеры стен и листа.</span></div>`;
+    return;
+  }
+  const R=computeProject(G,walls,manualMoves);
+  LAST={G,R};
+  // чистим верстак от ссылок на детали, которых больше не существует (например, после правки проёмов)
+  {
+    const validShelfUids=new Set([...(R.shelf||[]).map(s=>s.uid), ...R.fills.flatMap(f=>(f.shelf||[]).map(s=>s.uid))]);
+    manualMoves.shelf=(manualMoves.shelf||[]).filter(s=>validShelfUids.has(s.uid));
+  }
+  renderNotes(G,R); renderCards(G,R); renderScheme(G,R); renderCutmap(G,R); renderShelf(R);
+  renderCuts(G,R); renderSpec(G,R); renderEstimate(G,R); renderJointsV(R); renderLedSummary(R);
+}
+$('#i-preset').innerHTML=PRESETS.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+$('#i-preset').addEventListener('change',()=>{
+  const p=PRESETS.find(x=>x.id===$('#i-preset').value);
+  if(p&&p.id!=='custom'){ $('#i-pl').value=p.pl; $('#i-pw').value=p.pw; $('#p-panel').value=p.price; $('#i-glue').value=p.tubesPerSheet; }
+  run();
+});
+document.querySelectorAll('[data-sect] .sect-h').forEach(h=>h.addEventListener('click',()=>h.parentElement.classList.toggle('closed')));
+$('#rail').addEventListener('input',e=>{ if(!e.target.closest('#openings')) run(); });
+$('#rail').addEventListener('change',e=>{ if(!e.target.closest('#openings')) run(); });
+
+function snapshot(){
+  formToWall();
+  const o={v:3,walls:JSON.parse(JSON.stringify(walls)),active,manual:manualMoves,fields:{}};
+  document.querySelectorAll('#rail input,#rail select').forEach(el=>{
+    if(!el.id||WALL_FIELDS.includes(el.id)) return;
+    o.fields[el.id]= el.type==='checkbox'?el.checked:el.value;
+  });
+  return o;
+}
+$('#btn-save').addEventListener('click',()=>{
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([JSON.stringify(snapshot(),null,2)],{type:'application/json'}));
+  const nm=($('#i-client').value.trim()||'проект').replace(/[^\wа-яА-ЯёЁ -]/g,'');
+  a.download=`${nm} ${new Date().toISOString().slice(0,10)}.json`;
+  a.click(); URL.revokeObjectURL(a.href);
+});
+$('#btn-load').addEventListener('click',()=>$('#file-load').click());
+$('#file-load').addEventListener('change',e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const r=new FileReader();
+  r.onload=()=>{
+    try{
+      const o=JSON.parse(r.result);
+      Object.entries(o.fields||{}).forEach(([id,v])=>{
+        if(WALL_FIELDS.includes(id)) return;                    // стеновые поля берём из walls/миграции
+        if(id==='i-joint'){ $('#i-joint-v').checked=!!v; $('#i-joint-h').checked=!!v; return; }
+        if(id==='i-glue' && v>=10) return;                      // старое «м²/туба» не тащим
+        const el=document.getElementById(id); if(!el) return;
+        if(el.type==='checkbox') el.checked=v; else el.value=v;
+      });
+      if(o.v===3 && Array.isArray(o.walls) && o.walls.length){
+        walls=o.walls.map((w,i)=>Object.assign(newWall(),w,{id:i+1}));
+        wallSeq=walls.length;
+        active=Math.min(o.active||0,walls.length-1);
+      } else {
+        // миграция одностенового формата: поля + openings -> одна стена
+        const f2=o.fields||{};
+        const w=newWall();
+        w.W=+f2['i-w']||4000; w.H=+f2['i-h']||2300; w.ceil=+f2['i-ceil']||2700;
+        w.edges={top:!!f2['i-e-top'],bot:!!f2['i-e-bot'],left:!!f2['i-e-left'],right:!!f2['i-e-right']};
+        w.cout=+f2['i-cout']||0; w.cin=+f2['i-cin']||0;
+        w.ops=(o.openings||[]).map((x,i)=>Object.assign({anchorH:'left'},x,{id:i+1}));
+        w.opSeq=w.ops.length;
+        walls=[w]; wallSeq=1; active=0;
+      }
+      manualMoves=(o.manual&&typeof o.manual==='object')?o.manual:{};
+      walls.forEach(w=>{
+        ['top','bot','left','right'].forEach(k=>{ w.edges[k]=edgeMode(w.edges[k]); });
+        (w.seamsU||[]).forEach(sm=>{ sm.led=!!sm.led; });
+        w.ops.forEach(op=>{ if(!op.anchorH) op.anchorH='left'; if(!op.otkosMode) op.otkosMode={}; });
+      });
+      renderWallTabs(); wallToForm(); renderOpenings(); run();
+    }catch(err){
+      $('#notes').innerHTML=`<div class="note err"><b>Файл</b><span>Не удалось прочитать проект: файл повреждён или это не проект раскроя.</span></div>`;
+    }
+  };
+  r.readAsText(f); e.target.value='';
+});
+$('#btn-print').addEventListener('click',()=>window.print());
+
+/* ---------- DRAG проёмов на большой схеме ---------- */
+(function(){
+  const box=$('#scheme');
+  let drag=null; // {id, mode:'move'|'resize', dx, dy}
+  const svgPoint=(ev)=>{
+    const svg=box.querySelector('.wall-scheme.on svg'); if(!svg) return null;
+    const pt=svg.createSVGPoint(); pt.x=ev.clientX; pt.y=ev.clientY;
+    const m=svg.getScreenCTM(); if(!m) return null;
+    return pt.matrixTransform(m.inverse());
+  };
+  const snap=(v,targets,tol)=>{
+    for(const t of targets) if(Math.abs(v-t)<=tol) return t;
+    return Math.round(v/10)*10;
+  };
+  box.addEventListener('pointerdown',ev=>{
+    const t=ev.target;
+    if(t.dataset&&t.dataset.seamdrag!==undefined){
+      const w=AW(); w.seamsU=w.seamsU||[];
+      const pos=+t.dataset.seamdrag;
+      const existing=w.seamsU.find(x=>Math.abs(x.pos-pos)<1.5);
+      // создаём запись ТОЛЬКО когда реально начнётся перетаскивание (в pointermove) —
+      // иначе простой клик по автоматическому стыку молча превращал бы его в ручной
+      drag={mode:'seam',seamId:existing?existing.id:null,startPos:pos};
+      ev.preventDefault();
+      try{ box.setPointerCapture(ev.pointerId); }catch(_){}
+      return;
+    }
+    const id=t.dataset&&(t.dataset.resize||t.dataset.drag);
+    if(!id) return;
+    const w=AW(); const o=w.ops.find(x=>x.id==id); if(!o) return;
+    const pt=svgPoint(ev); if(!pt) return;
+    drag={id, mode:t.dataset.resize?'resize':'move',
+          dx:pt.x-o.x, dy:pt.y-(w.H-o.y-o.h)};
+    ev.preventDefault();
+    try{ box.setPointerCapture(ev.pointerId); }catch(_){}
+  });
+  box.addEventListener('pointermove',ev=>{
+    if(!drag) return;
+    const w=AW();
+    if(drag.mode==='seam'){
+      let sm=drag.seamId!=null?(w.seamsU||[]).find(x=>x.id===drag.seamId):null;
+      if(!sm){ w.seamSeq=(w.seamSeq||0)+1; sm={id:w.seamSeq,pos:drag.startPos}; w.seamsU=w.seamsU||[]; w.seamsU.push(sm); drag.seamId=sm.id; }
+      const pt=svgPoint(ev); if(!pt) return;
+      const G0=collect(); const vert=G0.orient==='v';
+      let pos=vert ? w.H-pt.y : pt.x;
+      pos=Math.round(pos/10)*10;
+      pos=Math.min(Math.max(pos,50),(vert?w.H:w.W)-50);
+      sm.pos=pos;
+      run();
+      return;
+    }
+    const o=w.ops.find(x=>x.id==drag.id); if(!o){drag=null;return;}
+    const pt=svgPoint(ev); if(!pt) return;
+    const G=collect(); const L=computeProject(G,walls).layouts[active];
+    const stripEdges=L.strips.flatMap(st=>[st.start,st.end]);
+    const tol=Math.max(w.W,w.H)/60;
+    if(drag.mode==='move'){
+      let nx=pt.x-drag.dx, nyTop=pt.y-drag.dy;
+      nx=snap(nx,[0,...stripEdges,w.W-o.w],tol);
+      nx=Math.min(Math.max(nx,0),Math.max(0,w.W-o.w));
+      let ny=w.H-nyTop-o.h;                       // в отметку от пола
+      ny=snap(ny,[0,w.H-o.h],tol);
+      ny=Math.min(Math.max(ny,0),Math.max(0,w.H-o.h));
+      o.x=nx; o.y=ny;
+    } else {
+      // тянем правый-нижний угол: верх проёма фиксирован, меняются ширина и низ
+      const topSvg=w.H-o.y-o.h;                    // верхняя кромка в svg-координатах
+      let nw=pt.x-o.x, nh=pt.y-topSvg;
+      nw=Math.max(100,Math.round(nw/10)*10);
+      nh=Math.max(100,Math.round(nh/10)*10);
+      o.w=Math.min(nw,w.W-o.x);
+      const top=o.y+o.h;                           // отметка верха от пола
+      o.h=Math.min(nh,top);
+      o.y=top-o.h;
+    }
+    run();
+  });
+  let downAt=null;
+  box.addEventListener('pointerdown',ev=>{
+    const ds=ev.target.dataset||{};
+    downAt={x:ev.clientX,y:ev.clientY,dragId:ds.drag,seamPos:ds.seamdrag,seamSeg:ds.seamseg,
+            jointPos:ds.jvclick,jointSeg:ds.jvseg,edgeSide:ds.edgeclick,
+            otkosOp:ds.otkosop,otkosSide:ds.otkosside};
+  },true);
+  const stop=(ev)=>{
+    const wasDrag=drag; const m=drag&&drag.mode;
+    drag=null;
+    if(wasDrag){ if(m==='seam') renderSeams(); else renderOpenings(); }
+    // клик без движения -> контекстное меню по тому, что под курсором
+    if(ev&&downAt&&Math.abs(ev.clientX-downAt.x)<5&&Math.abs(ev.clientY-downAt.y)<5){
+      if(downAt.otkosOp!==undefined) showOtkosMenu(ev,downAt.otkosOp,downAt.otkosSide);
+      else if(downAt.dragId!==undefined) showMatMenu(ev,downAt.dragId);
+      else if(downAt.seamPos!==undefined) showSeamMenu(ev,+downAt.seamPos,+downAt.seamSeg);
+      else if(downAt.jointPos!==undefined) showJointMenu(ev,+downAt.jointPos,+downAt.jointSeg);
+      else if(downAt.edgeSide!==undefined) showEdgeMenu(ev,downAt.edgeSide);
+    }
+    downAt=null;
+  };
+  box.addEventListener('pointerup',stop);
+  box.addEventListener('pointercancel',()=>{drag=null;downAt=null;});
+  // общая заготовка всплывающего меню — тот же вид, что у выбора материала заполнения
+  function menuShell(ev,title,minW){
+    closeMatMenu();
+    const menu=document.createElement('div');
+    menu.id='mat-menu';
+    menu.style.cssText=`position:fixed;z-index:99;background:var(--surface);border:1px solid var(--line-2);border-radius:8px;padding:6px;box-shadow:0 8px 30px rgba(0,0,0,.5);font-size:12px;min-width:${minW||210}px`;
+    menu.style.left=Math.min(ev.clientX,window.innerWidth-260)+'px';
+    menu.style.top=Math.min(ev.clientY,window.innerHeight-160)+'px';
+    const t=document.createElement('div');
+    t.style.cssText='font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:4px 8px 6px';
+    t.textContent=title;
+    menu.appendChild(t);
+    document.body.appendChild(menu);
+    setTimeout(()=>document.addEventListener('pointerdown',closeOnOutside,{capture:true}),0);
+    return menu;
+  }
+  function menuBtn(menu,label,checked,onClick,danger){
+    const b=document.createElement('button');
+    b.style.cssText=`display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:none;border:none;color:${danger?'var(--err)':'var(--paper)'};padding:6px 8px;cursor:pointer;border-radius:6px;font-size:12px`;
+    b.onmouseenter=()=>b.style.background='var(--void)';
+    b.onmouseleave=()=>b.style.background='none';
+    b.innerHTML=`<span>${esc(label)}</span>`+(checked?' <span style="margin-left:auto">✓</span>':'');
+    b.onclick=onClick;
+    menu.appendChild(b);
+    return b;
+  }
+  function menuDivider(menu,label){
+    const t=document.createElement('div');
+    t.style.cssText='font-family:var(--mono);font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);padding:8px 8px 3px;border-top:1px solid var(--line-2);margin-top:4px';
+    t.textContent=label;
+    menu.appendChild(t);
+  }
+  function showSeamMenu(ev,pos,segStart){
+    const w=AW(); const G=collect();
+    const key=jointSegKey('h',pos,segStart);
+    const cur=jointSegMode(w,G,'h',pos,segStart);
+    const menu=menuShell(ev,`Поперечный стык · ${fmt(pos)} мм`);
+    const setMode=(mode)=>{
+      w.jointModes=w.jointModes||{};
+      w.jointModes[key]=mode;
+      // режим стыка задаётся явно — если это был автоматический стык, отметку нужно
+      // всё равно завести в списке (чтобы им можно было управлять и как позицией)
+      let sm=(w.seamsU||[]).find(x=>Math.abs(x.pos-pos)<2);
+      if(!sm){ w.seamsU=w.seamsU||[]; w.seamSeq=(w.seamSeq||0)+1; sm={id:w.seamSeq,pos}; w.seamsU.push(sm); }
+      closeMatMenu(); renderSeams(); run();
+    };
+    menuBtn(menu,'Соединитель',cur==='cap',()=>setMode('cap'));
+    menuBtn(menu,'Встык (без профиля)',cur==='butt',()=>setMode('butt'));
+    menuBtn(menu,'LED-соединитель',cur==='led',()=>setMode('led'));
+    const sm=(w.seamsU||[]).find(x=>Math.abs(x.pos-pos)<2);
+    if(sm) menuBtn(menu,'Удалить стык',false,()=>{
+      w.seamsU=(w.seamsU||[]).filter(x=>x.id!==sm.id);
+      delete (w.jointModes||{})[key];
+      closeMatMenu(); renderSeams(); run();
+    },true);
+  }
+  function showJointMenu(ev,pos,segStart){
+    const w=AW(); const G=collect();
+    const key=jointSegKey('v',pos,segStart);
+    const cur=jointSegMode(w,G,'v',pos,segStart);
+    const menu=menuShell(ev,`Продольный стык · ${fmt(pos)} мм`);
+    const setMode=(mode)=>{
+      w.jointModes=w.jointModes||{};
+      w.jointModes[key]=mode;
+      closeMatMenu(); run();
+    };
+    menuBtn(menu,'Соединитель',cur==='cap',()=>setMode('cap'));
+    menuBtn(menu,'Встык (без профиля)',cur==='butt',()=>setMode('butt'));
+    menuBtn(menu,'LED-соединитель',cur==='led',()=>setMode('led'));
+  }
+  function showEdgeMenu(ev,side){
+    const w=AW();
+    const names={top:'Верх',bot:'Низ',left:'Слева',right:'Справа'};
+    const menu=menuShell(ev,`Край · ${names[side]||side}`);
+    const cur=edgeMode(w.edges[side]);
+    [['none','— нет'],['cap','Заглушка'],['led','LED-стартовый']].forEach(([val,label])=>{
+      menuBtn(menu,label,cur===val,()=>{
+        w.edges[side]=val;
+        closeMatMenu(); wallToForm(); run();
+      });
+    });
+  }
+  function showOtkosMenu(ev,opId,side){
+    const w=AW(); const o=w.ops.find(x=>x.id==opId); if(!o) return;
+    const names={top:'Сверху',bottom:'Снизу',left:'Слева',right:'Справа'};
+    const menu=menuShell(ev,`Откос · ${names[side]||side}`);
+    const cur=(o.otkosMode&&o.otkosMode[side])||'corner';
+    [['corner','Г-образный угол'],['butt','Встык (без профиля)'],['bend','Изгиб панели']].forEach(([val,label])=>{
+      menuBtn(menu,label,cur===val,()=>{
+        o.otkosMode=o.otkosMode||{}; o.otkosMode[side]=val;
+        closeMatMenu(); renderOpenings(); run();
+      });
+    });
+    menuDivider(menu,'Без откоса (напр. подоконник)');
+    [['none','Открытый край, без профиля'],['cap','Заглушка на краю панели'],['led','LED-профиль на краю панели']].forEach(([val,label])=>{
+      menuBtn(menu,label,cur===val,()=>{
+        o.otkosMode=o.otkosMode||{}; o.otkosMode[side]=val;
+        closeMatMenu(); renderOpenings(); run();
+      });
+    });
+  }
+  function showMatMenu(ev,opId){
+    const w=AW(); const o=w.ops.find(x=>x.id==opId); if(!o) return;
+    const menu=menuShell(ev,'Заполнение проёма',230);
+    const mk=(id,name)=>{
+      const b=menuBtn(menu,name,(o.fillMat||null)===(id||null),()=>{
+        o.fillMat=id; closeMatMenu(); renderOpenings(); run();
+      });
+      const sw=document.createElement('span');
+      sw.style.cssText=`width:12px;height:12px;border-radius:3px;flex:none;margin-right:8px;${id?`background:${matColor(id)}`:'border:1px dashed var(--line-2)'}`;
+      b.insertBefore(sw,b.firstChild);
+    };
+    mk(null,'— без заполнения —');
+    PRESETS.filter(pp=>pp.id!=='custom').forEach(pp=>mk(pp.id,pp.name));
+  }
+  function closeOnOutside(e){ const m=document.getElementById('mat-menu'); if(m&&!m.contains(e.target)) closeMatMenu(); }
+  function closeMatMenu(){ const m=document.getElementById('mat-menu'); if(m){m.remove(); document.removeEventListener('pointerdown',closeOnOutside,{capture:true});} }
+})();
+// touch-action, чтобы палец не скроллил страницу при перетаскивании
+(function(){const st=document.createElement('style');st.textContent='#scheme svg{touch-action:none}';document.head.appendChild(st);})();
+
+/* ---------- DRAG деталей на карте раскроя ---------- */
+(function(){
+  const box=$('#cutmap');
+  let dg=null;   // {pool,uid,svg,geo,w,h,gdx,gdy,rels:[{dx,dy,w,h}],valid,last}
+  const geoOf=svg=>({cw:+svg.dataset.cw,ch:+svg.dataset.ch,cols:+svg.dataset.cols,
+                     n:+svg.dataset.n,pl:+svg.dataset.pl,pw:+svg.dataset.pw});
+  const toSvg=(svg,ev)=>{
+    const pt=svg.createSVGPoint(); pt.x=ev.clientX; pt.y=ev.clientY;
+    const m=svg.getScreenCTM(); return m?pt.matrixTransform(m.inverse()):null;
+  };
+  const poolSheets=pool=>pool==='main'?LAST.R.sheets:(LAST.R.fills.find(f=>f.matId===pool)||{}).sheets;
+  const shelfOf=pool=>pool==='main'?(LAST.R.shelf||[]):((LAST.R.fills.find(f=>f.matId===pool)||{}).shelf||[]);
+  const findItem=(pool,uid)=>{
+    const shs=poolSheets(pool)||[];
+    for(const sh of shs){
+      for(const o of sh.list) if(o._uid===uid) return {kind:'w',o,sh,shs};
+      for(const o of sh.otk)  if(o._uid===uid) return {kind:'o',o,sh,shs};
+    }
+    return null;
+  };
+  const rectOf=it=>it.kind==='w'?{x:it.o.x,y:it.o.y,w:it.o.w,h:it.o.len}
+                               :{x:it.o.x,y:it.o.y,w:it.o.dw||it.o.dep,h:it.o.dh||it.o.len};
+  // может ли деталь поворачиваться: детали с вырезом под проём — нет (вырез и «дети» в нём тоже пришлось бы вращать)
+  const canRotate=it=>it.kind==='o'||!(it.o.cuts&&it.o.cuts.length);
+  function doRotate(svg,uid){
+    if(!LAST) return;
+    const pool=svg.dataset.pool||'main';
+    const it=findItem(pool,uid); if(!it||!canRotate(it)) return;
+    const geo=geoOf(svg), r=rectOf(it);
+    const shIdx=it.shs.indexOf(it.sh);
+    const prevMan=(manualMoves[pool]&&manualMoves[pool][uid])||null;
+    const nextRotFlag=!(prevMan&&prevMan.rot);           // тумблер поверх текущей ручной правки
+    const nw=r.h, nh=r.w;                                 // новые габариты после разворота
+    const shs=poolSheets(pool)||[];
+    const dst=shs[shIdx];
+    const others=[...dst.list.map(o=>({o,r:{x:o.x,y:o.y,w:o.w,h:o.len}})),
+                  ...dst.otk.map(o=>({o,r:{x:o.x,y:o.y,w:o.dw||o.dep,h:o.dh||o.len}}))]
+                 .filter(x=>x.o!==it.o);
+    const G=LAST.G;
+    const fits=(x,y)=>{
+      if(x<-0.5||y<-0.5||x+nw>geo.pw+0.5||y+nh>geo.pl+0.5) return false;
+      return others.every(o=>{
+        const gx=Math.min(x+nw,o.r.x+o.r.w)-Math.max(x,o.r.x);
+        const gy=Math.min(y+nh,o.r.y+o.r.h)-Math.max(y,o.r.y);
+        return !(gx>-G.kerf+1&&gy>-G.kerf+1);
+      });
+    };
+    const clampX=x=>Math.min(Math.max(Math.round(x/10)*10,0),Math.max(0,geo.pw-nw));
+    const clampY=y=>Math.min(Math.max(Math.round(y/10)*10,0),Math.max(0,geo.pl-nh));
+    // кандидаты на новое место: само исходное положение (приоритет — остаться на месте),
+    // углы КАЖДОЙ свободной зоны листа и кромки соседей с пропилом — так деталь находит
+    // место в любом достаточно большом «кармане» листа, а не только впритык к своему
+    // бывшему углу, как было раньше. Свободная зона может вплотную примыкать к соседней
+    // детали без зазора (сама геометрия зоны его не закладывает) — поэтому у каждого угла
+    // пробуем и «в притык», и «отступя на пропил», чтобы не отклонить пригодное место только
+    // из-за нулевого зазора у самой границы зоны.
+    const K=G.kerf;
+    const cands=[[r.x,r.y]];
+    (dst.free||[]).forEach(f=>{
+      if(f.w>=nw-0.5&&f.h>=nh-0.5){
+        [[f.x,f.y],[f.x+f.w-nw,f.y],[f.x,f.y+f.h-nh],[f.x+f.w-nw,f.y+f.h-nh]].forEach(([x,y])=>{
+          cands.push([x,y]);
+          cands.push([x+(x<=f.x+0.5?K:-K), y+(y<=f.y+0.5?K:-K)]);
+        });
+      }
+    });
+    others.forEach(o=>{
+      cands.push([o.r.x+o.r.w+G.kerf,o.r.y],[o.r.x-nw-G.kerf,o.r.y],
+                 [o.r.x,o.r.y+o.r.h+G.kerf],[o.r.x,o.r.y-nh-G.kerf]);
+    });
+    let best=null,bestD=Infinity;
+    cands.forEach(([x,y])=>{
+      x=clampX(x); y=clampY(y);
+      if(!fits(x,y)) return;
+      const d=Math.abs(x-r.x)+Math.abs(y-r.y);          // ближайшее к прежнему месту — предпочтительнее
+      if(d<bestD){ bestD=d; best=[x,y]; }
+    });
+    if(!best) return;   // действительно негде на всём листе — молча отказываем, как и при drag на красное
+    manualMoves[pool]=manualMoves[pool]||{};
+    // «омолаживаем» запись: при конфликте с чем-то другим уступает именно та правка,
+    // которую пользователь трогал последней — а не случайно та, что была введена раньше
+    delete manualMoves[pool][uid];
+    manualMoves[pool][uid]={sheet:shIdx,x:best[0],y:best[1],rot:nextRotFlag};
+    run();
+  }
+  // поворот детали, которая сейчас лежит на верстаке — там нет ограничений по месту,
+  // поэтому проверка одна: у детали не должно быть выреза под проём
+  function doShelfRotate(uid){
+    if(!LAST) return;
+    let pool=null,entry=null;
+    if((LAST.R.shelf||[]).some(s=>s.uid===uid)){ pool='main'; entry=LAST.R.shelf.find(s=>s.uid===uid); }
+    else{ for(const f of LAST.R.fills){ const e=(f.shelf||[]).find(s=>s.uid===uid); if(e){ pool=f.matId; entry=e; break; } } }
+    if(!entry||(entry.cuts&&entry.cuts.length)) return;
+    manualMoves.shelf=(manualMoves.shelf||[]).filter(s=>s.uid!==uid);
+    manualMoves.shelf.push({pool,uid,rot:!entry.rot});
+    run();
+  }
+  box.addEventListener('pointerdown',ev=>{
+    const rotEl=ev.target.closest&&ev.target.closest('[data-cmrot]');
+    if(rotEl){
+      const svg=rotEl.closest('svg'); if(svg){ ev.preventDefault(); ev.stopPropagation(); doRotate(svg,rotEl.dataset.cmrot); }
+      return;
+    }
+    const t=ev.target; if(!t.dataset||!t.dataset.cmdrag||!LAST) return;
+    const svg=t.closest('svg'); if(!svg) return;
+    const pool=svg.dataset.pool||'main';
+    const it=findItem(pool,t.dataset.cmdrag); if(!it) return;
+    const p=toSvg(svg,ev); if(!p) return;
+    const geo=geoOf(svg), r=rectOf(it);
+    const shIdx=it.shs.indexOf(it.sh);
+    const cx=(shIdx%geo.cols)*geo.cw, cy=Math.floor(shIdx/geo.cols)*geo.ch;
+    // связанные «из выреза» откосы едут вместе — их относительные позиции
+    const rels=[];
+    if(it.kind==='w'&&it.o.cuts&&it.o.cuts.length){
+      const holes=holeRects(it.o);
+      it.sh.otk.forEach(k=>{
+        const kr={x:k.x,y:k.y,w:k.dw||k.dep,h:k.dh||k.len};
+        if(holes.some(h=>insideRect(kr,h,3))) rels.push({dx:kr.x-r.x,dy:kr.y-r.y,w:kr.w,h:kr.h,uid:k._uid});
+      });
+    }
+    dg={pool,uid:t.dataset.cmdrag,svg,geo,w:r.w,h:r.h,
+        gdx:p.x-(cx+r.x),gdy:p.y-(cy+r.y),rels,valid:false,last:null,kind:it.kind,cuts:it.kind==='w'?it.o.cuts:null,
+        curRot:!!it.o.rot,fromShelf:false};   // текущий разворот (в т.ч. поставленный ранее кнопкой ↻) — переносим при перетаскивании, а не теряем
+    ev.preventDefault();
+    try{ box.setPointerCapture(ev.pointerId); }catch(_){}
+  });
+  // ---- перетаскивание детали С ВЕРСТАКА обратно на карту ----
+  const shelfBox=$('#shelf-items');
+  shelfBox.addEventListener('pointerdown',ev=>{
+    const rotEl=ev.target.closest&&ev.target.closest('[data-shelfrot]');
+    if(rotEl){ ev.preventDefault(); ev.stopPropagation(); doShelfRotate(rotEl.dataset.shelfrot); return; }
+    const pieceEl=ev.target.closest&&ev.target.closest('[data-shelfpiece]');
+    if(!pieceEl||!LAST) return;
+    const uid=pieceEl.dataset.shelfpiece, pool=pieceEl.dataset.pool;
+    const entry=shelfOf(pool).find(s=>s.uid===uid); if(!entry) return;
+    // нужен хотя бы один лист этого материала, чтобы было куда целиться курсором — если ни одного нет,
+    // возврат этой детали пока невозможен визуально; она остаётся на верстаке
+    const svg=document.querySelector('#cutmap svg[data-pool="'+pool+'"]');
+    if(!svg) return;
+    const geo=geoOf(svg);
+    dg={pool,uid,svg,geo,w:entry.w,h:entry.h,gdx:entry.w/2,gdy:entry.h/2,
+        rels:[],valid:false,last:null,kind:entry.kind,cuts:entry.cuts||null,
+        curRot:!!entry.rot,fromShelf:true};
+    ev.preventDefault();
+    try{ shelfBox.setPointerCapture(ev.pointerId); }catch(_){}
+  });
+  const ghostClear=()=>{ if(dg&&dg.svg){ const g=dg.svg.querySelector('#cm-ghost'); if(g) g.remove(); } };
+  document.addEventListener('pointermove',ev=>{
+    if(!dg) return;
+    // подсветка зоны верстака, пока курсор над ней (для сброса детали С листа НА верстак)
+    const zone=document.getElementById('shelf-zone');
+    if(zone&&!dg.fromShelf){
+      const zr=zone.getBoundingClientRect();
+      const over=ev.clientX>=zr.left&&ev.clientX<=zr.right&&ev.clientY>=zr.top&&ev.clientY<=zr.bottom;
+      zone.classList.toggle('shelf-zone-over',over);
+      if(over){ ghostClear(); return; }  // над верстаком — обычный призрак на карте не нужен
+    }
+    const p=toSvg(dg.svg,ev); if(!p) return;
+    const geo=dg.geo;
+    let gx=p.x-dg.gdx, gy=p.y-dg.gdy;
+    let col=Math.min(Math.max(Math.floor((gx+dg.w/2)/geo.cw),0),geo.cols-1);
+    let row=Math.max(Math.floor((gy+dg.h/2)/geo.ch),0);
+    let idx=Math.min(row*geo.cols+col,geo.n-1);
+    col=idx%geo.cols; row=Math.floor(idx/geo.cols);
+    let lx=Math.round((gx-col*geo.cw)/10)*10, ly=Math.round((gy-row*geo.ch)/10)*10;
+    // магнит: края листа, кромки соседних деталей (вплотную через пропил),
+    // выравнивание по их граням и внутренние края вырезов
+    const tol=Math.max(geo.pw,geo.pl)/45;
+    const candX=[0,geo.pw-dg.w], candY=[0,geo.pl-dg.h];
+    const dstSh=(poolSheets(dg.pool)||[])[idx];
+    if(dstSh){
+      const movingIds=new Set([dg.uid,...dg.rels.map(r=>r.uid)]);
+      const K=LAST.G.kerf;
+      const neigh=[...dstSh.list.map(o=>({o,r:{x:o.x,y:o.y,w:o.w,h:o.len},holes:(o.cuts&&o.cuts.length)?holeRects(o):[]})),
+                   ...dstSh.otk.map(o=>({o,r:{x:o.x,y:o.y,w:o.dw||o.dep,h:o.dh||o.len},holes:[]}))]
+                  .filter(x=>!movingIds.has(x.o._uid));
+      neigh.forEach(x=>{
+        candX.push(x.r.x+x.r.w+K, x.r.x-dg.w-K, x.r.x, x.r.x+x.r.w-dg.w);
+        candY.push(x.r.y+x.r.h+K, x.r.y-dg.h-K, x.r.y, x.r.y+x.r.h-dg.h);
+        x.holes.forEach(h=>{
+          candX.push(h.x, h.x+h.w-dg.w);
+          candY.push(h.y, h.y+h.h-dg.h);
+        });
+      });
+    }
+    const snapTo=(v,cands)=>{ let best=v,bd=tol;
+      cands.forEach(c=>{ const dd=Math.abs(v-c); if(dd<bd){bd=dd;best=c;} });
+      return Math.round(best); };
+    lx=snapTo(lx,candX); ly=snapTo(ly,candY);
+    lx=Math.min(Math.max(lx,0),Math.max(0,geo.pw-dg.w));
+    ly=Math.min(Math.max(ly,0),Math.max(0,geo.pl-dg.h));
+    // проверка через ту же физику, что и применение
+    const shs=poolSheets(dg.pool)||[];
+    const dst=shs[idx];
+    let ok=!!dst;
+    if(ok){
+      // при перетаскивании С ВЕРСТАКА у детали нет текущего места на листе — findItem её не найдёт,
+      // и это не нужно: rels всегда пуст для таких перетаскиваний, dx/dy не используются
+      const it=dg.fromShelf?null:findItem(dg.pool,dg.uid);
+      const dx=it?lx-it.o.x:0, dy=it?ly-it.o.y:0;
+      const movingIds=new Set([dg.uid,...dg.rels.map(r=>r.uid)]);
+      const movedRects=[{x:lx,y:ly,w:dg.w,h:dg.h},
+                        ...dg.rels.map(r=>({x:lx+r.dx,y:ly+r.dy,w:r.w,h:r.h}))];
+      movedRects.forEach(rr=>{ if(rr.x<-0.5||rr.y<-0.5||rr.x+rr.w>geo.pw+0.5||rr.y+rr.h>geo.pl+0.5) ok=false; });
+      if(ok){
+        const G=LAST.G;
+        const others=[...dst.list.map(o=>({kind:'w',o,r:{x:o.x,y:o.y,w:o.w,h:o.len}})),
+                      ...dst.otk.map(o=>({kind:'o',o,r:{x:o.x,y:o.y,w:o.dw||o.dep,h:o.dh||o.len}}))]
+                     .filter(x=>!movingIds.has(x.o._uid));
+        for(const rr of movedRects){
+          for(const x of others){
+            const gxo=Math.min(rr.x+rr.w,x.r.x+x.r.w)-Math.max(rr.x,x.r.x);
+            const gyo=Math.min(rr.y+rr.h,x.r.y+x.r.h)-Math.max(rr.y,x.r.y);
+            if(gxo>-G.kerf+1&&gyo>-G.kerf+1){
+              const inHole=x.kind==='w'&&holeRects(x.o).some(h=>insideRect(rr,h,3));
+              const revHole=dg.cuts&&dg.cuts.length&&holeRects({x:lx,y:ly,len:dg.h,cuts:dg.cuts}).some(h=>insideRect(x.r,h,3));
+              if(!inHole&&!revHole){ ok=false; break; }
+            }
+          }
+          if(!ok) break;
+        }
+      }
+    }
+    dg.valid=ok; dg.last={sheet:idx,x:lx,y:ly,rot:dg.curRot};
+    // призрак
+    ghostClear();
+    const cx=col*geo.cw, cy=row*geo.ch;
+    const g=document.createElementNS('http://www.w3.org/2000/svg','g');
+    g.id='cm-ghost';
+    const fs=geo.pl/28;
+    let inner=`<rect x="${cx+lx}" y="${cy+ly}" width="${dg.w}" height="${dg.h}" fill="${ok?'var(--ok)':'var(--err)'}" fill-opacity=".35" stroke="${ok?'var(--ok)':'var(--err)'}" stroke-width="${fs*0.12}" stroke-dasharray="${fs*0.4} ${fs*0.25}"/>`;
+    dg.rels.forEach(r=>{ inner+=`<rect x="${cx+lx+r.dx}" y="${cy+ly+r.dy}" width="${r.w}" height="${r.h}" fill="none" stroke="${ok?'var(--ok)':'var(--err)'}" stroke-width="${fs*0.08}" stroke-dasharray="${fs*0.3} ${fs*0.2}"/>`; });
+    g.innerHTML=inner;
+    dg.svg.appendChild(g);
+  });
+  const finish=(apply,ev)=>{
+    if(!dg) return;
+    ghostClear();
+    const zone=document.getElementById('shelf-zone');
+    if(zone) zone.classList.remove('shelf-zone-over');
+    // отпустили над зоной верстака — откладываем деталь, минуя обычную проверку места на листе
+    if(apply&&ev&&zone&&!dg.fromShelf){
+      const zr=zone.getBoundingClientRect();
+      if(ev.clientX>=zr.left&&ev.clientX<=zr.right&&ev.clientY>=zr.top&&ev.clientY<=zr.bottom){
+        manualMoves[dg.pool]=manualMoves[dg.pool]||{};
+        delete manualMoves[dg.pool][dg.uid];
+        manualMoves.shelf=(manualMoves.shelf||[]).filter(s=>s.uid!==dg.uid);
+        manualMoves.shelf.push({pool:dg.pool,uid:dg.uid,rot:dg.curRot});
+        dg=null; run(); return;
+      }
+    }
+    if(apply&&dg.valid&&dg.last){
+      manualMoves[dg.pool]=manualMoves[dg.pool]||{};
+      // «омолаживаем» запись — см. комментарий в doRotate: тот, кого тащат сейчас, при конфликте уступает
+      delete manualMoves[dg.pool][dg.uid];
+      manualMoves[dg.pool][dg.uid]=dg.last;
+      if(dg.fromShelf) manualMoves.shelf=(manualMoves.shelf||[]).filter(s=>s.uid!==dg.uid);
+      dg=null; run(); return;
+    }
+    dg=null;
+  };
+  document.addEventListener('pointerup',ev=>finish(true,ev));
+  document.addEventListener('pointercancel',()=>finish(false));
+})();
+(function(){const st=document.createElement('style');st.textContent='#cutmap svg{touch-action:none}';document.head.appendChild(st);})();
+
+/* ---------- старт ---------- */
+walls=[newWall()];
+renderWallTabs(); wallToForm();
+addOpening();
+run();
+</script>
+</body>
+</html>
