@@ -203,6 +203,8 @@ tbody tr:hover td{background:var(--surface)}
           <option value="h">Горизонтально</option>
         </select></div></div>
       <label class="chk"><input type="checkbox" id="i-sym" checked><span>Симметричная раскладка</span></label>
+      <label class="chk"><input type="checkbox" id="i-brick"><span>Раскладка «кирпичиком»</span></label>
+      <p class="hint">Поперечные стыки соседних полос сдвинуты друг относительно друга на полдлины листа — так шов не тянется одной линией через всю стену. Складывается поверх отметки первого стыка и ручных швов.</p>
       <label class="chk"><input type="checkbox" id="i-offcut" checked><span>Использовать обрезки</span></label>
       <div class="row">
         <div class="f"><label>Мин. полезный обрезок</label><input type="number" id="i-minoff" value="300"><span class="unit">мм</span></div>
@@ -838,10 +840,23 @@ function buildLayout(S){
   // rowH=0: резы каждые pl от начала сегмента (как раньше).
   // rowH>0: абсолютная серия отметок rowH, rowH+pl, rowH+2pl... от нуля оси;
   //         любой получившийся кусок длиннее листа дорезается шагом pl.
+  // brick: у нечётных полос (по индексу — соседних через одну) вся эта серия дополнительно
+  //        сдвинута на полдлины листа, поэтому шов у соседних полос не совпадает («кирпичик»).
+  //        Сдвиг считается от нуля оси (как и rowH), а не от начала сегмента — иначе у соседних
+  //        полос, задетых проёмом по-разному, сегменты стартовали бы в разных точках и сдвиг
+  //        «плыл» бы вместо честного полдлины между соседями. Сдвигаем ТОЛЬКО если шов в этом
+  //        сегменте и так неизбежен (сегмент длиннее листа, либо задана отметка rowH) — иначе
+  //        кирпичик резал бы кусок короче листа только ради сдвига, хотя без него куска хватило
+  //        бы целиком (у соседней чётной полосы того же сегмента шва бы не было вообще).
   const splitSeg=(a,b,stI)=>{
     const rowH=(S.rowH>0 && S.rowH<=S.pl+0.5) ? S.rowH : 0;
+    const forcesCut = rowH>0 || (b-a)>S.pl+0.5;
+    // rowH+pl/2 может превысить pl — сворачиваем в [0,pl), иначе поиск первой метки (ищет только
+    // вперёд от a) перескочит через её более раннее по фазе повторение и подставит лишнюю метку
+    // нулевой фазы, чтобы дотянуть от начала сегмента
+    const anchor=(rowH+(S.brick&&forcesCut&&(stI%2===1)?S.pl/2:0))%S.pl;
     let pts=[];
-    if(rowH>0){ let q=rowH; while(q<=a+0.5) q+=S.pl; for(;q<b-0.5;q+=S.pl) pts.push(q); }
+    if(anchor>0){ let q=anchor; while(q<=a+0.5) q+=S.pl; for(;q<b-0.5;q+=S.pl) pts.push(q); }
     (S.userSeams||[]).forEach(us=>{ if(us>a+0.5 && us<b-0.5) pts.push(us); });
     (bendExtraPts[stI]||[]).forEach(v=>{ if(v>a+0.5 && v<b-0.5) pts.push(v); });
     pts=[...new Set(pts.map(v=>Math.round(v)))].sort((x,y)=>x-y);
@@ -1260,7 +1275,7 @@ function collect(){
   return {
     client:$('#i-client').value.trim(),
     pl:num('#i-pl'), pw:num('#i-pw'), orient:$('#i-orient').value,
-    sym:chk('#i-sym'), offcut:chk('#i-offcut'), splice:chk('#i-splice'), rot:chk('#i-rot'), minoff:num('#i-minoff'), kerf:num('#i-kerf'),
+    sym:chk('#i-sym'), brick:chk('#i-brick'), offcut:chk('#i-offcut'), splice:chk('#i-splice'), rot:chk('#i-rot'), minoff:num('#i-minoff'), kerf:num('#i-kerf'),
     stock:num('#i-stock'),
     jointV:chk('#i-joint-v'), jointH:chk('#i-joint-h'), edgeOps:chk('#i-edgeops'),
     tubesPerSheet:num('#i-glue'), glueR:num('#i-gluer'),

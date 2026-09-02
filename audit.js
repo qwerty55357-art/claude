@@ -40,7 +40,7 @@ for(let t=0;t<N;t++){
   const nWalls=1+Math.floor(rand()*3);
   const G=Object.assign({},base,{pl:[2900,2500,2700][Math.floor(rand()*3)],pw:1150,
     orient:rand()<0.3?'h':'v',sym:rand()<0.5,offcut:rand()<0.85,splice:rand()<0.4,rot:rand()<0.3,
-    jointV:rand()<0.85,jointH:rand()<0.9});
+    brick:rand()<0.5,jointV:rand()<0.85,jointH:rand()<0.9});
   const wallsArr=Array.from({length:nWalls},()=>mkWall(rand));
   let R;
   try{ R=C.computeProject(G,wallsArr); }
@@ -438,6 +438,43 @@ for(let t=0;t<N;t++){
         const p2=sh2&&sh2.list.find(x=>x.label===p.label);
         chk('L104',!!p2 && Math.abs(p2.w-p.w)<0.5 && Math.abs(p2.len-p.len)<0.5,
           `${id}: ${p.label} с занятым вырезом повернулась вопреки запрету`);
+      }
+    }
+  }
+  // L110/L111 (нов): раскладка «кирпичиком». На чистой стене без проёмов и ручных швов (чтобы не
+  // путать сдвиг с их собственным вкладом в точки реза) при brick:true чётные полосы держат фазу
+  // anchor=rowH, нечётные — сдвинуты ровно на pl/2 по модулю pl; и (если полос ≥2 и швы вообще
+  // есть) обе фазы обязаны реально встретиться — иначе сдвиг никуда не делся.
+  {
+    const rowHTest=rand()<0.5?0:Math.round((200+rand()*(G.pl-400))/10)*10;
+    const wTest={W:Math.round((2000+rand()*4000)/10)*10, H:Math.round((3000+rand()*6000)/10)*10,
+      ceil:9000, rowH:rowHTest, ops:[], seamsU:[], seamSeq:0, jointsVLed:[],
+      edges:{top:'none',bot:'none',left:'none',right:'none'}, cout:0, cin:0, jointModes:{}};
+    const Gb=Object.assign({},G,{brick:true});
+    let Rb;
+    try{ Rb=C.computeProject(Gb,[wTest]); }
+    catch(e){ FAIL++; if(bugs.length<30) bugs.push('CRASH-BRICK #'+t+' :: '+e.message); Rb=null; }
+    if(Rb){
+      const L=Rb.layouts[0];
+      const rowHEff=(wTest.rowH>0 && wTest.rowH<=Gb.pl+0.5)?wTest.rowH:0;
+      let ok=true; const detail=[];
+      L.seams.forEach(sm=>{
+        const wantPhase=(rowHEff+(sm.strip%2===1?Gb.pl/2:0))%Gb.pl;
+        const gotPhase=((sm.pos%Gb.pl)+Gb.pl)%Gb.pl;
+        const d=Math.min(Math.abs(gotPhase-wantPhase),Gb.pl-Math.abs(gotPhase-wantPhase));
+        if(d>1){ ok=false; detail.push(`полоса ${sm.strip}@${sm.pos} (ждали фазу ${wantPhase.toFixed(0)}, получили ${gotPhase.toFixed(0)})`); }
+      });
+      chk('L110',ok,`${id}: кирпичик — фаза шва не совпала: ${detail.join('; ')}`);
+      // «сдвига нет вовсе» проверяем только когда у ОБЕИХ чётностей вообще есть хоть один шов —
+      // короткая полоса, у которой сдвинутая метка вышла за её собственную длину, законно
+      // остаётся вовсе без шва (это не баг: искусственно резать её только ради сдвига не надо,
+      // см. forcesCut в splitSeg), и тогда сравнивать её не с чем
+      const phaseOf=sm=>Math.round((((sm.pos%Gb.pl)+Gb.pl)%Gb.pl)/10)*10;
+      const evenPhases=new Set(L.seams.filter(sm=>sm.strip%2===0).map(phaseOf));
+      const oddPhases=new Set(L.seams.filter(sm=>sm.strip%2===1).map(phaseOf));
+      if(evenPhases.size && oddPhases.size){
+        const overlap=[...evenPhases].some(p=>oddPhases.has(p));
+        chk('L111',!overlap,`${id}: кирпичик — чётные и нечётные полосы дали одну и ту же фазу (${[...evenPhases]} / ${[...oddPhases]})`);
       }
     }
   }
