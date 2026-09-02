@@ -610,6 +610,8 @@ function renderOpenings(){
 }
 function otkosSideSelect(o,side,label){
   const cur=otkosModeJs(o,side);
+  const seamable=cur==='corner'||cur==='butt';         // шов возможен только там, где реально режется материал
+  const seamVal=((o.otkosSeamPos&&o.otkosSeamPos[side])||[]).join(', ');
   return `<div class="f"><label>${label}</label><select data-k="otkosMode" data-side="${side}">
     <optgroup label="С материалом откоса">
       <option value="corner"${cur==='corner'?' selected':''}>Г-образный угол</option>
@@ -621,7 +623,9 @@ function otkosSideSelect(o,side,label){
       <option value="cap"${cur==='cap'?' selected':''}>Заглушка на краю панели</option>
       <option value="led"${cur==='led'?' selected':''}>LED-профиль на краю панели</option>
     </optgroup>
-  </select></div>`;
+  </select>
+  ${seamable?`<input type="text" data-k="otkosSeam" data-side="${side}" value="${esc(seamVal)}" placeholder="шов авто (мм от ${side==='left'||side==='right'?'пола':'левого края'})" style="margin-top:4px" title="Позиция шва, если деталь придётся стыковать. Пусто — автоматически.">`:''}
+  </div>`;
 }
 function otkosModeJs(o,side){ return (o.otkosMode&&o.otkosMode[side])||'corner'; }
 // пересчёт x по привязке
@@ -646,6 +650,12 @@ $('#openings').addEventListener('input', e=>{
   else if(k==='otkosMode'){
     const side=e.target.dataset.side; if(!side) return;
     o.otkosMode=o.otkosMode||{}; o.otkosMode[side]=v;
+    renderOpenings(); run(); return;                 // поле ручного шва показывается только для «с материалом»
+  }
+  else if(k==='otkosSeam'){
+    const side=e.target.dataset.side; if(!side) return;
+    o.otkosSeamPos=o.otkosSeamPos||{};
+    o.otkosSeamPos[side]=v.split(',').map(s=>parseFloat(s.trim())).filter(n=>Number.isFinite(n)&&n>0);
     run(); return;
   }
   else if(k==='kind'){
@@ -1085,10 +1095,12 @@ function buildOtkosParts(S){
     // детали не режем. Остальные режимы («нет», «заглушка на краю», «LED на краю») — это про
     // то, ЧЕМ закрыт голый торец панели, когда откоса вообще нет — материала там нет никакого.
     const has=k=>{ const m=otkosMode(o,k); return m==='corner'||m==='butt'; };
-    if(has('left'))   parts.push({name:t+'·лев', len:o.h, dep:o.depth, op:i, side:'left'});
-    if(has('right'))  parts.push({name:t+'·прав',len:o.h, dep:o.depth, op:i, side:'right'});
-    if(has('top'))    parts.push({name:t+'·верх',len:o.w, dep:o.depth, op:i, side:'top'});
-    if(o.kind!=='door' && has('bottom')) parts.push({name:t+'·низ',len:o.w, dep:o.depth, op:i, side:'bottom'});
+    // ручной шов: позиции (мм от пола — лев/прав, от левого края — верх/низ), где стыковка неизбежна/выбрана
+    const seamsOf=k=>((o.otkosSeamPos&&o.otkosSeamPos[k])||[]).filter(v=>Number.isFinite(v));
+    if(has('left'))   parts.push({name:t+'·лев', len:o.h, dep:o.depth, op:i, side:'left',  seamPos:seamsOf('left')});
+    if(has('right'))  parts.push({name:t+'·прав',len:o.h, dep:o.depth, op:i, side:'right', seamPos:seamsOf('right')});
+    if(has('top'))    parts.push({name:t+'·верх',len:o.w, dep:o.depth, op:i, side:'top',   seamPos:seamsOf('top')});
+    if(o.kind!=='door' && has('bottom')) parts.push({name:t+'·низ',len:o.w, dep:o.depth, op:i, side:'bottom', seamPos:seamsOf('bottom')});
   });
   return parts;
 }
@@ -1102,7 +1114,7 @@ function packOtkos(parts,sheets,S,opt){
     asc:(a,b)=>a.len-b.len||a.dep-b.dep
   };
   const order=[...parts].sort(cmps[opt.order||'cur']);
-  let extra=0; const failed=[], spliced=[], forced=[];
+  let extra=0; const failed=[], spliced=[], forced=[], manualIgnored=[];
   const MIN=300;                                   // короче этого куска откос не собираем
   const fits=(f,pt)=>{
     if(f.w>=pt.dep && f.h>=pt.len) return {dw:pt.dep,dh:pt.len,rot:false};
@@ -1151,43 +1163,70 @@ function packOtkos(parts,sheets,S,opt){
     // деталь длиннее листа цельной быть не может в принципе.
     if(!done && (S.splice || !whole)){
       const newSheets=!whole;                      // вынужденной стыковке можно добирать листы
-      const chunks=[]; let rest=pt.len, ok=true;
-      const taken=[];                              // куски, изъятые из пулов на время подбора
-      const removeFree=(sh,f)=>{ const j=sh.free.indexOf(f); if(j>=0) sh.free.splice(j,1); };
-      while(rest>1){
-        let best=null,bSh=null;
-        sheets.forEach(sh=>sh.free.forEach(f=>{
-          if(f.w>=pt.dep && f.h>=Math.min(rest,MIN) && (!best||f.h>best.h)){ best=f;bSh=sh; }
-        }));
-        if(!best){
-          if(!newSheets){ ok=false; break; }
-          const sh={no:sheets.length+1,list:[],otk:[],rem:S.pl,used:0,extra:true,
-                    free:[{x:0,y:0,w:S.pw,h:S.pl}]};
-          sheets.push(sh); extra++;
-          best=sh.free[0]; bSh=sh;
+
+      // ручной шов пользователя (позиции на стороне отреза) -> фиксированные длины кусков;
+      // валиден только если ни один кусок не длиннее листа — иначе такой шов физически недостижим
+      let manualTakes=null, manualInvalid=false;
+      const rawSeam=Array.isArray(pt.seamPos)?pt.seamPos:[];
+      if(rawSeam.length){
+        const poss=[...new Set(rawSeam.map(v=>Math.round(v)))].filter(v=>v>0&&v<pt.len-1).sort((a,b)=>a-b);
+        if(poss.length){
+          const bounds=[0,...poss,pt.len];
+          const takes=bounds.slice(1).map((b,k)=>b-bounds[k]);
+          if(takes.every(t=>t<=S.pl+0.001)) manualTakes=takes; else manualInvalid=true;
         }
-        let take=Math.min(rest,best.h);
-        if(rest-take>0 && rest-take<MIN){          // не оставляем огрызок короче минимума
-          const t2=rest-MIN;
-          if(t2>=MIN) take=Math.min(t2,best.h);
-        }
-        chunks.push({f:best,sh:bSh,take});
-        removeFree(bSh,best);                       // изымаем ПО ССЫЛКЕ, не по индексу
-        taken.push({sh:bSh,f:best});
-        rest-=take;
       }
-      if(ok && chunks.length){
-        chunks.forEach((c,k)=>{
+
+      // подбор кусков под план takesPlan (null=автоматический выбор размера каждого куска)
+      const trySplit=takesPlan=>{
+        const chunks=[]; let rest=pt.len, ok=true, idx=0;
+        const taken=[];
+        const removeFree=(sh,f)=>{ const j=sh.free.indexOf(f); if(j>=0) sh.free.splice(j,1); };
+        while(rest>1){
+          const want=takesPlan?takesPlan[idx]:null;
+          const needH=want!=null?want:Math.min(rest,MIN);
+          let best=null,bSh=null;
+          sheets.forEach(sh=>sh.free.forEach(f=>{
+            if(f.w>=pt.dep && f.h>=needH && (!best||f.h>best.h)){ best=f;bSh=sh; }
+          }));
+          if(!best){
+            if(!newSheets){ ok=false; break; }
+            const sh={no:sheets.length+1,list:[],otk:[],rem:S.pl,used:0,extra:true,
+                      free:[{x:0,y:0,w:S.pw,h:S.pl}]};
+            sheets.push(sh); extra++;
+            best=sh.free[0]; bSh=sh;
+          }
+          let take=want!=null?want:Math.min(rest,best.h);
+          if(want==null && rest-take>0 && rest-take<MIN){   // не оставляем огрызок короче минимума
+            const t2=rest-MIN;
+            if(t2>=MIN) take=Math.min(t2,best.h);
+          }
+          chunks.push({f:best,sh:bSh,take});
+          removeFree(bSh,best);                       // изымаем ПО ССЫЛКЕ, не по индексу
+          taken.push({sh:bSh,f:best});
+          rest-=take; idx++;
+        }
+        if(!ok) taken.forEach(t=>t.sh.free.push(t.f));   // неудача: вернуть изъятые куски в пул
+        return {ok:ok&&chunks.length>0, chunks};
+      };
+
+      let attempt=trySplit(manualTakes);
+      if(manualTakes && !attempt.ok){                 // ручные позиции сейчас физически не разложить — откат на авто
+        manualIgnored.push(pt.name);
+        attempt=trySplit(null);
+      } else if(manualInvalid){
+        manualIgnored.push(pt.name);
+      }
+      if(attempt.ok){
+        attempt.chunks.forEach((c,k)=>{
           const part={...pt, len:c.take, x:c.f.x, y:c.f.y, sheet:c.sh.no,
                       dw:pt.dep, dh:c.take, rot:false, fromCut:!!c.f.fromCut,
-                      name:pt.name+(chunks.length>1?` (${k+1}/${chunks.length})`:''), spliced:chunks.length>1};
+                      name:pt.name+(attempt.chunks.length>1?` (${k+1}/${attempt.chunks.length})`:''), spliced:attempt.chunks.length>1};
           c.sh.otk.push(part);
           cutFree(c.sh,c.f,pt.dep,c.take);           // остатки этого куска возвращаются в пул
         });
-        if(chunks.length>1) (whole?spliced:forced).push(`${pt.name} — ${chunks.map(c=>fmt(c.take)).join(' + ')}`);
+        if(attempt.chunks.length>1) (whole?spliced:forced).push(`${pt.name} — ${attempt.chunks.map(c=>fmt(c.take)).join(' + ')}`);
         done=true;
-      } else {
-        taken.forEach(t=>t.sh.free.push(t.f));       // неудача: вернуть изъятые куски в пул
       }
     }
 
@@ -1200,7 +1239,7 @@ function packOtkos(parts,sheets,S,opt){
     }
     if(!done) failed.push(pt);
   });
-  return {extra,failed,spliced,forced};
+  return {extra,failed,spliced,forced,manualIgnored};
 }
 function nestProfile(runs,stock,kerf){
   const cuts=[];
@@ -1723,7 +1762,7 @@ function computeProject(G,walls,manual,cornerLinks){
 
   const fillArea=fills.reduce((a,f)=>a+f.area,0);
   return {layouts,L:layouts[0],sheets,fills,fillArea,mainSheets,extraSheets:ot.extra,failed:ot.failed,
-          spliced:ot.spliced,forced:ot.forced,parts,sheetArea,
+          spliced:ot.spliced,forced:ot.forced,manualSeamIgnored:ot.manualIgnored,parts,sheetArea,
           grossArea,opsArea,netArea,otkosArea,offArea,offBest,sheetsTotal,usedArea,waste,wasteGross,
           prof,tubes,glueArea,glueDetail,led,manual:man,shelf:man.shelf};
 }
@@ -2286,6 +2325,7 @@ function renderNotes(G,R){
     if(R.forced.length) n.push(['warn','Откос длиннее панели',`Собран из кусков: ${R.forced.join('; ')}. Поперечный шов на откосе неизбежен.`]);
     if(R.spliced.length) n.push(['warn','Шов на откосе',`Собраны из нескольких кусков: ${R.spliced.join('; ')}. Это сэкономило панель — согласуйте шов с клиентом или снимите галочку «Разрешить стыковку».`]);
     if(!R.spliced.length&&R.extraSheets&&!G.splice) n.push(['info','Можно сэкономить','Включите «Разрешить стыковку деталей откоса» — вероятно, добор панели не понадобится.']);
+    if(R.manualSeamIgnored&&R.manualSeamIgnored.length) n.push(['warn','Ручной шов откоса не применён',`Заданная позиция шва сейчас физически недостижима (кусок вышел бы длиннее листа или не нашлось места): ${R.manualSeamIgnored.join(', ')}. Шов расставлен автоматически.`]);
   }
   if(R.failed.length) n.push(['err','Откосы не размещены',`Не выкроены: ${[...new Set(R.failed.map(f=>`${f.name} ${fmt(f.dep)}×${fmt(f.len)}`))].join(', ')}. Глубина больше ширины листа (${fmt(G.pw)} мм). В смете не учтены.`]);
   if(R.waste>0.2) n.push(['warn','Отход',`Чистый отход ${fmt(R.waste*100,1)}% (валовый ${fmt(R.wasteGross*100,1)}%). Попробуйте сменить ориентацию листа.`]);

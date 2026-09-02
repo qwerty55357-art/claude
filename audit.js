@@ -293,6 +293,67 @@ for(let t=0;t<N;t++){
       chk('L81',Math.abs((inTot2?inTot2.total:0)-expIn)<1,`${id}: cin ${inTot2?inTot2.total:0} != ${expIn}`);
     }
   }
+  // L90/L91 (нов): ручной шов откоса (otkosSeamPos) при гарантированно вынужденной стыковке
+  // (сторона длиннее листа: len>G.pl, значит whole=false железно — auto-добор листов разрешён,
+  // так что валидный план обязан лечь ровно как задан, отказа быть не может). Ищем первую
+  // подходящую сторону в уже сгенерированной сцене, отдельно проверяем валидный план (все куски
+  // <= pl, равные доли на ceil(len/pl) частей) и заведомо невалидный (кусок pl+1 > pl).
+  {
+    let cand=null;
+    outer:
+    for(let wi=0;wi<wallsArr.length;wi++){
+      const w=wallsArr[wi];
+      for(let oi=0;oi<w.ops.length;oi++){
+        const o=w.ops[oi];
+        if(!o.otkos||!(o.depth>0)) continue;
+        for(const side of ['left','right','top','bottom']){
+          if(side==='bottom'&&o.kind==='door') continue;
+          const m=(o.otkosMode&&o.otkosMode[side])||'corner';
+          if(m!=='corner'&&m!=='butt') continue;
+          const len=(side==='left'||side==='right')?o.h:o.w;
+          if(len>G.pl){ cand={wi,oi,side,len}; break outer; }
+        }
+      }
+    }
+    if(cand){
+      const {wi,oi,side,len}=cand;
+      const o=wallsArr[wi].ops[oi];
+      const doInvalid=rand()<0.5 && len>G.pl+2;
+      let positions;
+      if(doInvalid){
+        positions=[G.pl+1];                            // один кусок гарантированно длиннее листа
+      } else {
+        const minParts=Math.ceil(len/G.pl), nSplits=Math.max(1,minParts-1);
+        positions=Array.from({length:nSplits},(_,k)=>Math.round(len*(k+1)/(nSplits+1)));
+      }
+      o.otkosSeamPos=o.otkosSeamPos||{}; o.otkosSeamPos[side]=positions;
+      let R2;
+      try{ R2=C.computeProject(G,wallsArr); }
+      catch(e){ FAIL++; if(bugs.length<30) bugs.push('CRASH-OTKOSSEAM #'+t+' :: '+e.message); R2=null; }
+      if(R2){
+        const poss=[...new Set(positions.map(v=>Math.round(v)))].filter(v=>v>0&&v<len-1).sort((a,b)=>a-b);
+        const bounds=[0,...poss,len];
+        const takes=bounds.slice(1).map((b,k)=>b-bounds[k]).sort((a,b)=>a-b);
+        const allFit=takes.every(x=>x<=G.pl+0.001);
+        const sideName={left:'лев',right:'прав',top:'верх',bottom:'низ'}[side];
+        let base='О'+(oi+1)+'·'+sideName;
+        if(wallsArr.length>1) base='С'+(wi+1)+'·'+base;
+        const ignored=(R2.manualSeamIgnored||[]).includes(base);
+        if(allFit){
+          chk('L90',!ignored,`${id}: валидный ручной шов ${base} неожиданно отклонён (позиции ${positions})`);
+          const got=[];
+          R2.sheets.forEach(sh=>sh.otk.forEach(p=>{
+            if(p.name===base||p.name.startsWith(base+' (')) got.push(Math.round(p.dh));
+          }));
+          got.sort((a,b)=>a-b);
+          chk('L91',JSON.stringify(got)===JSON.stringify(takes),`${id}: куски ${base} = [${got}] != заданным [${takes}]`);
+        } else {
+          chk('L90',ignored,`${id}: невалидный ручной шов ${base} (позиции ${positions}, куски [${takes}]) не был отклонён`);
+        }
+      }
+      o.otkosSeamPos={};
+    }
+  }
 }
 console.log(`\nСценариев: ${N} | проверок: ${PASS+FAIL} | провалено: ${FAIL} | падений: ${crashed}`);
 bugs.slice(0,20).forEach(b=>console.log('  '+b));
