@@ -16,6 +16,7 @@
   --paper:#EFEADF; --muted:#A0968A;
   --ink-face:#2A2317; --ink-alu:#14222B; --ink-cut:#2F4A2A;
   --warn:#E0A050; --err:#D2705E; --ok:#8FB57F; --void:#100F0C;
+  --mat-bamboo29:#C9A455; --mat-marble:#AEBFCE; --mat-slat:#9FBF93; --mat-rockL:#C2A18F; --mat-rockS:#C6ADD6; --mat-custom:#C9A455;
   --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   --disp:"Archivo","IBM Plex Sans",system-ui,sans-serif;
@@ -358,9 +359,9 @@ const PRESETS = [
   {id:'rockS',    name:'Скала маленькая 2900×600',    pl:2900, pw:600,  price:4500, tubesPerSheet:0.8},
   {id:'custom',   name:'Свой размер',                 pl:2900, pw:1150, price:4500, tubesPerSheet:1.5},
 ];
-// цвет заливки материала на схеме (тёмная и светлая темы читаются одинаково)
-const MATCOLORS={bamboo29:'#C9A455',marble:'#AEBFCE',slat:'#9FBF93',rockL:'#C2A18F',rockS:'#C6ADD6',custom:'#C9A455'};
-const matColor=id=>MATCOLORS[id]||'#C9A455';
+// цвет заливки материала на схеме — значения живут в CSS-переменных --mat-* (см. :root)
+const MATCOLORS={bamboo29:'var(--mat-bamboo29)',marble:'var(--mat-marble)',slat:'var(--mat-slat)',rockL:'var(--mat-rockL)',rockS:'var(--mat-rockS)',custom:'var(--mat-custom)'};
+const matColor=id=>MATCOLORS[id]||'var(--mat-custom)';
 const PSU_NOMINALS = [12,24,36,48,60,100,150,200,250,300,350,400,500];
 
 const $ = s => document.querySelector(s);
