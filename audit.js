@@ -256,6 +256,43 @@ for(let t=0;t<N;t++){
       w0.jointModes={};
     }
   }
+  // L80/L81 (нов): «автосвязка углов» — cornerLinks как 4-й параметр computeProject.
+  // Строим случайный набор связей между стенами (плюс «половинные» — один конец вне проекта)
+  // и проверяем, что суммарная длина профиля «cout»/«cin» равна независимо посчитанному
+  // ожиданию: старые источники (per-wall счётчики + corner-режим на откосах, это то, что уже
+  // дал R без links) плюс один прогон на связь длиной по более высокой из двух стен
+  // (или по своей стене, если второй конец — «вне проекта»).
+  {
+    wallsArr.forEach((w,i)=>{ w.id=i+1; });
+    const links=[];
+    if(rand()<0.7){
+      const nLinks=Math.floor(rand()*3);
+      for(let k=0;k<nLinks;k++){
+        const a=wallsArr[Math.floor(rand()*wallsArr.length)];
+        const outside=rand()<0.3||wallsArr.length<2;
+        const b=outside?null:wallsArr[Math.floor(rand()*wallsArr.length)];
+        links.push({id:k+1,type:rand()<0.5?'out':'in',aw:a.id,as:'left',bw:b?b.id:'',bs:b?'right':''});
+      }
+    }
+    let R2;
+    try{ R2=C.computeProject(G,wallsArr,undefined,links); }
+    catch(e){ FAIL++; if(bugs.length<30) bugs.push('CRASH-CORNERLINKS #'+t+' :: '+e.message); R2=null; }
+    if(R2){
+      const baseOut=R.prof.find(p=>p.key==='cout'), baseIn=R.prof.find(p=>p.key==='cin');
+      const byId=new Map(wallsArr.map(w=>[w.id,w]));
+      let addOut=0, addIn=0;
+      links.forEach(c=>{
+        const a=byId.get(c.aw); if(!a) return;
+        const b=c.bw?byId.get(c.bw):null;
+        const len=b?Math.max(a.H,b.H):a.H;
+        if(c.type==='in') addIn+=len; else addOut+=len;
+      });
+      const outTot2=R2.prof.find(p=>p.key==='cout'), inTot2=R2.prof.find(p=>p.key==='cin');
+      const expOut=(baseOut?baseOut.total:0)+addOut, expIn=(baseIn?baseIn.total:0)+addIn;
+      chk('L80',Math.abs((outTot2?outTot2.total:0)-expOut)<1,`${id}: cout ${outTot2?outTot2.total:0} != ${expOut}`);
+      chk('L81',Math.abs((inTot2?inTot2.total:0)-expIn)<1,`${id}: cin ${inTot2?inTot2.total:0} != ${expIn}`);
+    }
+  }
 }
 console.log(`\nСценариев: ${N} | проверок: ${PASS+FAIL} | провалено: ${FAIL} | падений: ${crashed}`);
 bugs.slice(0,20).forEach(b=>console.log('  '+b));

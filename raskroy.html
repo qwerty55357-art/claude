@@ -232,10 +232,10 @@ tbody tr:hover td{background:var(--surface)}
       <p class="hint">Края стены, поперечные и продольные стыки, LED — в разделе «LED».</p>
       <label class="sub-l">Профили на контуре проёмов (Г-образные)</label>
       <label class="chk"><input type="checkbox" id="i-edgeops" checked><span>Окантовка торцов у проёмов без откосов</span></label>
-      <div class="row">
-        <div class="f"><label>Углы внешние</label><input type="number" id="i-cout" value="0"><span class="unit">шт</span></div>
-        <div class="f"><label>Углы внутренние</label><input type="number" id="i-cin" value="0"><span class="unit">шт</span></div>
-      </div>
+      <label class="sub-l">Углы между стенами (по проекту, не по активной стене)</label>
+      <div id="corners-list"></div>
+      <button class="btn btn-mini" id="btn-add-corner">+ Добавить угол</button>
+      <p class="hint">Один угол = один физический стык краёв двух стен (или край стены и внешней конструкции) — считается один раз, а не по разу с каждой стороны.</p>
     </div>
   </section>
   <section class="sect" data-sect>
@@ -393,6 +393,7 @@ const esc = s => String(s).replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp
 let walls=[], wallSeq=0, active=0;
 let manualMoves={};   // ручные перестановки на карте раскроя: {pool:{uid:{sheet,x,y}}}
 let LAST=null;        // последний расчёт — нужен drag'у карты
+let cornerLinks=[], cornerSeq=0;   // углы между стенами: {id,type:'out'|'in',aw,as,bw,bs} — bw='' значит «вне проекта»
 function newWall(){
   wallSeq++;
   return {id:wallSeq, name:'Стена '+wallSeq, W:4000, H:2300, ceil:2700, rowH:0,
@@ -414,12 +415,15 @@ $('#wall-tabs').addEventListener('click',e=>{
   const v=e.target.dataset.wall; if(v===undefined) return;
   if(v==='add'){ walls.push(newWall()); active=walls.length-1; }
   else active=+v;
-  renderWallTabs(); wallToForm(); renderOpenings(); run();
+  renderWallTabs(); wallToForm(); renderOpenings(); renderCornerLinks(); run();
 });
 $('#btn-del-wall').addEventListener('click',()=>{
   if(walls.length<=1) return;
+  const deadId=AW().id;
   walls.splice(active,1); active=Math.max(0,active-1);
-  renderWallTabs(); wallToForm(); renderOpenings(); run();
+  // угол, ссылавшийся на удалённую стену одним концом, теряет смысл целиком — не превращаем в «вне проекта» молча
+  cornerLinks=cornerLinks.filter(c=>c.aw!=deadId&&c.bw!=deadId);
+  renderWallTabs(); wallToForm(); renderOpenings(); renderCornerLinks(); run();
 });
 
 // поля стены <-> форма
@@ -429,7 +433,6 @@ function wallToForm(){
   $('#i-w').value=w.W; $('#i-h').value=w.H; $('#i-ceil').value=w.ceil;
   $('#i-e-top').value=edgeMode(w.edges.top); $('#i-e-bot').value=edgeMode(w.edges.bot);
   $('#i-e-left').value=edgeMode(w.edges.left); $('#i-e-right').value=edgeMode(w.edges.right);
-  $('#i-cout').value=w.cout; $('#i-cin').value=w.cin;
   renderSeams();
 }
 function formToWall(){
@@ -437,9 +440,8 @@ function formToWall(){
   w.name=$('#i-wname').value.trim()||w.name;
   w.W=num('#i-w'); w.H=num('#i-h'); w.ceil=num('#i-ceil');
   w.edges={top:$('#i-e-top').value,bot:$('#i-e-bot').value,left:$('#i-e-left').value,right:$('#i-e-right').value};
-  w.cout=num('#i-cout'); w.cin=num('#i-cin');
 }
-const WALL_FIELDS=['i-wname','i-w','i-h','i-ceil','i-e-top','i-e-bot','i-e-left','i-e-right','i-cout','i-cin'];
+const WALL_FIELDS=['i-wname','i-w','i-h','i-ceil','i-e-top','i-e-bot','i-e-left','i-e-right'];
 $('#i-wname').addEventListener('input',()=>{ AW().name=$('#i-wname').value.trim()||AW().name; renderWallTabs(); });
 // [ОТРИСОВКА]
 function renderSeams(){
@@ -675,6 +677,48 @@ $('#openings').addEventListener('click', e=>{
 $('#btn-add-op').addEventListener('click', ()=>{ addOpening(); run(); });
 document.addEventListener('click',e=>{
   if(e.target&&e.target.id==='btn-mreset'){ manualMoves={}; run(); }
+});
+
+/* ---- углы между стенами: список связей вместо ручных счётчиков на стену ---- */
+// [ОТРИСОВКА]
+function renderCornerLinks(){
+  const box=$('#corners-list'); if(!box) return;
+  const wallOpt=cur=>walls.map(w=>`<option value="${w.id}"${+cur===w.id?' selected':''}>${esc(w.name)}</option>`).join('');
+  const sideOpt=cur=>`<option value="left"${cur==='left'?' selected':''}>Слева</option><option value="right"${cur==='right'?' selected':''}>Справа</option>`;
+  box.innerHTML=(cornerLinks.length?cornerLinks.map((c,i)=>`
+    <div class="opening" data-cornerrow="${c.id}">
+      <div class="opening-h"><span class="tag">Угол ${i+1}</span><button class="btn btn-del btn-mini" data-cornerdel="${c.id}">удалить</button></div>
+      <div class="row">
+        <div class="f"><label>Стена А</label><select data-cf="aw">${wallOpt(c.aw)}</select></div>
+        <div class="f"><label>Край А</label><select data-cf="as">${sideOpt(c.as)}</select></div>
+      </div>
+      <div class="row">
+        <div class="f"><label>Стена Б</label><select data-cf="bw"><option value=""${!c.bw?' selected':''}>— вне проекта</option>${wallOpt(c.bw)}</select></div>
+        <div class="f"><label>Край Б</label><select data-cf="bs"${c.bw?'':' disabled'}>${sideOpt(c.bs)}</select></div>
+      </div>
+      <div class="row row-1">
+        <div class="f"><label>Тип угла</label><select data-cf="type"><option value="out"${c.type==='out'?' selected':''}>Внешний</option><option value="in"${c.type==='in'?' selected':''}>Внутренний</option></select></div>
+      </div>
+    </div>`).join('') : '<p class="hint" style="margin:4px 0">Углов пока нет.</p>');
+}
+$('#corners-list').addEventListener('input',e=>{
+  const row=e.target.closest('[data-cornerrow]'); if(!row) return;
+  const c=cornerLinks.find(x=>x.id==row.dataset.cornerrow); if(!c) return;
+  const k=e.target.dataset.cf; if(!k) return;
+  c[k]=e.target.value;
+  if(k==='bw'){ if(!c.bw) c.bs=''; else if(!c.bs) c.bs='left'; renderCornerLinks(); }
+  run();
+});
+$('#corners-list').addEventListener('click',e=>{
+  const id=e.target.dataset.cornerdel; if(!id) return;
+  cornerLinks=cornerLinks.filter(c=>c.id!=id);
+  renderCornerLinks(); run();
+});
+$('#btn-add-corner').addEventListener('click',()=>{
+  cornerSeq++;
+  const w=AW(), other=walls.find(x=>x.id!==w.id);
+  cornerLinks.push({id:cornerSeq, type:'out', aw:w.id, as:'left', bw:other?other.id:'', bs:other?'right':''});
+  renderCornerLinks(); run();
 });
 
 /* =====================================================================
@@ -1415,8 +1459,9 @@ function jointSegMode(w,G,kind,pos,segStart){
   const globalOn = kind==='v' ? G.jointV : G.jointH;
   return globalOn ? 'cap' : 'butt';
 }
-function computeProject(G,walls,manual){
+function computeProject(G,walls,manual,cornerLinks){
   manual=manual||{};
+  cornerLinks=cornerLinks||[];
   const multi=walls.length>1;
   const tag=i=>'С'+(i+1);
 
@@ -1599,6 +1644,18 @@ function computeProject(G,walls,manual){
       });
     });
   });
+
+  // углы между стенами (список связей): один физический стык — один прогон,
+  // длиной по более высокой из двух стен; конец «вне проекта» (bw='') — по своей стене
+  {
+    const wallById=new Map(walls.map(w=>[w.id,w]));
+    cornerLinks.forEach(c=>{
+      const a=wallById.get(+c.aw); if(!a) return;
+      const b=(c.bw!==''&&c.bw!=null)?wallById.get(+c.bw):null;
+      const len=b?Math.max(a.H,b.H):a.H;
+      (c.type==='in'?cornerRuns.cin:cornerRuns.cout).push(len);
+    });
+  }
 
   push('edge','Заглушка · край области',capRuns,G.price.edge);
   push('jointV','Соединитель · продольные швы',jvRuns,G.price.joint);
@@ -2257,7 +2314,7 @@ function run(){
     $('#notes').innerHTML=`<div class="note err"><b>Ввод</b><span>Заполните размеры стен и листа.</span></div>`;
     return;
   }
-  const R=computeProject(G,walls,manualMoves);
+  const R=computeProject(G,walls,manualMoves,cornerLinks);
   LAST={G,R};
   // чистим верстак от ссылок на детали, которых больше не существует (например, после правки проёмов)
   {
@@ -2279,7 +2336,8 @@ $('#rail').addEventListener('change',e=>{ if(!e.target.closest('#openings')) run
 
 function snapshot(){
   formToWall();
-  const o={v:3,walls:JSON.parse(JSON.stringify(walls)),active,manual:manualMoves,fields:{}};
+  const o={v:3,walls:JSON.parse(JSON.stringify(walls)),active,manual:manualMoves,
+           cornerLinks:JSON.parse(JSON.stringify(cornerLinks)),fields:{}};
   document.querySelectorAll('#rail input,#rail select').forEach(el=>{
     if(!el.id||WALL_FIELDS.includes(el.id)) return;
     o.fields[el.id]= el.type==='checkbox'?el.checked:el.value;
@@ -2308,8 +2366,9 @@ $('#file-load').addEventListener('change',e=>{
         if(el.type==='checkbox') el.checked=v; else el.value=v;
       });
       if(o.v===3 && Array.isArray(o.walls) && o.walls.length){
-        walls=o.walls.map((w,i)=>Object.assign(newWall(),w,{id:i+1}));
-        wallSeq=walls.length;
+        // сохраняем исходные id стен (на них могут ссылаться cornerLinks) — донумеровываем только то, чего не было
+        walls=o.walls.map((w,i)=>Object.assign(newWall(),w,{id:w.id||(i+1)}));
+        wallSeq=Math.max(walls.length,...walls.map(w=>w.id||0));
         active=Math.min(o.active||0,walls.length-1);
       } else {
         // миграция одностенового формата: поля + openings -> одна стена
@@ -2328,7 +2387,14 @@ $('#file-load').addEventListener('change',e=>{
         (w.seamsU||[]).forEach(sm=>{ sm.led=!!sm.led; });
         w.ops.forEach(op=>{ if(!op.anchorH) op.anchorH='left'; if(!op.otkosMode) op.otkosMode={}; });
       });
-      renderWallTabs(); wallToForm(); renderOpenings(); run();
+      // углы: оставляем только ссылки на реально существующие стены (после миграции/удаления часть могла пропасть)
+      {
+        const ids=new Set(walls.map(w=>w.id));
+        cornerLinks=(Array.isArray(o.cornerLinks)?o.cornerLinks:[])
+          .filter(c=>ids.has(+c.aw)&&(c.bw===''||c.bw==null||ids.has(+c.bw)));
+        cornerSeq=Math.max(0,...cornerLinks.map(c=>c.id||0));
+      }
+      renderWallTabs(); wallToForm(); renderOpenings(); renderCornerLinks(); run();
     }catch(err){
       $('#notes').innerHTML=`<div class="note err"><b>Файл</b><span>Не удалось прочитать проект: файл повреждён или это не проект раскроя.</span></div>`;
     }
@@ -2828,6 +2894,7 @@ $('#btn-print').addEventListener('click',()=>window.print());
 walls=[newWall()];
 renderWallTabs(); wallToForm();
 addOpening();
+renderCornerLinks();
 run();
 </script>
 </body>
