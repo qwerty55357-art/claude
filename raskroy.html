@@ -404,7 +404,7 @@ function newWall(){
   wallSeq++;
   return {id:wallSeq, name:'Стена '+wallSeq, W:4000, H:2300, ceil:2700, rowH:0,
           ops:[], opSeq:0, seamsU:[], seamSeq:0, vseamsU:[], vseamSeq:0, jointsVLed:[], jointModes:{},
-          edges:{top:'cap',bot:'none',left:'cap',right:'cap'}, cout:0, cin:0};
+          pieceMats:{}, edges:{top:'cap',bot:'none',left:'cap',right:'cap'}, cout:0, cin:0};
 }
 const AW=()=>walls[active];
 // старые проекты хранили края булевыми: true -> заглушка
@@ -978,7 +978,11 @@ function buildLayout(S){
         // как по длине уже клипуется by/bh по [from,to]; иначе при отступе с «дальней» стороны
         // (insetEnd) вырез мог остаться шире, чем стала деталь
         const pw=st.w-st.insetStart-st.insetEnd;
-        const p={strip:st.i,len,w:pw,from,to,cuts:[],
+        // pk — устойчивый ключ детали ВНУТРИ этой стены (индексы полосы/сегмента/куска). Нужен
+        // отдельно от label: сам текстовый label не инъективен (si+k+1 может совпасть у разных
+        // (si,k) на одной полосе, напр. si=0,k=1 и si=1,k=0 дают одинаковый суффикс «.2») —
+        // для отображения это не беда, но как ключ w.pieceMats он бы задел сразу обе детали
+        const p={strip:st.i,len,w:pw,from,to,cuts:[],pk:st.i+'|'+si+'|'+k,
           label:'П'+(st.i+1)+((st.segs.length>1||bounds.length>2)?'.'+(si+k+1):'')};
         st.cuts.forEach(c=>{
           const y0=Math.max(from,c.b0), y1=Math.min(to,c.b0+c.bL);
@@ -1658,11 +1662,23 @@ function computeProject(G,walls,manual,cornerLinks){
     const L=buildLayout(wallS(G,w));
     L.wall=i;
     L.pieces.forEach(p=>{ p.wall=i; if(multi) p.label=tag(i)+'·'+p.label; });
+    // индивидуальный материал детали (клик по детали на схеме, как и заполнение проёма) —
+    // ключ w.pieceMats — это p.pk (устойчивый индекс внутри стены), НЕ label: текстовый label
+    // не инъективен (см. комментарий у его генерации в buildLayout), а pk уникален всегда.
+    // деталь с вырезом (проём) override не получает — вложенный buildLayout для тайлинга
+    // не знает о проёме (ops:[]), собрал бы её целиком и вырез был бы молча потерян
+    const pm=w.pieceMats||{};
+    L.pieces.forEach(p=>{
+      if(p.cuts&&p.cuts.length) return;
+      const mid=pm[p.pk]; if(!mid) return;
+      const mp=PRESETS.find(x=>x.id===mid); if(mp) p.matOverride=mp.id;
+    });
     return L;
   });
 
-  // --- общий раскрой: куски всех стен в один пул листов ---
-  const allPieces=layouts.flatMap(L=>L.pieces);
+  // --- общий раскрой: куски всех стен в один пул листов (детали с индивидуальным материалом
+  //     сюда не идут — у них свой пул ниже, рядом с заполнением проёмов) ---
+  const allPieces=layouts.flatMap(L=>L.pieces).filter(p=>!p.matOverride);
 
   // Если «изгиб» геометрически не влез (см. buildLayout) — на эту сторону возвращаем
   // обычный «Г-образный» угол, иначе деталь откоса потеряется без замены (и опустится
@@ -1888,6 +1904,43 @@ function computeProject(G,walls,manual,cornerLinks){
     });
   }
 
+  // --- индивидуальный материал отдельных деталей стены (клик по детали на схеме) — та же
+  //     механика, что и заполнение проёма: деталь тайлится через buildLayout как отдельная
+  //     «стена» размером с саму деталь, листами выбранного материала (если они меньше детали —
+  //     деталь просто соберётся из нескольких, это видно на карте раскроя). Свой пул на каждый
+  //     материал, ключ пула — с префиксом 'piece:', чтобы не слиться с пулом заполнения проёма
+  //     того же материала (иначе poolSheets/shelfOf находили бы только первый из двух). ---
+  {
+    const byMat={};
+    layouts.forEach((L,wi)=>L.pieces.forEach(p=>{
+      if(!p.matOverride) return;
+      const mp=PRESETS.find(x=>x.id===p.matOverride); if(!mp) return;
+      (byMat[mp.id]=byMat[mp.id]||{mat:mp,items:[]}).items.push({wi,p});
+    }));
+    Object.values(byMat).forEach(({mat,items})=>{
+      const poolId='piece:'+mat.id;
+      const Gm=Object.assign({},G,{pl:mat.pl,pw:mat.pw});
+      const pieces=[];
+      const fillLayouts=[];
+      items.forEach(({wi,p})=>{
+        const L=buildLayout(Object.assign({},Gm,{W:p.w,H:p.len,rowH:0,userSeams:[],ops:[]}));
+        const pref=p.label;   // только для отображения — сам label не гарантированно уникален (см. pk)
+        L.pieces.forEach(pp=>{ pp.label=pref+'·'+pp.label; });
+        fillLayouts.push({wi,k:wi+':'+p.pk,L});
+        pieces.push(...L.pieces);
+      });
+      const sA=packSheets(pieces,Gm), a=sA.length;
+      const sB=packSheetsCols(pieces,Gm), b=sB.length;
+      const sheetsM=(a<=b)?packSheets(pieces,Gm):sB;   // повторный прогон победителя детерминирован
+      const area=items.reduce((x,{p})=>x+m2(p.w,p.len),0);
+      manual[poolId]=manual[poolId]||{};
+      const manF=applyManual(sheetsM,manual[poolId],Gm,mat.pl,mat.pw,manual.shelf.filter(s=>s.pool===poolId));
+      man.moved+=manF.moved; man.dropped+=manF.dropped;
+      fills.push({matId:poolId,matColorId:mat.id,matName:mat.name,pl:mat.pl,pw:mat.pw,price:mat.price,
+                  tubesPerSheet:mat.tubesPerSheet,sheets:sheetsM,layouts:fillLayouts,area,shelf:manF.shelf,kind:'piece'});
+    });
+  }
+
   // --- клей: строго по норме на купленный лист (1,5 тубы на бамбуковую панель),
   //     по каждому материалу своя норма; округление вверх один раз по сумме ---
   const glueArea=netArea+otkosArea+fills.reduce((a,f)=>a+f.area,0);   // справочно: реальная площадь приклейки
@@ -1973,6 +2026,19 @@ function schemeFor(G,R,wi){
         ?`<line x1="${x+p}" y1="${y}" x2="${x+p}" y2="${y+h}" stroke="var(--straw-deep)" stroke-opacity=".22" stroke-width="${fs*0.025}"/>`
         :`<line x1="${x}" y1="${y+p}" x2="${x+w}" y2="${y+p}" stroke="var(--straw-deep)" stroke-opacity=".22" stroke-width="${fs*0.025}"/>`;
     }
+  });
+  // клик по отдельной детали стены — свой материал (та же механика, что у заполнения проёма);
+  // если материал уже назначен, деталь подсвечена его цветом со штриховой обводкой. Детали с
+  // вырезом (проём) не кликабельны — им override недоступен (см. computeProject)
+  L.pieces.forEach(p=>{
+    if(p.cuts&&p.cuts.length) return;
+    const st=L.strips[p.strip];
+    const x=L.vert?st.start:p.from, y=L.vert?H-p.to:H-st.end, w=L.vert?st.w:p.len, h=L.vert?p.len:st.w;
+    if(p.matOverride){
+      const mc=matColor(p.matOverride);
+      g+=`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${mc}" fill-opacity=".3" stroke="${mc}" stroke-width="${fs*0.09}" stroke-dasharray="${fs*0.3} ${fs*0.2}"/>`;
+    }
+    g+=`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="transparent" data-piececlick="${encodeURIComponent(p.pk)}" data-piecelabel="${encodeURIComponent(p.label)}" style="cursor:pointer"/>`;
   });
   // стыки между полосами — только вне проёмов; режим (соединитель/встык/LED) выбирается по отрезку
   L.joints.forEach(j=>{
@@ -2311,7 +2377,7 @@ function renderCutmap(G,R){
     html+=cutmapSvg(R.sheets,{pl:G.pl,pw:G.pw,minoff:G.minoff}).replace('<svg ','<svg data-pool="main" ');
   }
   R.fills.forEach(f=>{
-    html+=`<div class="mat-h" style="border-left:4px solid ${matColor(f.matId)}">Материал: ${esc(f.matName)} — ${f.sheets.length} ${plu(f.sheets.length,'лист','листа','листов')} ${fmt(f.pl)}×${fmt(f.pw)} · заполнение проёмов</div>`;
+    html+=`<div class="mat-h" style="border-left:4px solid ${matColor(f.matColorId||f.matId)}">Материал: ${esc(f.matName)} — ${f.sheets.length} ${plu(f.sheets.length,'лист','листа','листов')} ${fmt(f.pl)}×${fmt(f.pw)} · ${f.kind==='piece'?'материал деталей стены':'заполнение проёмов'}</div>`;
     html+=cutmapSvg(f.sheets,{pl:f.pl,pw:f.pw,minoff:G.minoff}).replace('<svg ','<svg data-pool="'+f.matId+'" ');
   });
   $('#cutmap').innerHTML=html;
@@ -2369,7 +2435,8 @@ function renderSpec(G,R){const S=G;
     `${R.mainSheets} на плоскость`+(R.extraSheets?` + ${R.extraSheets} на откосы`:R.parts.length?', откосы из обрезков':'')]);
   R.fills.forEach(f=>{
     const nP=f.layouts.reduce((a,x)=>a+x.L.pieces.length,0);
-    rows.push(['Панель '+f.matName, f.sheets.length+' шт', `заполнение проёмов · ${nP} ${plu(nP,'деталь','детали','деталей')} · ${fmt(f.area,2)} м²`]);
+    const what=f.kind==='piece'?'материал деталей стены':'заполнение проёмов';
+    rows.push(['Панель '+f.matName, f.sheets.length+' шт', `${what} · ${nP} ${plu(nP,'деталь','детали','деталей')} · ${fmt(f.area,2)} м²`]);
   });
   if(R.failed.length)
     rows.push(['⚠ Откосы не выкроены', R.failed.length+' шт', 'не помещаются в лист — в смете не учтены']);
@@ -2402,7 +2469,7 @@ function renderEstimate(G,R){const S=G;
   const rows=[];
   const add=(n,q,u,p)=>{ if(q>0) rows.push({n,q,u,p,s:q*p}); };
   add('Панель '+S.presetName,R.sheetsTotal,'шт',S.price.panel);
-  R.fills.forEach(f=>add('Панель '+f.matName+' (заполнение)',f.sheets.length,'шт',f.price));
+  R.fills.forEach(f=>add('Панель '+f.matName+(f.kind==='piece'?' (материал детали)':' (заполнение)'),f.sheets.length,'шт',f.price));
   const gOrder=['Край области','Стыки вертикальные','Стыки горизонтальные','Контур проёмов','Углы','LED'];
   const grp={}; R.prof.forEach(p=>{(grp[p.group]=grp[p.group]||[]).push(p);});
   gOrder.forEach(g=>{ (grp[g]||[]).forEach(p=>add(p.name,p.sticks,'хл',p.price)); });
@@ -2481,7 +2548,7 @@ function renderNotes(G,R){
   }
   if(R.failed.length) n.push(['err','Откосы не размещены',`Не выкроены: ${[...new Set(R.failed.map(f=>`${f.name} ${fmt(f.dep)}×${fmt(f.len)}`))].join(', ')}. Глубина больше ширины листа (${fmt(G.pw)} мм). В смете не учтены.`]);
   if(R.waste>0.2) n.push(['warn','Отход',`Чистый отход ${fmt(R.waste*100,1)}% (валовый ${fmt(R.wasteGross*100,1)}%). Попробуйте сменить ориентацию листа.`]);
-  if(R.fills.length) n.push(['info','Несколько материалов',`Заполнения проёмов кроятся из своих листов: ${R.fills.map(f=>`${f.matName} — ${f.sheets.length} ${plu(f.sheets.length,'лист','листа','листов')}`).join('; ')}. Карта раскроя разбита по материалам.`]);
+  if(R.fills.length) n.push(['info','Несколько материалов',`Заполнения проёмов и детали с индивидуальным материалом кроятся из своих листов: ${R.fills.map(f=>`${f.matName} — ${f.sheets.length} ${plu(f.sheets.length,'лист','листа','листов')}`).join('; ')}. Карта раскроя разбита по материалам.`]);
   if(walls.length>1) n.push(['info','Общий раскрой',`Детали всех ${walls.length} стен кроятся из общего пула листов — обрезки одной стены идут на другую.`]);
   {
     const totalShelf=(R.shelf?R.shelf.length:0)+R.fills.reduce((a,f)=>a+(f.shelf?f.shelf.length:0),0);
@@ -2677,7 +2744,7 @@ $('#btn-print').addEventListener('click',()=>window.print());
     const ds=ev.target.dataset||{};
     downAt={x:ev.clientX,y:ev.clientY,dragId:ds.drag,seamPos:ds.seamdrag,seamSeg:ds.seamseg,
             jointPos:ds.jvclick,jointSeg:ds.jvseg,edgeSide:ds.edgeclick,
-            otkosOp:ds.otkosop,otkosSide:ds.otkosside};
+            otkosOp:ds.otkosop,otkosSide:ds.otkosside,piecePk:ds.piececlick,pieceLabel:ds.piecelabel};
   },true);
   const stop=(ev)=>{
     const wasDrag=drag; const m=drag&&drag.mode;
@@ -2690,6 +2757,7 @@ $('#btn-print').addEventListener('click',()=>window.print());
       else if(downAt.seamPos!==undefined) showSeamMenu(ev,+downAt.seamPos,+downAt.seamSeg);
       else if(downAt.jointPos!==undefined) showJointMenu(ev,+downAt.jointPos,+downAt.jointSeg);
       else if(downAt.edgeSide!==undefined) showEdgeMenu(ev,downAt.edgeSide);
+      else if(downAt.piecePk!==undefined) showPieceMatMenu(ev,decodeURIComponent(downAt.piecePk),decodeURIComponent(downAt.pieceLabel||''));
     }
     downAt=null;
   };
@@ -2813,6 +2881,26 @@ $('#btn-print').addEventListener('click',()=>window.print());
       b.insertBefore(sw,b.firstChild);
     };
     mk(null,'— без заполнения —');
+    PRESETS.filter(pp=>pp.id!=='custom').forEach(pp=>mk(pp.id,pp.name));
+  }
+  // индивидуальный материал отдельной детали стены — та же механика, что у заполнения проёма;
+  // если у выбранного материала листы меньше самой детали, она соберётся из нескольких — это
+  // делает та же логика buildLayout, что уже используется для заполнения проёмов (см. computeProject)
+  function showPieceMatMenu(ev,pk,label){
+    const w=AW();
+    const menu=menuShell(ev,`Материал детали · ${label||pk}`,230);
+    const cur=(w.pieceMats&&w.pieceMats[pk])||null;
+    const mk=(id,name)=>{
+      const b=menuBtn(menu,name,cur===(id||null),()=>{
+        w.pieceMats=w.pieceMats||{};
+        if(id) w.pieceMats[pk]=id; else delete w.pieceMats[pk];
+        closeMatMenu(); run();
+      });
+      const sw=document.createElement('span');
+      sw.style.cssText=`width:12px;height:12px;border-radius:3px;flex:none;margin-right:8px;${id?`background:${matColor(id)}`:'border:1px dashed var(--line-2)'}`;
+      b.insertBefore(sw,b.firstChild);
+    };
+    mk(null,'— материал стены (по умолчанию) —');
     PRESETS.filter(pp=>pp.id!=='custom').forEach(pp=>mk(pp.id,pp.name));
   }
   function closeOnOutside(e){ const m=document.getElementById('mat-menu'); if(m&&!m.contains(e.target)) closeMatMenu(); }

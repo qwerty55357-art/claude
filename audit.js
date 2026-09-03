@@ -66,9 +66,11 @@ for(let t=0;t<N;t++){
     for(let a=0;a<oth.length;a++)for(let b=a+1;b<oth.length;b++)
       chk('L2',!ov(oth[a],oth[b]),`${id} лист ${sh.no}: откос×откос ${oth[a].n}/${oth[b].n}`);
   });
-  // L3: все куски размещены
-  const nPieces=R.layouts.reduce((a,L)=>a+L.pieces.length,0);
+  // L3: все куски размещены (детали с индивидуальным материалом — matOverride — не идут в
+  // главный пул, у них свой пул в R.fills с kind:'piece', см. L140/L141 ниже)
+  const nPieces=R.layouts.reduce((a,L)=>a+L.pieces.filter(p=>!p.matOverride).length,0);
   chk('L3',nPieces===R.sheets.reduce((a,sh)=>a+sh.list.length,0),`${id}: потеряны детали`);
+  const nOverridePieces=R.layouts.reduce((a,L)=>a+L.pieces.filter(p=>p.matOverride).length,0);
   // L4: площадь кусков = площадь сегментов + добавка от изгиба-«соседа» (у изгиба-«недорезом»
   // сама деталь не растёт — растёт только запас внутри выреза, площадь детали не меняется).
   R.layouts.forEach((L,wi)=>{
@@ -568,6 +570,42 @@ for(let t=0;t<N;t++){
         const overlap=[...evenPhases].some(p=>oddPhases.has(p));
         chk('L111',!overlap,`${id}: кирпичик — чётные и нечётные полосы дали одну и ту же фазу (${[...evenPhases]} / ${[...oddPhases]})`);
       }
+    }
+  }
+  // L140-143 (нов): индивидуальный материал отдельной детали стены (клик по детали на схеме,
+  // w.pieceMats). Берём случайную деталь БЕЗ выреза из уже посчитанного R, назначаем ей материал
+  // из PRESETS через pieceMats и пересчитываем: деталь обязана уйти из главного пула, в R2.fills
+  // обязана появиться запись kind:'piece' для этого материала с записью именно этой детали, а
+  // площадь её замощения обязана совпасть с площадью исходной детали (сама геометрия замощения —
+  // непересечение и границы листа — уже проверяется общими L30/L30b/L31, они гоняются по ВСЕМ
+  // R.fills независимо от kind).
+  if(rand()<0.5){
+    const cands=[];
+    R.layouts.forEach((L,wi)=>L.pieces.forEach(p=>{ if(!(p.cuts&&p.cuts.length)) cands.push({wi,p}); }));
+    if(cands.length){
+      const {wi,p}=cands[Math.floor(rand()*cands.length)];
+      const opts=C.PRESETS.filter(m=>m.id!=='custom');
+      const mat=opts[Math.floor(rand()*opts.length)];
+      wallsArr[wi].pieceMats={}; wallsArr[wi].pieceMats[p.pk]=mat.id;
+      let R2;
+      try{ R2=C.computeProject(G,wallsArr); }
+      catch(e){ FAIL++; if(bugs.length<30) bugs.push('CRASH-PIECEMAT #'+t+' :: '+e.message); R2=null; }
+      if(R2){
+        const stillMain=R2.sheets.some(sh=>sh.list.some(x=>x.pk===p.pk&&x.wall===p.wall));
+        chk('L140',!stillMain,`${id}: ${p.label} с индивидуальным материалом осталась в главном пуле`);
+        const f=R2.fills.find(x=>x.kind==='piece'&&x.matColorId===mat.id);
+        chk('L141',!!f,`${id}: не найден fill kind:'piece' для материала ${mat.id}`);
+        if(f){
+          const entry=f.layouts.find(x=>x.k===wi+':'+p.pk);
+          chk('L142',!!entry,`${id}: в fill piece:${mat.id} нет записи для ${p.label}`);
+          if(entry){
+            const pa=entry.L.pieces.reduce((a,pp)=>a+pp.w*pp.len,0)/1e6;
+            const want=(p.w*p.len)/1e6;
+            chk('L143',Math.abs(pa-want)<0.01,`${id}: замощение ${p.label} материалом ${mat.id} — площадь ${pa.toFixed(3)} != ${want.toFixed(3)}`);
+          }
+        }
+      }
+      wallsArr[wi].pieceMats={};
     }
   }
 }
