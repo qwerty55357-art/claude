@@ -180,10 +180,14 @@ tbody tr:hover td{background:var(--surface)}
       <div class="row row-1">
         <div class="f"><label>Высота потолка</label><input type="number" id="i-ceil" value="2700"><span class="unit">мм</span></div>
       </div>
-      <label class="sub-l">Поперечные стыки активной стены</label>
+      <label class="sub-l">Горизонтальные стыки активной стены</label>
       <div id="seams-list"></div>
-      <button class="btn btn-mini" id="btn-add-seam" style="margin-bottom:4px">+ добавить стык</button>
+      <button class="btn btn-mini" id="btn-add-seam" style="margin-bottom:4px">+ добавить горизонтальный стык</button>
       <p class="hint">Дизайнерские швы в точных отметках от пола. Стык можно перетаскивать прямо на схеме; перетаскивание автоматического стыка превращает его в ручной. Профиль на стыке (соединитель / встык / LED) — клик по линии на схеме, либо в разделе «LED».</p>
+      <label class="sub-l">Вертикальные стыки активной стены</label>
+      <div id="vseams-list"></div>
+      <button class="btn btn-mini" id="btn-add-vseam" style="margin-bottom:4px">+ добавить вертикальный стык</button>
+      <p class="hint">Дополнительный разрез внутри полосы материала в точной отметке от левого края — необязательно на естественной границе полос. Тип стыка (соединитель / встык / LED) — клик по линии на схеме, либо в разделе «LED».</p>
       <div class="row row-1" style="margin-top:4px">
         <button class="btn btn-mini btn-del" id="btn-del-wall" style="justify-self:start">Удалить эту стену</button>
       </div>
@@ -212,7 +216,7 @@ tbody tr:hover td{background:var(--surface)}
       </div>
       <label class="chk"><input type="checkbox" id="i-rot"><span>Однотонная панель — рисунок ненаправленный</span></label>
       <label class="chk"><input type="checkbox" id="i-splice"><span>Разрешить стыковку деталей откоса</span></label>
-      <p class="hint">Стыковка откосов позволяет добрать их из мелких остатков и часто экономит целую панель, но на откосе появится поперечный шов.</p>
+      <p class="hint">Стыковка откосов позволяет добрать их из мелких остатков и часто экономит целую панель, но на откосе появится горизонтальный шов.</p>
       <p class="hint">Проверьте длину листа: если она равна высоте стены, обрезков не будет вовсе — обычно это опечатка.</p>
     </div>
   </section>
@@ -229,9 +233,9 @@ tbody tr:hover td{background:var(--surface)}
     <div class="sect-b">
       <div class="row row-1"><div class="f"><label>Длина хлыста</label><input type="number" id="i-stock" value="3000"><span class="unit">мм</span></div></div>
       <label class="sub-l">Стыки между панелями</label>
-      <label class="chk"><input type="checkbox" id="i-joint-v" checked><span>Профиль на продольных стыках полос</span></label>
-      <label class="chk"><input type="checkbox" id="i-joint-h" checked><span>Профиль на поперечных стыках (лист короче стены)</span></label>
-      <p class="hint">Края стены, поперечные и продольные стыки, LED — в разделе «LED».</p>
+      <label class="chk"><input type="checkbox" id="i-joint-v" checked><span>Профиль на вертикальных стыках полос</span></label>
+      <label class="chk"><input type="checkbox" id="i-joint-h" checked><span>Профиль на горизонтальных стыках (лист короче стены)</span></label>
+      <p class="hint">Края стены, горизонтальные и вертикальные стыки, LED — в разделе «LED».</p>
       <label class="sub-l">Профили на контуре проёмов (Г-образные)</label>
       <label class="chk"><input type="checkbox" id="i-edgeops" checked><span>Окантовка торцов у проёмов без откосов</span></label>
       <label class="sub-l">Углы между стенами (по проекту, не по активной стене)</label>
@@ -253,9 +257,9 @@ tbody tr:hover td{background:var(--surface)}
         <div class="f"><label>Слева</label><select id="i-e-left" class="edge-sel"><option value="none">— нет</option><option value="cap" selected>Заглушка</option><option value="led">LED-стартовый</option></select></div>
         <div class="f"><label>Справа</label><select id="i-e-right" class="edge-sel"><option value="none">— нет</option><option value="cap" selected>Заглушка</option><option value="led">LED-стартовый</option></select></div>
       </div>
-      <label class="sub-l">Продольные стыки активной стены</label>
+      <label class="sub-l">Вертикальные стыки активной стены</label>
       <div id="jointsv-list"></div>
-      <p class="hint">Между полосами всегда либо соединитель, либо (если отмечено) светящийся соединитель — то же самое можно переключить кликом по линии на схеме. Поперечные стыки — в разделе «Объект».</p>
+      <p class="hint">Между полосами всегда либо соединитель, либо (если отмечено) светящийся соединитель — то же самое можно переключить кликом по линии на схеме. Горизонтальные и дополнительные вертикальные стыки — в разделе «Объект».</p>
       <label class="sub-l">Итого по проекту</label>
       <div id="led-summary"></div>
       <div class="row">
@@ -312,8 +316,8 @@ tbody tr:hover td{background:var(--surface)}
       <span><svg width="12" height="12"><rect width="12" height="12" fill="var(--straw-face)" stroke="var(--straw-deep)"/></svg>панель</span>
       <span><svg width="12" height="12"><rect width="12" height="12" fill="var(--void)" stroke="var(--line-2)"/></svg>проём</span>
       <span><svg width="14" height="12"><line x1="1" y1="6" x2="13" y2="6" stroke="var(--alu)" stroke-width="3"/></svg>заглушка (край панели)</span>
-      <span><svg width="14" height="12"><line x1="7" y1="0" x2="7" y2="12" stroke="var(--straw-deep)" stroke-width="3"/></svg>продольный стык (соединитель)</span>
-      <span><svg width="14" height="12"><line x1="0" y1="6" x2="14" y2="6" stroke="var(--err)" stroke-width="3"/></svg>поперечный стык (соединитель)</span>
+      <span><svg width="14" height="12"><line x1="7" y1="0" x2="7" y2="12" stroke="var(--straw-deep)" stroke-width="3"/></svg>вертикальный стык (соединитель)</span>
+      <span><svg width="14" height="12"><line x1="0" y1="6" x2="14" y2="6" stroke="var(--err)" stroke-width="3"/></svg>горизонтальный стык (соединитель)</span>
       <span><svg width="14" height="12"><line x1="0" y1="6" x2="14" y2="6" stroke="var(--warn)" stroke-width="4"/></svg>LED-профиль (стартовый / соединительный)</span>
       <span><svg width="14" height="12"><line x1="0" y1="6" x2="14" y2="6" stroke="var(--ok)" stroke-width="4"/></svg>изгиб панели (без детали откоса)</span>
       <span><svg width="14" height="12"><line x1="0" y1="6" x2="14" y2="6" stroke="var(--muted)" stroke-width="3" stroke-dasharray="3 2"/></svg>откос встык (без профиля)</span>
@@ -399,7 +403,7 @@ let cornerLinks=[], cornerSeq=0;   // углы между стенами: {id,ty
 function newWall(){
   wallSeq++;
   return {id:wallSeq, name:'Стена '+wallSeq, W:4000, H:2300, ceil:2700, rowH:0,
-          ops:[], opSeq:0, seamsU:[], seamSeq:0, jointsVLed:[], jointModes:{},
+          ops:[], opSeq:0, seamsU:[], seamSeq:0, vseamsU:[], vseamSeq:0, jointsVLed:[], jointModes:{},
           edges:{top:'cap',bot:'none',left:'cap',right:'cap'}, cout:0, cin:0};
 }
 const AW=()=>walls[active];
@@ -435,7 +439,7 @@ function wallToForm(){
   $('#i-w').value=w.W; $('#i-h').value=w.H; $('#i-ceil').value=w.ceil;
   $('#i-e-top').value=edgeMode(w.edges.top); $('#i-e-bot').value=edgeMode(w.edges.bot);
   $('#i-e-left').value=edgeMode(w.edges.left); $('#i-e-right').value=edgeMode(w.edges.right);
-  renderSeams();
+  renderSeams(); renderVSeams();
 }
 function formToWall(){
   const w=AW();
@@ -477,8 +481,40 @@ $('#btn-add-seam').addEventListener('click',()=>{
   w.seamsU.push({id:w.seamSeq,pos});
   renderSeams(); run();
 });
+// [ОТРИСОВКА]
+function renderVSeams(){
+  const w=AW();
+  $('#vseams-list').innerHTML=(w.vseamsU||[]).map(sm=>`
+    <div class="row" data-vseamrow="${sm.id}" style="align-items:center;margin-bottom:4px">
+      <div class="f"><label>Отметка от левого края</label><input type="number" data-vseampos value="${Math.round(sm.pos)}"><span class="unit">мм</span></div>
+      <div class="f" style="display:flex;gap:8px;align-items:center;margin-top:14px">
+        <span class="hint" style="margin:0">профиль — клик по линии на схеме</span>
+        <button class="btn btn-del btn-mini" data-vseamdel="${sm.id}">удалить</button>
+      </div>
+    </div>`).join('');
+}
+$('#vseams-list').addEventListener('input',e=>{
+  const row=e.target.closest('[data-vseamrow]'); if(!row) return;
+  const w=AW(); const sm=(w.vseamsU||[]).find(x=>x.id==row.dataset.vseamrow); if(!sm) return;
+  if(e.target.hasAttribute('data-vseampos')) sm.pos=parseFloat(e.target.value)||0;
+  else return;
+  run();
+});
+$('#vseams-list').addEventListener('click',e=>{
+  const id=e.target.dataset.vseamdel; if(!id) return;
+  const w=AW(); w.vseamsU=(w.vseamsU||[]).filter(x=>x.id!=id);
+  renderVSeams(); run();
+});
+$('#btn-add-vseam').addEventListener('click',()=>{
+  const w=AW(); w.vseamsU=w.vseamsU||[]; w.vseamSeq=(w.vseamSeq||0)+1;
+  // новая отметка — посередине по ширине, не совпадая с существующими
+  let pos=Math.round(w.W/2/10)*10;
+  while(w.vseamsU.some(x=>Math.abs(x.pos-pos)<20)) pos+=100;
+  w.vseamsU.push({id:w.vseamSeq,pos});
+  renderVSeams(); run();
+});
 
-/* ---- продольные стыки активной стены: список с подсветкой (раздел LED) ---- */
+/* ---- вертикальные стыки активной стены: список с подсветкой (раздел LED) ---- */
 // [ОТРИСОВКА]
 function renderJointsV(R){
   const box=$('#jointsv-list'); if(!box) return;
@@ -486,7 +522,7 @@ function renderJointsV(R){
   const L=R&&R.layouts?R.layouts[active]:null;
   const joints=L?L.joints:[];
   if(!joints.length){
-    box.innerHTML='<p class="hint" style="margin:4px 0">На этой стене нет продольных стыков — она укладывается одной полосой.</p>';
+    box.innerHTML='<p class="hint" style="margin:4px 0">На этой стене нет вертикальных стыков — она укладывается одной полосой.</p>';
     return;
   }
   const rows=[];
@@ -783,6 +819,18 @@ function buildLayout(S){
       cur+=w;
     });
   });
+  // Ручные вертикальные стыки: принудительный разрез полосы В ЛЮБОМ месте по ширине (высоте —
+  // при горизонтальной раскладке), а не только на естественной границе панелей. Если позиция
+  // уже совпадает с границей — резать нечего, там и так есть стык.
+  (S.userVSeams||[]).forEach(pos=>{
+    const idx=strips.findIndex(st=>pos>st.start+1 && pos<st.end-1);
+    if(idx<0) return;
+    const st=strips[idx];
+    strips.splice(idx,1,
+      {i:0,region:st.region,start:st.start,w:pos-st.start,end:pos,segs:[],cuts:[]},
+      {i:0,region:st.region,start:pos,w:st.end-pos,end:st.end,segs:[],cuts:[]});
+  });
+  strips.forEach((st,k)=>{ st.i=k; });
   // Изгиб панели («развёртка»): бок проёма без отдельной детали откоса — вместо неё соседняя
   // деталь физически шире/длиннее на глубину откоса. «Лево/право» и «верх/низ» — это ВСЕГДА
   // физические стороны проёма (x- и y-ось соответственно), а не «поперёк/вдоль полосы» — эти
@@ -1523,7 +1571,7 @@ function applyManual(sheets,mv,G,pl,pw,shelfList){
 
 function wallS(G,w){
   return Object.assign({},G,{W:w.W,H:w.H,ceil:w.ceil,rowH:w.rowH||0,
-    userSeams:(w.seamsU||[]).map(x=>x.pos),ops:w.ops,
+    userSeams:(w.seamsU||[]).map(x=>x.pos),userVSeams:(w.vseamsU||[]).map(x=>x.pos),ops:w.ops,
     edges:w.edges,cout:w.cout,cin:w.cin});
 }
 // ---- Режим стыка по отрезкам: 'cap' (соединитель) | 'butt' (встык, профиль не считается) | 'led' ----
@@ -1637,8 +1685,8 @@ function computeProject(G,walls,manual,cornerLinks){
   // --- профили: отрезки собираются со всех стен, нестинг общий ---
   const PGROUP={
     edge:'Край области',
-    jointV:'Стыки продольные',
-    jointH:'Стыки поперечные',
+    jointV:'Стыки вертикальные',
+    jointH:'Стыки горизонтальные',
     ops:'Контур проёмов',
     frame:'Контур проёмов',
     cout:'Углы',
@@ -1738,8 +1786,8 @@ function computeProject(G,walls,manual,cornerLinks){
   }
 
   push('edge','Заглушка · край области',capRuns,G.price.edge);
-  push('jointV','Соединитель · продольные швы',jvRuns,G.price.joint);
-  push('jointH','Соединитель · поперечные швы',jhRuns,G.price.joint);
+  push('jointV','Соединитель · вертикальные швы',jvRuns,G.price.joint);
+  push('jointH','Соединитель · горизонтальные швы',jhRuns,G.price.joint);
   push('ops','Заглушка · торцы у проёмов без откосов',opsRuns,G.price.edge);
   push('frame','Заглушка · примыкание откосов к раме',frameRuns,G.price.edge);
   push('cout','Угол внешний (стены и контуры откосов)',cornerRuns.cout,G.price.cout);
@@ -2266,7 +2314,7 @@ function renderSpec(G,R){const S=G;
   if(R.failed.length)
     rows.push(['⚠ Откосы не выкроены', R.failed.length+' шт', 'не помещаются в лист — в смете не учтены']);
   // профили сгруппированы по назначению, внутри группы — построчно
-  const groupsOrder=['Край области','Стыки продольные','Стыки поперечные','Контур проёмов','Углы','LED'];
+  const groupsOrder=['Край области','Стыки вертикальные','Стыки горизонтальные','Контур проёмов','Углы','LED'];
   const byGroup={};
   R.prof.forEach(p=>{ (byGroup[p.group]=byGroup[p.group]||[]).push(p); });
   groupsOrder.forEach(g=>{
@@ -2295,7 +2343,7 @@ function renderEstimate(G,R){const S=G;
   const add=(n,q,u,p)=>{ if(q>0) rows.push({n,q,u,p,s:q*p}); };
   add('Панель '+S.presetName,R.sheetsTotal,'шт',S.price.panel);
   R.fills.forEach(f=>add('Панель '+f.matName+' (заполнение)',f.sheets.length,'шт',f.price));
-  const gOrder=['Край области','Стыки продольные','Стыки поперечные','Контур проёмов','Углы','LED'];
+  const gOrder=['Край области','Стыки вертикальные','Стыки горизонтальные','Контур проёмов','Углы','LED'];
   const grp={}; R.prof.forEach(p=>{(grp[p.group]=grp[p.group]||[]).push(p);});
   gOrder.forEach(g=>{ (grp[g]||[]).forEach(p=>add(p.name,p.sticks,'хл',p.price)); });
   add('Клей «жидкие гвозди»',R.tubes,'туба',S.price.glue);
@@ -2338,7 +2386,7 @@ function renderNotes(G,R){
     if(w.rowH>G.pl+0.5)
       n.push(['warn','Отметка стыка',wt(i)+`отметка ${fmt(w.rowH)} мм больше длины листа (${fmt(G.pl)}) — лист туда не дотянется, отметка игнорируется.`]);
     if(L.seams.length)
-      n.push(['info','Поперечные стыки',wt(i)+`швы на отметках ${[...new Set(L.seams.map(x=>fmt(x.pos)))].join(', ')} мм.`+(G.jointH?' Профиль заложен.':' Профиль на поперечные швы ВЫКЛЮЧЕН — проверьте, так ли задумано.')]);
+      n.push(['info','Горизонтальные стыки',wt(i)+`швы на отметках ${[...new Set(L.seams.map(x=>fmt(x.pos)))].join(', ')} мм.`+(G.jointH?' Профиль заложен.':' Профиль на горизонтальные швы ВЫКЛЮЧЕН — проверьте, так ли задумано.')]);
     const last=L.strips[L.strips.length-1];
     if(L.strips.length>1&&last.w<150&&!G.sym)
       n.push(['warn','Раскладка',wt(i)+`крайняя полоса всего ${fmt(last.w)} мм. Включите симметричную раскладку.`]);
@@ -2623,15 +2671,14 @@ $('#btn-print').addEventListener('click',()=>window.print());
     const w=AW(); const G=collect();
     const key=jointSegKey('h',pos,segStart);
     const cur=jointSegMode(w,G,'h',pos,segStart);
-    const menu=menuShell(ev,`Поперечный стык · ${fmt(pos)} мм`);
+    const menu=menuShell(ev,`Горизонтальный стык · ${fmt(pos)} мм`);
     const setMode=(mode)=>{
+      // тип стыка хранится по ключу позиции в jointModes независимо от того, отмечена ли
+      // эта позиция в списке ручных стыков — не заводим лишнюю запись в списке только из-за
+      // выбора типа (иначе в сайдбаре появлялся стык, который пользователь не добавлял)
       w.jointModes=w.jointModes||{};
       w.jointModes[key]=mode;
-      // режим стыка задаётся явно — если это был автоматический стык, отметку нужно
-      // всё равно завести в списке (чтобы им можно было управлять и как позицией)
-      let sm=(w.seamsU||[]).find(x=>Math.abs(x.pos-pos)<2);
-      if(!sm){ w.seamsU=w.seamsU||[]; w.seamSeq=(w.seamSeq||0)+1; sm={id:w.seamSeq,pos}; w.seamsU.push(sm); }
-      closeMatMenu(); renderSeams(); run();
+      closeMatMenu(); run();
     };
     menuBtn(menu,'Соединитель',cur==='cap',()=>setMode('cap'));
     menuBtn(menu,'Встык (без профиля)',cur==='butt',()=>setMode('butt'));
@@ -2647,7 +2694,7 @@ $('#btn-print').addEventListener('click',()=>window.print());
     const w=AW(); const G=collect();
     const key=jointSegKey('v',pos,segStart);
     const cur=jointSegMode(w,G,'v',pos,segStart);
-    const menu=menuShell(ev,`Продольный стык · ${fmt(pos)} мм`);
+    const menu=menuShell(ev,`Вертикальный стык · ${fmt(pos)} мм`);
     const setMode=(mode)=>{
       w.jointModes=w.jointModes||{};
       w.jointModes[key]=mode;
@@ -2656,6 +2703,12 @@ $('#btn-print').addEventListener('click',()=>window.print());
     menuBtn(menu,'Соединитель',cur==='cap',()=>setMode('cap'));
     menuBtn(menu,'Встык (без профиля)',cur==='butt',()=>setMode('butt'));
     menuBtn(menu,'LED-соединитель',cur==='led',()=>setMode('led'));
+    const sm=(w.vseamsU||[]).find(x=>Math.abs(x.pos-pos)<2);
+    if(sm) menuBtn(menu,'Удалить стык',false,()=>{
+      w.vseamsU=(w.vseamsU||[]).filter(x=>x.id!==sm.id);
+      delete (w.jointModes||{})[key];
+      closeMatMenu(); renderVSeams(); run();
+    },true);
   }
   function showEdgeMenu(ev,side){
     const w=AW();

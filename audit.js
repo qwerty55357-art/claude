@@ -8,12 +8,15 @@ function rnd(seed){let x=seed;return()=>{x=(x*1103515245+12345)&0x7fffffff;retur
 function mkWall(r){
   const W=Math.round((1000+r()*11000)/10)*10, H=Math.round((500+r()*4000)/10)*10;
   const w={W,H,ceil:Math.max(H,2000),rowH:(r()<0.3?Math.round((500+r()*2400)/10)*10:0),
-    ops:[],seamsU:[],seamSeq:0,jointsVLed:[],
+    ops:[],seamsU:[],seamSeq:0,vseamsU:[],vseamSeq:0,jointsVLed:[],
     edges:{top:['cap','led','none'][Math.floor(r()*3)],bot:r()<0.3?'cap':'none',
            left:r()<0.8?'cap':'none',right:['cap','led','none'][Math.floor(r()*3)]},
     cout:Math.floor(r()*3),cin:Math.floor(r()*3),jointModes:{}};
   const nS=Math.floor(r()*3);
   for(let i=0;i<nS;i++) w.seamsU.push({id:i+1,pos:Math.round((100+r()*(H-200))/10)*10,led:r()<0.4});
+  // ручные вертикальные стыки (в любом месте по ширине, не только на границе полос материала)
+  const nVS=Math.floor(r()*3);
+  for(let i=0;i<nVS;i++) w.vseamsU.push({id:i+1,pos:Math.round((100+r()*(W-200))/10)*10});
   // случайные метки продольных LED-стыков: подставляем позиции, часть из которых реально совпадёт
   // с фактическими границами полос (pw), часть — мимо (тогда просто не найдут соответствия, не баг)
   const nJ=Math.floor(r()*3);
@@ -76,6 +79,30 @@ for(let t=0;t<N;t++){
     ea+=widenArea*1e6;
     chk('L4',Math.abs(pa-ea)<1,`${id} стена ${wi}: площадь деталей ${pa} != ${ea}`);
     L.pieces.forEach(p=>chk('L4b',p.len<=G.pl+0.5,`${id} стена ${wi}: кусок ${p.label} len=${p.len} > pl=${G.pl}`));
+    // L120 (нов): ручные вертикальные стыки (userVSeams) режут полосу на части, но не теряют и
+    // не прибавляют ширину — сумма ширин полос внутри каждого участка (region) равна его ширине.
+    {
+      const byRegion={};
+      L.strips.forEach(st=>{ byRegion[st.region]=(byRegion[st.region]||0)+st.w; });
+      L.regions.forEach((rg,ri)=>{
+        const want=rg[1]-rg[0], got=byRegion[ri]||0;
+        chk('L120',Math.abs(want-got)<1,`${id} стена ${wi}: участок ${ri} — сумма ширин полос ${got} != ${want}`);
+      });
+    }
+  });
+  // L121 (нов): ручной вертикальный стык, реально попавший внутрь полосы (не на её готовую
+  // границу), обязан дать новый стык (L.joints) на этой отметке — иначе кнопка «+ добавить
+  // вертикальный стык» молча ничего не делает.
+  wallsArr.forEach((w,wi)=>{
+    (w.vseamsU||[]).forEach(vs=>{
+      const L=R.layouts[wi];
+      const onBoundary=L.strips.some(st=>Math.abs(st.start-vs.pos)<1||Math.abs(st.end-vs.pos)<1);
+      const outOfRange=!L.strips.some(st=>vs.pos>st.start+1&&vs.pos<st.end-1)&&!onBoundary;
+      if(outOfRange) return;   // позиция вне полос вообще (мимо стены/по кромке проёма) — не баг
+      if(onBoundary) return;   // уже совпало с готовой границей — резать нечего, стык и так есть
+      chk('L121',L.joints.some(j=>Math.abs(j.pos-vs.pos)<2),
+        `${id} стена ${wi}: вертикальный стык на ${vs.pos} не появился в L.joints`);
+    });
   });
   // L7/L8: панелей в разумных пределах
   const needArea=(R.netArea+R.otkosArea)*1e6;
