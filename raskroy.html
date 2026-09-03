@@ -1679,11 +1679,10 @@ function computeProject(G,walls,manual,cornerLinks){
     // индивидуальный материал детали (клик по детали на схеме, как и заполнение проёма) —
     // ключ w.pieceMats — это p.pk (устойчивый индекс внутри стены), НЕ label: текстовый label
     // не инъективен (см. комментарий у его генерации в buildLayout), а pk уникален всегда.
-    // деталь с вырезом (проём) override не получает — вложенный buildLayout для тайлинга
-    // не знает о проёме (ops:[]), собрал бы её целиком и вырез был бы молча потерян
+    // деталь с вырезом (проём) override тоже получает — сам вырез передаётся во вложенный
+    // buildLayout как синтетический op (см. ниже, у сборки пула piece:), чтобы не потерять его
     const pm=w.pieceMats||{};
     L.pieces.forEach(p=>{
-      if(p.cuts&&p.cuts.length) return;
       const mid=pm[p.pk]; if(!mid) return;
       const mp=PRESETS.find(x=>x.id===mid); if(mp) p.matOverride=mp.id;
     });
@@ -1923,7 +1922,10 @@ function computeProject(G,walls,manual,cornerLinks){
   //     «стена» размером с саму деталь, листами выбранного материала (если они меньше детали —
   //     деталь просто соберётся из нескольких, это видно на карте раскроя). Свой пул на каждый
   //     материал, ключ пула — с префиксом 'piece:', чтобы не слиться с пулом заполнения проёма
-  //     того же материала (иначе poolSheets/shelfOf находили бы только первый из двух). ---
+  //     того же материала (иначе poolSheets/shelfOf находили бы только первый из двух). Если у
+  //     детали есть вырез под проём (p.cuts), он передаётся во вложенный buildLayout синтетическим
+  //     op — иначе вырез был бы молча потерян, а на месте проёма лёг бы сплошной материал. ---
+  const vert=G.orient==='v';
   {
     const byMat={};
     layouts.forEach((L,wi)=>L.pieces.forEach(p=>{
@@ -1937,7 +1939,17 @@ function computeProject(G,walls,manual,cornerLinks){
       const pieces=[];
       const fillLayouts=[];
       items.forEach(({wi,p})=>{
-        const L=buildLayout(Object.assign({},Gm,{W:p.w,H:p.len,rowH:0,userSeams:[],ops:[]}));
+        // p.w/p.len — это «поперёк/вдоль», а не «реальные Ш/В» (в отличие от o.w/o.h у проёмов,
+        // которые всегда в системе координат стены) — при горизонтальной раскладке (orient='h')
+        // W/H вложенного buildLayout нужно ПОМЕНЯТЬ МЕСТАМИ, иначе its across/along (см. их вывод
+        // в самом buildLayout) перепутаются с материалом нового листа не по той оси. p.cuts уже в
+        // локальных координатах детали (ax/aw — поперёк, by/bh — вдоль) — переводим в x/y/w/h так
+        // же, как это делает сам buildLayout через oA/oB, с тем же самым vert.
+        const ops=(p.cuts||[]).map((c,ci)=>vert
+          ? {id:ci,kind:'window',x:c.ax,y:c.by,w:c.aw,h:c.bh}
+          : {id:ci,kind:'window',x:c.by,y:c.ax,w:c.bh,h:c.aw});
+        const miniW=vert?p.w:p.len, miniH=vert?p.len:p.w;
+        const L=buildLayout(Object.assign({},Gm,{W:miniW,H:miniH,rowH:0,userSeams:[],ops}));
         const pref=p.label;   // только для отображения — сам label не гарантированно уникален (см. pk)
         L.pieces.forEach(pp=>{ pp.label=pref+'·'+pp.label; });
         fillLayouts.push({wi,k:wi+':'+p.pk,L});
@@ -2048,10 +2060,10 @@ function schemeFor(G,R,wi){
     }
   });
   // клик по отдельной детали стены — свой материал (та же механика, что у заполнения проёма);
-  // если материал уже назначен, деталь подсвечена его цветом со штриховой обводкой. Детали с
-  // вырезом (проём) не кликабельны — им override недоступен (см. computeProject)
+  // если материал уже назначен, деталь подсвечена его цветом со штриховой обводкой. Прямоугольник
+  // кликабельной зоны рисуется ДО самого проёма (ниже по коду) — там, где проём перекрывает эту
+  // деталь, клик достаётся именно проёму (свой материал заполнения), а не детали под ним
   L.pieces.forEach(p=>{
-    if(p.cuts&&p.cuts.length) return;
     const st=L.strips[p.strip];
     const x=L.vert?st.start:p.from, y=L.vert?H-p.to:H-st.end, w=L.vert?st.w:p.len, h=L.vert?p.len:st.w;
     if(p.matOverride){
