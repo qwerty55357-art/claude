@@ -77,6 +77,21 @@ for(let t=0;t<N;t++){
     let widenArea=0;
     L.pieces.forEach(p=>(p.bend||[]).forEach(b=>{ if(!b.inner) widenArea+=b.extra||0; }));
     ea+=widenArea*1e6;
+    // LED физически шире обычного стыка (LED_GAP=10мм) — деталь по обе стороны такого стыка
+    // теряет материал: вертикальный LED-стык съедает insetStart+insetEnd по всей длине полосы,
+    // горизонтальный — 10мм на всю (уже уменьшенную вертикальными стыками) ширину полосы
+    let ledLoss=0;
+    L.strips.forEach(st=>{
+      const segLen=st.segs.reduce((x,sg)=>x+(sg[1]-sg[0]),0);
+      ledLoss+=((st.insetStart||0)+(st.insetEnd||0))*segLen;
+    });
+    L.seams.forEach(sm=>{
+      if(C.jointSegMode(wallsArr[wi],G,'h',sm.pos,sm.a0)==='led'){
+        const st=L.strips[sm.strip];
+        ledLoss+=10*(st.w-(st.insetStart||0)-(st.insetEnd||0));
+      }
+    });
+    ea-=ledLoss;
     chk('L4',Math.abs(pa-ea)<1,`${id} стена ${wi}: площадь деталей ${pa} != ${ea}`);
     L.pieces.forEach(p=>chk('L4b',p.len<=G.pl+0.5,`${id} стена ${wi}: кусок ${p.label} len=${p.len} > pl=${G.pl}`));
     // L120 (нов): ручные вертикальные стыки (userVSeams) режут полосу на части, но не теряют и
@@ -104,6 +119,56 @@ for(let t=0;t<N;t++){
         `${id} стена ${wi}: вертикальный стык на ${vs.pos} не появился в L.joints`);
     });
   });
+  // L130-132 (нов): физическая ширина LED (10мм, поровну 5+5 на стыке между полосами, все 10 —
+  // с одной стороны на краю стены) на чистой стене (без проёмов) — сравниваем LED-прогон с
+  // cap-прогоном той же стены и проверяем ТОЧНУЮ разницу, а не только совокупную площадь (L4
+  // мог бы не заметить компенсирующую пару ошибок в противоположных знаках).
+  if(rand()<0.4){
+    const wT={W:3200,H:2300,ceil:3000,rowH:0,ops:[],seamsU:[],seamSeq:0,vseamsU:[],vseamSeq:0,
+      jointsVLed:[],edges:{top:'none',bot:'none',left:'cap',right:'cap'},cout:0,cin:0,jointModes:{}};
+    const Gt=Object.assign({},G,{orient:'v',sym:false});
+    const base=C.computeProject(Gt,[wT]).layouts[0];
+    if(base.strips.length>=2){
+      const j0=base.joints[0];
+      wT.jointModes={}; wT.jointModes[C.jointSegKey('v',j0.pos,j0.segs[0][0])]='led';
+      const led=C.computeProject(Gt,[wT]).layouts[0];
+      const a0=base.strips[0], a1=led.strips[0], b0=base.strips[1], b1=led.strips[1];
+      chk('L130a',Math.abs((a1.insetEnd-a0.insetEnd)-5)<0.01,`${id}: верт. LED-стык — insetEnd левой полосы ${a1.insetEnd} вместо ${a0.insetEnd+5}`);
+      chk('L130b',Math.abs((b1.insetStart-b0.insetStart)-5)<0.01,`${id}: верт. LED-стык — insetStart правой полосы ${b1.insetStart} вместо ${b0.insetStart+5}`);
+    }
+    if(base.seams.length){
+      const sm0=base.seams[0];
+      wT.jointModes={}; wT.jointModes[C.jointSegKey('h',sm0.pos,sm0.a0)]='led';
+      const led=C.computeProject(Gt,[wT]).layouts[0];
+      const before=base.pieces.filter(p=>p.strip===sm0.strip&&Math.abs(p.to-sm0.pos)<1)[0];
+      const after=base.pieces.filter(p=>p.strip===sm0.strip&&Math.abs(p.from-sm0.pos)<1)[0];
+      const beforeL=led.pieces.filter(p=>p.strip===sm0.strip&&Math.abs(p.to-(sm0.pos-5))<1)[0];
+      const afterL=led.pieces.filter(p=>p.strip===sm0.strip&&Math.abs(p.from-(sm0.pos+5))<1)[0];
+      chk('L131a',!!beforeL&&Math.abs((before.to-before.from)-(beforeL.to-beforeL.from)-5)<0.01,
+        `${id}: гориз. LED-шов — кусок ДО шва не укоротился ровно на 5мм`);
+      chk('L131b',!!afterL&&Math.abs((after.to-after.from)-(afterL.to-afterL.from)-5)<0.01,
+        `${id}: гориз. LED-шов — кусок ПОСЛЕ шва не укоротился ровно на 5мм`);
+    }
+    wT.jointModes={}; wT.edges.left='led';
+    const ledgeL=C.computeProject(Gt,[wT]).layouts[0];
+    chk('L132',Math.abs(ledgeL.strips[0].insetStart-10)<0.01,
+      `${id}: LED-край слева — insetStart первой полосы ${ledgeL.strips[0].insetStart} вместо 10`);
+    // L133 (нов): «LED на краю панели» у откоса (без материала) — вырез под проём увеличивается
+    // на LED_GAP именно с той стороны, где выбран этот режим, панель со стороны проёма отступает
+    const wOp={W:3000,H:2300,ceil:3000,rowH:0,seamsU:[],seamSeq:0,vseamsU:[],vseamSeq:0,
+      jointsVLed:[],edges:{top:'none',bot:'none',left:'none',right:'none'},cout:0,cin:0,jointModes:{},
+      ops:[{kind:'window',w:800,h:1000,x:1000,y:500,otkos:true,depth:150,id:1,
+            otkosMode:{left:'cap',right:'cap',top:'cap',bottom:'cap'}}]};
+    const baseOp=C.computeProject(Gt,[wOp]).layouts[0];
+    wOp.ops[0].otkosMode.left='led';
+    const ledOp=C.computeProject(Gt,[wOp]).layouts[0];
+    const cutOf=L=>{ for(const p of L.pieces){ const c=(p.cuts||[]).find(x=>x.op===0); if(c) return c; } return null; };
+    const c0=cutOf(baseOp), c1=cutOf(ledOp);
+    chk('L133a',!!c0&&!!c1&&Math.abs((c0.ax-c1.ax)-10)<0.5,
+      `${id}: LED на краю откоса (left) — ax ${c1&&c1.ax} вместо ${c0&&(c0.ax-10)}`);
+    chk('L133b',!!c0&&!!c1&&Math.abs((c1.aw-c0.aw)-10)<0.5,
+      `${id}: LED на краю откоса (left) — aw ${c1&&c1.aw} вместо ${c0&&(c0.aw+10)}`);
+  }
   // L7/L8: панелей в разумных пределах
   const needArea=(R.netArea+R.otkosArea)*1e6;
   chk('L7',R.sheetsTotal>=Math.ceil(needArea/(G.pl*G.pw)-1e-9),`${id}: панелей меньше минимума`);

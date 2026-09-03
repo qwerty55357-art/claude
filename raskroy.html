@@ -791,14 +791,32 @@ function subIn(lo,hi,gaps){
   const segs=subRanges(hi-lo, gaps.map(g=>[g[0]-lo,g[1]-lo]));
   return segs.map(g=>[g[0]+lo,g[1]+lo]);
 }
+// физическая ширина LED-профиля/ленты — везде, где он занимает место в раскрое (стыки,
+// края стены, откосы), считаем ровно 10 мм, поровну по 5 мм с каждой стороны на стыке
+const LED_GAP=10;
 function buildLayout(S){
   const vert=S.orient==='v', across=vert?S.W:S.H, along=vert?S.H:S.W, bandW=S.pw;
   const oA=o=>vert?[o.x,o.w]:[o.y,o.h], oB=o=>vert?[o.y,o.h]:[o.x,o.w];
 
+  // «LED на краю панели» (откос без материала, но с LED-профилем на голом торце панели, см.
+  // 6-опционный otkosMode) — панель физически отступает от истинной границы проёма на LED_GAP
+  // с этой стороны, вырез под проём в самой панели ровно настолько больше. Только для ВЫРЕЗА:
+  // остальная геометрия (изгиб, деление на регионы проёмом на всю длину) работает с настоящими
+  // размерами проёма S.ops — изгиб и это исключают друг друга на одной стороне, конфликта нет.
+  const opsHole=S.ops.map(o=>{
+    if(!o.otkosMode) return o;
+    let x=o.x,y=o.y,w=o.w,h=o.h;
+    if(otkosMode(o,'left')==='led'){ x-=LED_GAP; w+=LED_GAP; }
+    if(otkosMode(o,'right')==='led') w+=LED_GAP;
+    if(otkosMode(o,'top')==='led') h+=LED_GAP;
+    if(o.kind!=='door' && otkosMode(o,'bottom')==='led'){ y-=LED_GAP; h+=LED_GAP; }
+    return (x===o.x&&y===o.y&&w===o.w&&h===o.h) ? o : Object.assign({},o,{x,y,w,h});
+  });
+
   // Проём во всю длину полос рассекает область на независимые участки:
   // материал слева и справа от него не связан, сетку надо строить в каждом отдельно.
   const dividers=[];
-  S.ops.forEach(o=>{
+  opsHole.forEach(o=>{
     const [b0,bL]=oB(o), [a0,aL]=oA(o);
     if(b0<=1 && b0+bL>=along-1) dividers.push([a0,a0+aL]);
   });
@@ -830,7 +848,30 @@ function buildLayout(S){
       {i:0,region:st.region,start:st.start,w:pos-st.start,end:pos,segs:[],cuts:[]},
       {i:0,region:st.region,start:pos,w:st.end-pos,end:st.end,segs:[],cuts:[]});
   });
-  strips.forEach((st,k)=>{ st.i=k; });
+  strips.forEach((st,k)=>{ st.i=k; st.insetStart=0; st.insetEnd=0; });
+  // LED физически шире обычного соединителя (см. LED_GAP) — везде, где выбран LED-профиль,
+  // материал реально отступает от него. ВАЖНО: st.start/st.end/st.w здесь остаются номинальными
+  // (не режутся) — от них зависят стыки с проёмами, координаты вырезов и позиции самих стыков
+  // (joints ниже), а мы их же и опрашиваем на тип. Если сдвинуть st.end у стыка, помеченного
+  // LED, «под собой», у этого же стыка сменится номинальная позиция — и при следующем пересчёте
+  // jointSegMode перестанет находить свою же настройку по старому ключу (самоаннулирование).
+  // Поэтому фактическая нехватка материала копится отдельно в insetStart/insetEnd и вычитается
+  // только при формировании готовой детали (p.w) и координат её выреза — см. ниже по коду.
+  // Край стены — односторонний отступ (соседней детали с той стороны просто нет); стык между
+  // полосами — по 5 мм с каждой стороны, симметрично.
+  if(strips.length){
+    const edgeStartSide=vert?'left':'bot', edgeEndSide=vert?'right':'top';
+    if(S.edges&&edgeMode(S.edges[edgeStartSide])==='led') strips[0].insetStart+=LED_GAP;
+    if(S.edges&&edgeMode(S.edges[edgeEndSide])==='led') strips[strips.length-1].insetEnd+=LED_GAP;
+    for(let k=0;k<strips.length-1;k++){
+      const a=strips[k], b=strips[k+1];
+      if(b.region!==a.region) continue;   // проём-разделитель — там стыка нет вовсе
+      // тип стыка — одно значение на всю границу (ширина куска не может «плыть» по высоте),
+      // берём как представительную точку начало координат вдоль полосы, как и остальной код
+      const mode=S.jointModeV?S.jointModeV(a.end,0):'cap';
+      if(mode==='led'){ a.insetEnd+=LED_GAP/2; b.insetStart+=LED_GAP/2; }
+    }
+  }
   // Изгиб панели («развёртка»): бок проёма без отдельной детали откоса — вместо неё соседняя
   // деталь физически шире/длиннее на глубину откоса. «Лево/право» и «верх/низ» — это ВСЕГДА
   // физические стороны проёма (x- и y-ось соответственно), а не «поперёк/вдоль полосы» — эти
@@ -876,7 +917,7 @@ function buildLayout(S){
   });
   strips.forEach(st=>{
     const gaps=[];
-    S.ops.forEach((o,oi)=>{
+    opsHole.forEach((o,oi)=>{
       const [a0,aL]=oA(o),[b0,bL]=oB(o);
       if(a0<=st.start+1 && a0+aL>=st.end-1){ gaps.push([b0,b0+bL]); return; }
       const x0=Math.max(st.start,a0), x1=Math.min(st.end,a0+aL);
@@ -921,14 +962,29 @@ function buildLayout(S){
     st.segs.forEach((sg,si)=>{
       const bounds=[sg[0],...splitSeg(sg[0],sg[1],st.i),sg[1]];
       for(let k=0;k<bounds.length-1;k++){
-        const from=bounds[k], to=bounds[k+1], len=to-from;
+        let from=bounds[k], to=bounds[k+1];
+        // LED-соединитель на горизонтальном стыке — тот же принцип, что и у вертикального:
+        // проверяем режим ПО НОМИНАЛЬНОЙ границе (bounds[k]/bounds[k+1]), затем отступаем внутрь
+        // куска на половину зазора. Границы сегмента (k==0 / последняя) — это край стены или
+        // проёма, а не стык между кусками, туда это не относится.
+        if(k>0 && (S.jointModeH?S.jointModeH(bounds[k],st.start):'cap')==='led') from+=LED_GAP/2;
+        if(k<bounds.length-2 && (S.jointModeH?S.jointModeH(bounds[k+1],st.start):'cap')==='led') to-=LED_GAP/2;
+        const len=to-from;
         if(len<=0.5) continue;
-        if(k>0) seams.push({strip:st.i, pos:from, a0:st.start, a1:st.end});
-        const p={strip:st.i,len,w:st.w,from,to,cuts:[],
+        if(k>0) seams.push({strip:st.i, pos:bounds[k], a0:st.start, a1:st.end});
+        // ширина детали и координата выреза по ширине — с поправкой на LED-отступы полосы
+        // (insetStart/insetEnd, см. выше): локальный ноль детали сдвигается вместе с материалом,
+        // а сам вырез подрезается по НОВОЙ (уменьшенной) ширине с обеих сторон — точно так же,
+        // как по длине уже клипуется by/bh по [from,to]; иначе при отступе с «дальней» стороны
+        // (insetEnd) вырез мог остаться шире, чем стала деталь
+        const pw=st.w-st.insetStart-st.insetEnd;
+        const p={strip:st.i,len,w:pw,from,to,cuts:[],
           label:'П'+(st.i+1)+((st.segs.length>1||bounds.length>2)?'.'+(si+k+1):'')};
         st.cuts.forEach(c=>{
           const y0=Math.max(from,c.b0), y1=Math.min(to,c.b0+c.bL);
-          if(y1-y0>1) p.cuts.push({op:c.op,ax:c.ax,aw:c.aw,by:y0-from,bh:y1-y0});
+          if(y1-y0<=1) return;
+          const x0=Math.max(0,c.ax-st.insetStart), x1=Math.min(pw,c.ax-st.insetStart+c.aw);
+          if(x1-x0>1) p.cuts.push({op:c.op,ax:x0,aw:x1-x0,by:y0-from,bh:y1-y0});
         });
         pieces.push(p);
       }
@@ -1572,7 +1628,11 @@ function applyManual(sheets,mv,G,pl,pw,shelfList){
 function wallS(G,w){
   return Object.assign({},G,{W:w.W,H:w.H,ceil:w.ceil,rowH:w.rowH||0,
     userSeams:(w.seamsU||[]).map(x=>x.pos),userVSeams:(w.vseamsU||[]).map(x=>x.pos),ops:w.ops,
-    edges:w.edges,cout:w.cout,cin:w.cin});
+    edges:w.edges,cout:w.cout,cin:w.cin,
+    // резолверы типа стыка для геометрии (LED-соединитель физически шире, см. LED_GAP в buildLayout) —
+    // те же jointSegMode/jointSegKey, что использует и остальной проект для сметы/подсветки линий
+    jointModeH:(pos,segStart)=>jointSegMode(w,G,'h',pos,segStart),
+    jointModeV:(pos,segStart)=>jointSegMode(w,G,'v',pos,segStart)});
 }
 // ---- Режим стыка по отрезкам: 'cap' (соединитель) | 'butt' (встык, профиль не считается) | 'led' ----
 // Ключ отрезка стабилен, пока не меняется геометрия стены (позиция стыка + начало отрезка).

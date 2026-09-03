@@ -146,9 +146,10 @@ def grab(n):
             if st and d==0: return js[i:j+1]
         j += 1
 funcs = '\n\n'.join(grab(n) for n in names)
-# jointSegKey и otkosMode — однострочные const, вытаскиваются отдельно:
+# jointSegKey, otkosMode, LED_GAP — однострочные const, вытаскиваются отдельно:
 i = js.index('const jointSegKey='); j = js.index('\n', i); jsk = js[i:j]
 i = js.index('const otkosMode=');   j = js.index('\n', i); otm = js[i:j]
+i = js.index('const LED_GAP=');     j = js.index('\n', i); ledgap = js[i:j]
 pres = s[s.index('const PRESETS') : s.index('const matColor')]
 extra = ("const edgeMode=v=>v===true?'cap':(v===false||v==null)?'none':v;\n"
          "const insideRect=(r,h,tol)=>r.x>=h.x-tol&&r.y>=h.y-tol&&"
@@ -157,7 +158,7 @@ mod = ('"use strict";\n'
        'const fmt=(v,d=0)=>Number(v).toLocaleString("ru-RU",{minimumFractionDigits:d,maximumFractionDigits:d});\n'
        'const m2=(a,b)=>(a*b)/1e6;\n'
        'const PSU_NOMINALS=[12,24,36,48,60,100,150,200,250,300,350,400,500];\n'
-       + extra + '\n' + jsk + '\n' + otm + '\n' + pres + '\n' + funcs +
+       + extra + '\n' + jsk + '\n' + otm + '\n' + ledgap + '\n' + pres + '\n' + funcs +
        '\n\nmodule.exports={compute,computeProject,applyManual,jointSegKey,jointSegMode,otkosMode,rotateCuts,holeRects,buildLayout,wallS,PRESETS};\n')
 io.open('core.js', 'w', encoding='utf-8').write(mod)
 ```
