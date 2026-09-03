@@ -291,6 +291,36 @@ for(let t=0;t<N;t++){
     if(R.led) chk('L50',Math.abs(R.led.auto-expectedAuto)<0.01,`${id}: авто-лента ${R.led.auto} != ${expectedAuto}`);
     else chk('L50',expectedAuto<0.0005,`${id}: LED-профили есть (${expectedAuto}м), а R.led=null`);
   }
+  // L150-152 (нов): несколько БП вместо одного нереального номинала. Суммарная мощность
+  // psuCount×psuW обязана покрывать реальную потребность need, psuW — стандартный номинал,
+  // а psuCount — минимально возможное число единиц (меньшим числом не покрыть потребность
+  // даже самым крупным доступным номиналом).
+  if(R.led){
+    const maxNom=C.PSU_NOMINALS[C.PSU_NOMINALS.length-1];
+    chk('L150',R.led.psuCount*R.led.psuW>=R.led.need-0.01,
+      `${id}: БП суммарно ${R.led.psuCount}×${R.led.psuW}=${R.led.psuCount*R.led.psuW} < потребности ${R.led.need}`);
+    chk('L151',C.PSU_NOMINALS.includes(R.led.psuW),`${id}: номинал БП ${R.led.psuW} не из стандартного ряда`);
+    chk('L152',R.led.psuCount===1||(R.led.psuCount-1)*maxNom<R.led.need-0.01,
+      `${id}: БП ${R.led.psuCount} шт избыточно — хватило бы ${R.led.psuCount-1}`);
+  }
+  // L153 (нов): обычные случайные стены почти никогда не набирают на несколько БП сами —
+  // принудительно большая лента (ручная добавка, 50-350м), чтобы реально прогнать ветку
+  // psuCount>1, а не только пассивно проверять её на сценариях, где она не сработала.
+  if(rand()<0.3){
+    const bigLen=50+rand()*300;
+    const Gx=Object.assign({},G,{ledLen:bigLen});
+    const wSimple={W:3000,H:2300,ceil:3000,rowH:0,ops:[],seamsU:[],seamSeq:0,vseamsU:[],vseamSeq:0,
+      jointsVLed:[],edges:{top:'none',bot:'none',left:'none',right:'none'},cout:0,cin:0,jointModes:{}};
+    let Rx;
+    try{ Rx=C.computeProject(Gx,[wSimple]); }
+    catch(e){ FAIL++; if(bugs.length<30) bugs.push('CRASH-PSUBIG #'+t+' :: '+e.message); Rx=null; }
+    if(Rx&&Rx.led){
+      const maxNom=C.PSU_NOMINALS[C.PSU_NOMINALS.length-1];
+      chk('L153a',Rx.led.psuCount>1,`${id}: большая лента ${bigLen.toFixed(1)}м не потребовала нескольких БП (psuCount=${Rx.led.psuCount})`);
+      chk('L153b',Rx.led.psuCount*Rx.led.psuW>=Rx.led.need-0.01,`${id}: БП недостаточно для большой ленты`);
+      chk('L153c',Rx.led.psuCount===1||(Rx.led.psuCount-1)*maxNom<Rx.led.need-0.01,`${id}: БП избыточно для большой ленты`);
+    }
+  }
   // L51 (нов): не должно быть задвоения длины одного шва в двух профилях сразу —
   // сумма jointV(продольные)+jointH(поперечные)+ledjoint(оба вида) не может превышать
   // теоретический максимум всех продольных И поперечных швов проекта вместе

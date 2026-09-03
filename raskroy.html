@@ -266,7 +266,10 @@ tbody tr:hover td{background:var(--surface)}
         <div class="f"><label>Доп. лента вручную</label><input type="number" id="i-ledlen" value="0" step="0.1"><span class="unit">м</span></div>
         <div class="f"><label>Мощность ленты</label><input type="number" id="i-ledw" value="14.4" step="0.1"><span class="unit">Вт/м</span></div>
       </div>
-      <div class="row row-1"><div class="f"><label>Запас БП</label><input type="number" id="i-psur" value="30"><span class="unit">%</span></div></div>
+      <div class="row">
+        <div class="f"><label>Запас БП</label><input type="number" id="i-psur" value="30"><span class="unit">%</span></div>
+        <div class="f"><label>Температура свечения</label><select id="i-ledtemp"></select></div>
+      </div>
     </div>
   </section>
   <section class="sect" data-sect>
@@ -385,6 +388,14 @@ const PRESETS = [
 const MATCOLORS={bamboo29:'var(--mat-bamboo29)',marble:'var(--mat-marble)',slat:'var(--mat-slat)',rockL:'var(--mat-rockL)',rockS:'var(--mat-rockS)',custom:'var(--mat-custom)'};
 const matColor=id=>MATCOLORS[id]||'var(--mat-custom)';
 const PSU_NOMINALS = [12,24,36,48,60,100,150,200,250,300,350,400,500];
+// цветовая температура LED-подсветки — одна настройка на проект, справочная (в расчёт не входит)
+const LED_TEMPS = [
+  {k:2700, name:'2700К, тёплый белый'},
+  {k:3000, name:'3000К, тёплый белый'},
+  {k:4000, name:'4000К, нейтральный белый'},
+  {k:6000, name:'6000К, холодный белый'},
+  {k:6500, name:'6500К, дневной белый'},
+];
 
 const $ = s => document.querySelector(s);
 const num = id => { const v = parseFloat($(id).value); return isFinite(v) ? v : 0; };
@@ -558,8 +569,11 @@ function renderLedSummary(R){
     el.innerHTML='<p class="hint" style="margin:0 0 8px">Подсветка сейчас не выбрана — нигде нет краёв «LED-стартовый» и подсвеченных стыков.</p>';
     return;
   }
+  const psuTxt=R.led.psuCount>1?`${R.led.psuCount}× блок питания ${R.led.psuW} Вт`:`блок питания ${R.led.psuW} Вт`;
+  const tempTxt=(LED_TEMPS.find(t=>t.k===R.led.temp)||{}).name;
   el.innerHTML=`<p class="hint" style="margin:0 0 8px"><b style="color:var(--paper)">${fmt(R.led.len,1)} м ленты</b>`+
-    ` · нагрузка ${fmt(R.led.watt,0)} Вт · блок питания ${R.led.psuW} Вт`+
+    (tempTxt?` · ${tempTxt}`:'')+
+    ` · нагрузка ${fmt(R.led.watt,0)} Вт · ${psuTxt}`+
     (R.led.auto>0&&R.led.manual>0?` <span style="color:var(--muted)">(${fmt(R.led.auto,1)} из профилей + ${fmt(R.led.manual,1)} вручную)</span>`:'')+
     `</p>`;
 }
@@ -1387,7 +1401,7 @@ function collect(){
     stock:num('#i-stock'),
     jointV:chk('#i-joint-v'), jointH:chk('#i-joint-h'), edgeOps:chk('#i-edgeops'),
     tubesPerSheet:num('#i-glue'), glueR:num('#i-gluer'),
-    ledLen:num('#i-ledlen'), ledW:num('#i-ledw'), psuR:num('#i-psur'),
+    ledLen:num('#i-ledlen'), ledW:num('#i-ledw'), psuR:num('#i-psur'), ledTemp:num('#i-ledtemp'),
     price:{panel:num('#p-panel'),glue:num('#p-glue'),edge:num('#p-edge'),joint:num('#p-joint'),
            cout:num('#p-cout'),cin:num('#p-cin'),ledstart:num('#p-ledprof'),ledjoint:num('#p-ledjoint'),
            led:num('#p-led'),psu:num('#p-psu'),markup:num('#p-markup')},
@@ -1958,8 +1972,14 @@ function computeProject(G,walls,manual,cornerLinks){
   const ledTotal=ledAutoM+(G.ledLen>0?G.ledLen:0);
   if(ledTotal>0.01){
     const need=ledTotal*G.ledW*(1+G.psuR/100);
-    const psuW=PSU_NOMINALS.find(n=>n>=need)||Math.ceil(need/100)*100;
-    led={len:ledTotal,auto:ledAutoM,manual:G.ledLen,watt:ledTotal*G.ledW,need,psuW};
+    // несколько одинаковых БП вместо одного нереального «на всю нагрузку»: делим потребность на
+    // минимальное число блоков максимального номинала (500 Вт), затем берём наименьший номинал,
+    // которого хватает на ОДНУ такую долю — psuCount*psuW гарантированно >= need (см. audit L150)
+    const maxNom=PSU_NOMINALS[PSU_NOMINALS.length-1];
+    const psuCount=Math.max(1,Math.ceil(need/maxNom-1e-9));
+    const psuW=PSU_NOMINALS.find(n=>n>=need/psuCount-1e-9);
+    led={len:ledTotal,auto:ledAutoM,manual:G.ledLen,watt:ledTotal*G.ledW,need,psuW,psuCount,
+         psuTotalW:psuW*psuCount,temp:G.ledTemp};
   }
 
   const fillArea=fills.reduce((a,f)=>a+f.area,0);
@@ -2455,8 +2475,9 @@ function renderSpec(G,R){const S=G;
   rows.push(['GROUP:Расходники и подсветка','','']);
   rows.push(['Клей «жидкие гвозди»', R.tubes+' туб', `${R.glueDetail} · приклеивается ${fmt(R.glueArea,2)} м²`]);
   if(R.led){
-    rows.push(['LED-лента', fmt(R.led.len,1)+' м', `${R.led.auto>0?`из профилей ${fmt(R.led.auto,1)} м`:''}${R.led.manual>0?`${R.led.auto>0?' + ':''}вручную ${fmt(R.led.manual,1)} м`:''} · ${fmt(S.ledW,1)} Вт/м · ${fmt(R.led.watt,0)} Вт`]);
-    rows.push(['Блок питания', `1 шт · ${R.led.psuW} Вт`, `нужно ${fmt(R.led.need,0)} Вт с запасом ${fmt(S.psuR)}%`]);
+    const tempTxt=(LED_TEMPS.find(t=>t.k===R.led.temp)||{}).name;
+    rows.push(['LED-лента', fmt(R.led.len,1)+' м', `${R.led.auto>0?`из профилей ${fmt(R.led.auto,1)} м`:''}${R.led.manual>0?`${R.led.auto>0?' + ':''}вручную ${fmt(R.led.manual,1)} м`:''} · ${fmt(S.ledW,1)} Вт/м · ${fmt(R.led.watt,0)} Вт${tempTxt?' · '+tempTxt:''}`]);
+    rows.push(['Блок питания', `${R.led.psuCount} шт × ${R.led.psuW} Вт`, `нужно ${fmt(R.led.need,0)} Вт с запасом ${fmt(S.psuR)}% · суммарно ${fmt(R.led.psuTotalW,0)} Вт`]);
   }
   $('#spec').innerHTML=`<thead><tr><th>Позиция</th><th class="num">Кол-во</th><th>Примечание</th></tr></thead><tbody>`+
     rows.map(r=>{
@@ -2474,7 +2495,7 @@ function renderEstimate(G,R){const S=G;
   const grp={}; R.prof.forEach(p=>{(grp[p.group]=grp[p.group]||[]).push(p);});
   gOrder.forEach(g=>{ (grp[g]||[]).forEach(p=>add(p.name,p.sticks,'хл',p.price)); });
   add('Клей «жидкие гвозди»',R.tubes,'туба',S.price.glue);
-  if(R.led){ add('LED-лента',Math.ceil(R.led.len),'м',S.price.led); add(`Блок питания ${R.led.psuW} Вт`,1,'шт',S.price.psu); }
+  if(R.led){ add('LED-лента',Math.ceil(R.led.len),'м',S.price.led); add(`Блок питания ${R.led.psuW} Вт`,R.led.psuCount,'шт',S.price.psu); }
   const sub=rows.reduce((a,r)=>a+r.s,0), mk=sub*S.price.markup/100;
   $('#estimate').innerHTML=`<thead><tr><th>Наименование</th><th class="num">Кол-во</th><th class="num">Цена</th><th class="num">Сумма</th></tr></thead><tbody>`+
     rows.map(r=>`<tr><td>${esc(r.n)}</td><td class="num">${fmt(r.q)} ${r.u}</td><td class="num dim">${money(r.p)}</td><td class="num">${money(r.s)}</td></tr>`).join('')+
@@ -2500,7 +2521,7 @@ function renderCards(G,R){const S=G;
       <div class="card-sub">${R.glueDetail}</div></div>
     ${R.led?`<div class="card"><div class="card-k">LED</div>
       <div class="card-v">${fmt(R.led.len,1)}<small>м</small></div>
-      <div class="card-sub">БП ${R.led.psuW} Вт · нагрузка ${fmt(R.led.watt,0)} Вт</div></div>`:''}`;
+      <div class="card-sub">БП ${R.led.psuCount>1?R.led.psuCount+'×':''}${R.led.psuW} Вт · нагрузка ${fmt(R.led.watt,0)} Вт</div></div>`:''}`;
 }
 function renderNotes(G,R){
   const n=[]; const multi=walls.length>1;
@@ -2584,6 +2605,7 @@ function run(){
   renderCuts(G,R); renderSpec(G,R); renderEstimate(G,R); renderJointsV(R); renderLedSummary(R);
 }
 $('#i-preset').innerHTML=PRESETS.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+$('#i-ledtemp').innerHTML=LED_TEMPS.map(t=>`<option value="${t.k}"${t.k===4000?' selected':''}>${t.name}</option>`).join('');
 $('#i-preset').addEventListener('change',()=>{
   const p=PRESETS.find(x=>x.id===$('#i-preset').value);
   if(p&&p.id!=='custom'){ $('#i-pl').value=p.pl; $('#i-pw').value=p.pw; $('#p-panel').value=p.price; $('#i-glue').value=p.tubesPerSheet; }
