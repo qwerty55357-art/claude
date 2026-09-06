@@ -250,12 +250,12 @@ tbody tr:hover td{background:var(--surface)}
       <p class="hint">Всё про свет — в одном месте. Быстрее переключать прямо на схеме: клик по краю стены или по линии стыка открывает то же меню на месте.</p>
       <label class="sub-l">Края стены</label>
       <div class="row">
-        <div class="f"><label>Верх</label><select id="i-e-top" class="edge-sel"><option value="none">— нет</option><option value="cap" selected>Заглушка</option><option value="led">LED-стартовый</option></select></div>
-        <div class="f"><label>Низ</label><select id="i-e-bot" class="edge-sel"><option value="none" selected>— нет</option><option value="cap">Заглушка</option><option value="led">LED-стартовый</option></select></div>
+        <div class="f"><label>Верх</label><select id="i-e-top" class="edge-sel"><option value="none">— нет</option><option value="cap" selected>Заглушка</option><option value="led" disabled>LED-стартовый (только рисованием, см. раздел «LED»)</option></select></div>
+        <div class="f"><label>Низ</label><select id="i-e-bot" class="edge-sel"><option value="none" selected>— нет</option><option value="cap">Заглушка</option><option value="led" disabled>LED-стартовый (только рисованием, см. раздел «LED»)</option></select></div>
       </div>
       <div class="row">
-        <div class="f"><label>Слева</label><select id="i-e-left" class="edge-sel"><option value="none">— нет</option><option value="cap" selected>Заглушка</option><option value="led">LED-стартовый</option></select></div>
-        <div class="f"><label>Справа</label><select id="i-e-right" class="edge-sel"><option value="none">— нет</option><option value="cap" selected>Заглушка</option><option value="led">LED-стартовый</option></select></div>
+        <div class="f"><label>Слева</label><select id="i-e-left" class="edge-sel"><option value="none">— нет</option><option value="cap" selected>Заглушка</option><option value="led" disabled>LED-стартовый (только рисованием, см. раздел «LED»)</option></select></div>
+        <div class="f"><label>Справа</label><select id="i-e-right" class="edge-sel"><option value="none">— нет</option><option value="cap" selected>Заглушка</option><option value="led" disabled>LED-стартовый (только рисованием, см. раздел «LED»)</option></select></div>
       </div>
       <label class="sub-l">Вертикальные стыки активной стены</label>
       <div id="jointsv-list"></div>
@@ -570,7 +570,7 @@ function renderJointsV(R){
           <select data-jvpos="${Math.round(j.pos)}" data-jvseg="${Math.round(sg[0])}">
             <option value="cap"${cur==='cap'?' selected':''}>Соединитель</option>
             <option value="butt"${cur==='butt'?' selected':''}>Встык (без профиля)</option>
-            <option value="led"${cur==='led'?' selected':''}>LED-соединитель</option>
+            <option value="led"${cur==='led'?' selected':''} disabled>LED-соединитель (только рисованием, см. раздел «LED»)</option>
           </select>
         </div>
       </div>`);
@@ -900,7 +900,7 @@ function otkosSideSelect(o,side,label){
     <optgroup label="Без откоса (напр. подоконник)">
       <option value="none"${cur==='none'?' selected':''}>Открытый край, без профиля</option>
       <option value="cap"${cur==='cap'?' selected':''}>Заглушка на краю панели</option>
-      <option value="led"${cur==='led'?' selected':''}>LED-профиль на краю панели</option>
+      <option value="led"${cur==='led'?' selected':''} disabled>LED-профиль на краю панели (только рисованием, см. раздел «LED»)</option>
     </optgroup>
   </select>
   ${seamable?`<input type="text" data-k="otkosSeam" data-side="${side}" value="${esc(seamVal)}" placeholder="шов авто (мм от ${side==='left'||side==='right'?'пола':'левого края'})" style="margin-top:4px" title="Позиция шва, если деталь придётся стыковать. Пусто — автоматически.">`:''}
@@ -3295,7 +3295,10 @@ $('#btn-print').addEventListener('click',()=>window.print());
     };
     menuBtn(menu,'Соединитель',cur==='cap',()=>setMode('cap'));
     menuBtn(menu,'Встык (без профиля)',cur==='butt',()=>setMode('butt'));
-    menuBtn(menu,'LED-соединитель',cur==='led',()=>setMode('led'));
+    // LED здесь больше не выбирается напрямую — только протяжкой мышью в разделе «LED»
+    // (см. wallLedGraph/ledCircuits); если уже стоит (старые данные или уже нарисовано) — просто
+    // показываем это, не давая случайно выбрать заново тем же кликом мимо контура
+    if(cur==='led') menuDivider(menu,'Сейчас: LED (меняется в разделе «LED»)');
     const sm=(w.seamsU||[]).find(x=>Math.abs(x.pos-pos)<2);
     if(sm) menuBtn(menu,'Удалить стык',false,()=>{
       w.seamsU=(w.seamsU||[]).filter(x=>x.id!==sm.id);
@@ -3315,7 +3318,7 @@ $('#btn-print').addEventListener('click',()=>window.print());
     };
     menuBtn(menu,'Соединитель',cur==='cap',()=>setMode('cap'));
     menuBtn(menu,'Встык (без профиля)',cur==='butt',()=>setMode('butt'));
-    menuBtn(menu,'LED-соединитель',cur==='led',()=>setMode('led'));
+    if(cur==='led') menuDivider(menu,'Сейчас: LED (меняется в разделе «LED»)');
     const sm=(w.vseamsU||[]).find(x=>Math.abs(x.pos-pos)<2);
     if(sm) menuBtn(menu,'Удалить стык',false,()=>{
       w.vseamsU=(w.vseamsU||[]).filter(x=>x.id!==sm.id);
@@ -3328,12 +3331,13 @@ $('#btn-print').addEventListener('click',()=>window.print());
     const names={top:'Верх',bot:'Низ',left:'Слева',right:'Справа'};
     const menu=menuShell(ev,`Край · ${names[side]||side}`);
     const cur=edgeMode(w.edges[side]);
-    [['none','— нет'],['cap','Заглушка'],['led','LED-стартовый']].forEach(([val,label])=>{
+    [['none','— нет'],['cap','Заглушка']].forEach(([val,label])=>{
       menuBtn(menu,label,cur===val,()=>{
         w.edges[side]=val;
         closeMatMenu(); wallToForm(); run();
       });
     });
+    if(cur==='led') menuDivider(menu,'Сейчас: LED (меняется в разделе «LED»)');
   }
   function showOtkosMenu(ev,opId,side){
     const w=AW(); const o=w.ops.find(x=>x.id==opId); if(!o) return;
@@ -3348,12 +3352,13 @@ $('#btn-print').addEventListener('click',()=>window.print());
       });
     });
     menuDivider(menu,'Без откоса (напр. подоконник)');
-    [['none','Открытый край, без профиля'],['cap','Заглушка на краю панели'],['led','LED-профиль на краю панели']].forEach(([val,label])=>{
+    [['none','Открытый край, без профиля'],['cap','Заглушка на краю панели']].forEach(([val,label])=>{
       menuBtn(menu,label,cur===val,()=>{
         o.otkosMode=o.otkosMode||{}; o.otkosMode[side]=val;
         closeMatMenu(); renderOpenings(); run();
       });
     });
+    if(cur==='led') menuDivider(menu,'Сейчас: LED (меняется в разделе «LED»)');
     // индивидуальный материал ЭТОЙ стороны откоса — только если сторона вообще режется из
     // материала (corner/butt/protrude); при «изгибе»/«нет»/«заглушке»/«led» отдельной детали нет вовсе
     if(cur==='corner'||cur==='butt'||cur==='protrude'){
