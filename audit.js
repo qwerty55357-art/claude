@@ -235,8 +235,9 @@ for(let t=0;t<N;t++){
   // L70 (нов): площадь «откосов» честно учитывает изгиб — она равна сумме depth×len
   // по ВСЕМ сторонам с материалом откоса (corner/butt/bend/protrude) — «нет»/«заглушка»/«led»
   // на краю материала не расходуют вообще, только профиль. «Выступающий» (protrude) добавляет
-  // вылет накладки (otkosOverlap) к глубине именно на СВОИХ сторонах — та же depOf-логика,
-  // что и в buildOtkosParts.
+  // вылет накладки (otkosOverlap) к глубине именно на СВОИХ сторонах (depOf), а у верх/низ ещё и
+  // к ДЛИНЕ — Т-стык: они перекрывают торцы лев/прав, если та тоже «выступающая» (lenOf), та же
+  // логика, что и в buildOtkosParts.
   {
     let expArea=0;
     wallsArr.forEach(w=>w.ops.forEach(o=>{
@@ -244,15 +245,45 @@ for(let t=0;t<N;t++){
       const m=k=>(o.otkosMode&&o.otkosMode[k])||'corner';
       const has=v=>v==='corner'||v==='butt'||v==='bend'||v==='protrude';
       const depOf=k=>o.depth+(m(k)==='protrude'?(o.otkosOverlap||0):0);
-      if(has(m('left')))  expArea+=(depOf('left')*o.h)/1e6;
-      if(has(m('right'))) expArea+=(depOf('right')*o.h)/1e6;
-      if(has(m('top')))   expArea+=(depOf('top')*o.w)/1e6;
-      if(o.kind!=='door' && has(m('bottom'))) expArea+=(depOf('bottom')*o.w)/1e6;
+      const lenOf=k=>{
+        if(k==='left'||k==='right') return o.h;
+        const ov=o.otkosOverlap||0;
+        const extL=m('left')==='protrude'?ov:0, extR=m('right')==='protrude'?ov:0;
+        return o.w+(m(k)==='protrude'?extL+extR:0);
+      };
+      if(has(m('left')))  expArea+=(depOf('left')*lenOf('left'))/1e6;
+      if(has(m('right'))) expArea+=(depOf('right')*lenOf('right'))/1e6;
+      if(has(m('top')))   expArea+=(depOf('top')*lenOf('top'))/1e6;
+      if(o.kind!=='door' && has(m('bottom'))) expArea+=(depOf('bottom')*lenOf('bottom'))/1e6;
     }));
     // неразмещённые (failed) детали НЕ входят в otkosArea — вычитаем их площадь из ожидания
     const failedArea=R.failed.reduce((a,f)=>a+(f.dep*f.len)/1e6,0);
     chk('L70',Math.abs(R.otkosArea-(expArea-failedArea))<0.01,
       `${id}: otkosArea ${R.otkosArea.toFixed(3)} != ожидаемой ${(expArea-failedArea).toFixed(3)}`);
+  }
+  // L73 (нов): «заглушка примыкания к раме» — на каждую сторону с материалом или изгибом
+  // (corner/butt/bend/protrude), длиной lenOf — у «выступающих» верх/низ она длиннее на Т-стык
+  // (см. buildOtkosParts и effOps-блок в computeProject).
+  {
+    let expFrame=0;
+    wallsArr.forEach(w=>w.ops.forEach(o=>{
+      if(!o.otkos||!(o.depth>0)) return;
+      const m=k=>(o.otkosMode&&o.otkosMode[k])||'corner';
+      const has=v=>v==='corner'||v==='butt'||v==='bend'||v==='protrude';
+      const lenOf=k=>{
+        if(k==='left'||k==='right') return o.h;
+        const ov=o.otkosOverlap||0;
+        const extL=m('left')==='protrude'?ov:0, extR=m('right')==='protrude'?ov:0;
+        return o.w+(m(k)==='protrude'?extL+extR:0);
+      };
+      if(has(m('left')))  expFrame+=lenOf('left');
+      if(has(m('right'))) expFrame+=lenOf('right');
+      if(has(m('top')))   expFrame+=lenOf('top');
+      if(o.kind!=='door' && has(m('bottom'))) expFrame+=lenOf('bottom');
+    }));
+    const frameProf=R.prof.find(p=>p.key==='frame');
+    chk('L73',Math.abs((frameProf?frameProf.total:0)-expFrame)<1,
+      `${id}: frame ${frameProf?frameProf.total:0} != ${expFrame}`);
   }
   // L72 (нов): «заглушка на краю» и «LED на краю» без откоса — попадают именно в ops/ledstart,
   // сумма длин совпадает (вместе со старым источником ops — торцы проёмов без откоса вообще),
@@ -463,7 +494,14 @@ for(let t=0;t<N;t++){
           if(side==='bottom'&&o.kind==='door') continue;
           const m=(o.otkosMode&&o.otkosMode[side])||'corner';
           if(m!=='corner'&&m!=='butt'&&m!=='protrude') continue;
-          const len=(side==='left'||side==='right')?o.h:o.w;
+          // Т-стык: верх/низ «выступающий» длиннее на вылет накладки с каждого конца, где
+          // соседняя лев/прав тоже «выступающая» — та же lenOf-логика, что в buildOtkosParts
+          const sideMode=k=>(o.otkosMode&&o.otkosMode[k])||'corner';
+          let len=(side==='left'||side==='right')?o.h:o.w;
+          if((side==='top'||side==='bottom')&&m==='protrude'){
+            const ov=o.otkosOverlap||0;
+            len+=(sideMode('left')==='protrude'?ov:0)+(sideMode('right')==='protrude'?ov:0);
+          }
           if(len>G.pl){ cand={wi,oi,side,len}; break outer; }
         }
       }
@@ -722,7 +760,14 @@ for(let t=0;t<N;t++){
         const f=R2.fills.find(x=>x.kind==='otkos'&&x.matColorId===mat.id);
         chk('L161',!!f,`${id}: не найден fill kind:'otkos' для материала ${mat.id}`);
         if(f){
-          const nomLen=(c.side==='left'||c.side==='right')?c.o.h:c.o.w;
+          // Т-стык: верх/низ «выступающий» длиннее на вылет накладки с каждого конца, где
+          // соседняя лев/прав тоже «выступающая» (см. buildOtkosParts/L70)
+          const sideMode=k=>(c.o.otkosMode&&c.o.otkosMode[k])||'corner';
+          let nomLen=(c.side==='left'||c.side==='right')?c.o.h:c.o.w;
+          if((c.side==='top'||c.side==='bottom')&&c.m==='protrude'){
+            const ov=c.o.otkosOverlap||0;
+            nomLen+=(sideMode('left')==='protrude'?ov:0)+(sideMode('right')==='protrude'?ov:0);
+          }
           const nomDep=c.o.depth+(c.m==='protrude'?(c.o.otkosOverlap||0):0);
           const nomArea=nomDep*nomLen;
           const placedArea=f.sheets.reduce((a,sh)=>a+sh.otk.filter(x=>nameMatch(x.name))

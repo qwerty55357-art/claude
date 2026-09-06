@@ -1246,12 +1246,23 @@ function buildOtkosParts(S){
     // от края, обращённого в проём (см. cutmapSvg)
     const depOf=k=>o.depth+(otkosMode(o,k)==='protrude'?(o.otkosOverlap||0):0);
     const overlapOf=k=>otkosMode(o,k)==='protrude'?(o.otkosOverlap||0):0;
+    // угол выступающих накладок — Т-стык: верх/низ длиннее и перекрывают торцы левой/правой
+    // накладки (те остаются простыми прямоугольниками высотой o.h, без запила под 45°) —
+    // с любого конца, где СОСЕДНЯЯ вертикальная сторона тоже «выступающая», к длине верх/низ
+    // прибавляется вылет накладки; если сосед не «выступающий» — там обычный угол, длина как была
+    const lenOf=k=>{
+      if(k==='left'||k==='right') return o.h;
+      const ov=o.otkosOverlap||0;
+      const extL=otkosMode(o,'left')==='protrude'?ov:0;
+      const extR=otkosMode(o,'right')==='protrude'?ov:0;
+      return o.w+(otkosMode(o,k)==='protrude'?extL+extR:0);
+    };
     // ручной шов: позиции (мм от пола — лев/прав, от левого края — верх/низ), где стыковка неизбежна/выбрана
     const seamsOf=k=>((o.otkosSeamPos&&o.otkosSeamPos[k])||[]).filter(v=>Number.isFinite(v));
-    if(has('left'))   parts.push({name:t+'·лев', len:o.h, dep:depOf('left'), op:i, side:'left',  seamPos:seamsOf('left'), overlap:overlapOf('left'), revealDep:o.depth});
-    if(has('right'))  parts.push({name:t+'·прав',len:o.h, dep:depOf('right'), op:i, side:'right', seamPos:seamsOf('right'), overlap:overlapOf('right'), revealDep:o.depth});
-    if(has('top'))    parts.push({name:t+'·верх',len:o.w, dep:depOf('top'), op:i, side:'top',   seamPos:seamsOf('top'), overlap:overlapOf('top'), revealDep:o.depth});
-    if(o.kind!=='door' && has('bottom')) parts.push({name:t+'·низ',len:o.w, dep:depOf('bottom'), op:i, side:'bottom', seamPos:seamsOf('bottom'), overlap:overlapOf('bottom'), revealDep:o.depth});
+    if(has('left'))   parts.push({name:t+'·лев', len:lenOf('left'), dep:depOf('left'), op:i, side:'left',  seamPos:seamsOf('left'), overlap:overlapOf('left'), revealDep:o.depth});
+    if(has('right'))  parts.push({name:t+'·прав',len:lenOf('right'), dep:depOf('right'), op:i, side:'right', seamPos:seamsOf('right'), overlap:overlapOf('right'), revealDep:o.depth});
+    if(has('top'))    parts.push({name:t+'·верх',len:lenOf('top'), dep:depOf('top'), op:i, side:'top',   seamPos:seamsOf('top'), overlap:overlapOf('top'), revealDep:o.depth});
+    if(o.kind!=='door' && has('bottom')) parts.push({name:t+'·низ',len:lenOf('bottom'), dep:depOf('bottom'), op:i, side:'bottom', seamPos:seamsOf('bottom'), overlap:overlapOf('bottom'), revealDep:o.depth});
   });
   return parts;
 }
@@ -1878,7 +1889,15 @@ function computeProject(G,walls,manual,cornerLinks){
     // но голый торец САМОЙ ПАНЕЛИ на этой стороне всё равно можно закрыть заглушкой или LED,
     // даже если откоса там нет вообще (например, вместо него подоконник).
     effOps[i].forEach(o=>{ if(!o.otkos||!(o.depth>0)) return;
-      const sides=[['left',o.h],['right',o.h],['top',o.w]]; if(o.kind!=='door') sides.push(['bottom',o.w]);
+      // Т-стык: у «выступающих» верх/низ заглушка примыкания к раме идёт на всю (удлинённую)
+      // длину детали, а не только на ширину проёма — та же lenOf-логика, что в buildOtkosParts
+      const lenOf=k=>{
+        if(k==='left'||k==='right') return o.h;
+        const ov=o.otkosOverlap||0;
+        const extL=otkosMode(o,'left')==='protrude'?ov:0, extR=otkosMode(o,'right')==='protrude'?ov:0;
+        return o.w+(otkosMode(o,k)==='protrude'?extL+extR:0);
+      };
+      const sides=[['left',lenOf('left')],['right',lenOf('right')],['top',lenOf('top')]]; if(o.kind!=='door') sides.push(['bottom',lenOf('bottom')]);
       sides.forEach(([k,len])=>{
         const md=otkosMode(o,k);
         if(md==='cap'){ opsRuns.push(len); return; }
@@ -2227,14 +2246,18 @@ function schemeFor(G,R,wi){
       // вылета (o.otkosOverlap), чтобы было видно, СКОЛЬКО стены она перекроет, а не только что
       // сторона «выступающая» (это не отдельная замена панели — реальная накладка ложится вторым
       // слоем поверх неё, поэтому и на схеме это лишь полупрозрачная зона, а не вырез)
+      // угол — Т-стык: верх/низ длиннее и перекрывают торцы левой/правой накладки (та же схема,
+      // что и в buildOtkosParts) — растягиваем прямоугольник верх/низ в СТОРОНУ каждого соседнего
+      // угла, где соседняя вертикальная сторона тоже «выступающая»
+      const ov=o.otkosOverlap||0;
+      const extL=om('left')==='protrude'?ov:0, extR=om('right')==='protrude'?ov:0;
       const flangeRect=side=>{
-        if(om(side)!=='protrude') return '';
-        const ov=o.otkosOverlap||0; if(ov<=0) return '';
+        if(om(side)!=='protrude'||ov<=0) return '';
         let fx=x, fy=y, fw=o.w, fh=o.h;
         if(side==='left') { fx=x-ov; fw=ov; }
         else if(side==='right')  { fx=x+o.w; fw=ov; }
-        else if(side==='top')    { fy=y-ov; fh=ov; }
-        else if(side==='bottom') { fy=y+o.h; fh=ov; }
+        else if(side==='top')    { fy=y-ov; fh=ov; fx=x-extL; fw=o.w+extL+extR; }
+        else if(side==='bottom') { fy=y+o.h; fh=ov; fx=x-extL; fw=o.w+extL+extR; }
         // pointer-events:none — это декоративная подсказка поверх детали стены, клик по этой
         // зоне обязан по-прежнему попадать в кликабельный прямоугольник детали под ней (свой
         // материал детали), а не проваливаться в накладку без какого-либо обработчика
