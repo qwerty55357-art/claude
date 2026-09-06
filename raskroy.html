@@ -416,6 +416,15 @@ let walls=[], wallSeq=0, active=0;
 let manualMoves={};   // ручные перестановки на карте раскроя: {pool:{uid:{sheet,x,y}}}
 let LAST=null;        // последний расчёт — нужен drag'у карты
 let cornerLinks=[], cornerSeq=0;   // углы между стенами: {id,type:'out'|'in',aw,as,bw,bs} — bw='' значит «вне проекта»
+// LED-контуры: группировка уже отмеченных «led»-позиций (w.edges/w.jointModes/o.otkosMode)
+// в один физический отрезок ленты ради (а) суммарной длины/БП по контуру и (б) единого
+// способа реализации на весь отрезок. САМА разметка «здесь LED» не переезжает сюда —
+// остаётся на позициях, как раньше, чтобы не трогать уже проверенную аудитом геометрию
+// зазоров/отступов; контур — чисто оверлей поверх неё.
+// {id, kind:'joint'|'start'|'none', legs:[...]}, kind='none' — «без профиля» (щель есть,
+// но профиль на этот отрезок не покупается — длина ленты всё равно считается).
+// leg: {wall,el:'edge',side} | {wall,el:'jointV'|'jointH',pos,segStart} | {wall,el:'otkos',op,side}
+let ledCircuits=[], ledCircuitSeq=0;
 function newWall(){
   wallSeq++;
   return {id:wallSeq, name:'Стена '+wallSeq, W:4000, H:2300, ceil:2700, rowH:0,
@@ -445,6 +454,7 @@ $('#btn-del-wall').addEventListener('click',()=>{
   walls.splice(active,1); active=Math.max(0,active-1);
   // угол, ссылавшийся на удалённую стену одним концом, теряет смысл целиком — не превращаем в «вне проекта» молча
   cornerLinks=cornerLinks.filter(c=>c.aw!=deadId&&c.bw!=deadId);
+  ledCircuits=ledCircuits.map(c=>Object.assign({},c,{legs:c.legs.filter(l=>l.wall!=deadId)})).filter(c=>c.legs.length);
   renderWallTabs(); wallToForm(); renderOpenings(); renderCornerLinks(); run();
 });
 
@@ -1690,8 +1700,19 @@ function jointSegMode(w,G,kind,pos,segStart){
   const globalOn = kind==='v' ? G.jointV : G.jointH;
   return globalOn ? 'cap' : 'butt';
 }
-function computeProject(G,walls,manual,cornerLinks){
+// ---- LED-контуры: чистая группировка позиций, уже помеченных 'led' выше (см. объявление
+// ledCircuits) — ключ ножки контура совпадает по смыслу с jointSegKey/otkosMode-адресацией ----
+const ledLegKey=l=>l.el==='edge'?'edge|'+l.wall+'|'+l.side
+  :l.el==='otkos'?'otkos|'+l.wall+'|'+l.op+'|'+l.side
+  :l.el+'|'+l.wall+'|'+Math.round(l.pos)+'|'+Math.round(l.segStart);
+function ledCircuitOf(ledCircuits,leg){
+  const key=ledLegKey(leg);
+  for(const c of (ledCircuits||[])) if(c.legs.some(l=>ledLegKey(l)===key)) return c;
+  return null;
+}
+function computeProject(G,walls,manual,cornerLinks,ledCircuits){
   manual=manual||{};
+  ledCircuits=ledCircuits||[];
   cornerLinks=cornerLinks||[];
   const multi=walls.length>1;
   const tag=i=>'С'+(i+1);
@@ -1830,8 +1851,16 @@ function computeProject(G,walls,manual,cornerLinks){
     prof.push({key,name,runs:runs2,sticks:n.sticks,total:n.total,detail:n.detail,price,group:PGROUP[key]||'Прочее'});
   };
 
-  const capRuns=[], ledStartRuns=[], jvRuns=[], jhRuns=[], ledJointRuns=[], opsRuns=[], frameRuns=[];
+  const capRuns=[], ledStartRuns=[], jvRuns=[], jhRuns=[], ledJointRuns=[], ledPlainRuns=[], opsRuns=[], frameRuns=[];
   const cornerRuns={cout:[],cin:[]};
+  // LED-позиция может входить в контур (см. ledCircuits) — тогда способ реализации (старт/
+  // соединитель/без профиля) берётся из контура целиком, а не из типа позиции по умолчанию;
+  // без контура (старые данные, миграция) — прежнее поведение по умолчанию для этого типа позиции.
+  const ledDst=(leg,def)=>{
+    const c=ledCircuitOf(ledCircuits,leg);
+    const kind=c?c.kind:def;
+    return kind==='none'?ledPlainRuns:kind==='start'?ledStartRuns:ledJointRuns;
+  };
   walls.forEach((w,i)=>{
     const W=w.W,H=w.H,L=layouts[i];
     // край области: каждая сторона — нет / заглушка / LED-стартовый
@@ -1843,7 +1872,7 @@ function computeProject(G,walls,manual,cornerLinks){
     ];
     sides.forEach(([k,len,gaps])=>{
       const mode=edgeMode(w.edges[k]); if(mode==='none') return;
-      const dst=mode==='led'?ledStartRuns:capRuns;
+      const dst=mode==='led'?ledDst({wall:w.id,el:'edge',side:k},'start'):capRuns;
       subRanges(len,gaps).forEach(sg=>dst.push(sg[1]-sg[0]));
     });
 
@@ -1851,7 +1880,7 @@ function computeProject(G,walls,manual,cornerLinks){
     L.joints.forEach(j=>{
       j.segs.forEach(sg=>{
         const mode=jointSegMode(w,G,'v',j.pos,sg[0]);
-        const dst=mode==='led'?ledJointRuns:(mode==='cap'?jvRuns:null);
+        const dst=mode==='led'?ledDst({wall:w.id,el:'jointV',pos:j.pos,segStart:sg[0]},'joint'):(mode==='cap'?jvRuns:null);
         if(dst) dst.push(sg[1]-sg[0]);
       });
     });
@@ -1866,7 +1895,7 @@ function computeProject(G,walls,manual,cornerLinks){
       });
       subIn(sm.a0,sm.a1,gaps.filter(g=>g[1]>g[0])).forEach(g=>{
         const mode=jointSegMode(w,G,'h',sm.pos,g[0]);
-        const dst=mode==='led'?ledJointRuns:(mode==='cap'?jhRuns:null);
+        const dst=mode==='led'?ledDst({wall:w.id,el:'jointH',pos:sm.pos,segStart:g[0]},'joint'):(mode==='cap'?jhRuns:null);
         if(dst) dst.push(g[1]-g[0]);
       });
     });
@@ -1888,7 +1917,7 @@ function computeProject(G,walls,manual,cornerLinks){
     // Без материала откоса («нет», «заглушка на краю», «LED на краю») угла и рамы не бывает —
     // но голый торец САМОЙ ПАНЕЛИ на этой стороне всё равно можно закрыть заглушкой или LED,
     // даже если откоса там нет вообще (например, вместо него подоконник).
-    effOps[i].forEach(o=>{ if(!o.otkos||!(o.depth>0)) return;
+    effOps[i].forEach((o,oi)=>{ if(!o.otkos||!(o.depth>0)) return;
       // Т-стык: у «выступающих» верх/низ заглушка примыкания к раме идёт на всю (удлинённую)
       // длину детали, а не только на ширину проёма — та же lenOf-логика, что в buildOtkosParts
       const lenOf=k=>{
@@ -1901,7 +1930,7 @@ function computeProject(G,walls,manual,cornerLinks){
       sides.forEach(([k,len])=>{
         const md=otkosMode(o,k);
         if(md==='cap'){ opsRuns.push(len); return; }
-        if(md==='led'){ ledStartRuns.push(len); return; }
+        if(md==='led'){ ledDst({wall:w.id,el:'otkos',op:oi,side:k},'start').push(len); return; }
         if(md==='none') return;
         if(md==='corner') cornerRuns.cout.push(len);
         frameRuns.push(len);
@@ -1930,7 +1959,10 @@ function computeProject(G,walls,manual,cornerLinks){
   push('cin','Угол внутренний',cornerRuns.cin,G.price.cin);
   push('ledstart','LED-профиль стартовый',ledStartRuns,G.price.ledstart);
   push('ledjoint','LED-профиль соединительный',ledJointRuns,G.price.ledjoint);
-  const ledAutoM=(ledStartRuns.reduce((a,b)=>a+b,0)+ledJointRuns.reduce((a,b)=>a+b,0))/1000;
+  // ledPlainRuns — LED-контур с kind:'none' («без профиля»): в длину ленты входит,
+  // в номенклатуру профиля — нет (профиль на этот отрезок не покупается)
+  const sumM=arr=>arr.reduce((a,b)=>a+b,0)/1000;
+  const ledAutoM=sumM(ledStartRuns)+sumM(ledJointRuns)+sumM(ledPlainRuns);
 
   // --- заполнение проёмов другими материалами: свой пул листов на каждый материал ---
   const fills=[];
@@ -2734,7 +2766,7 @@ function run(){
     $('#notes').innerHTML=`<div class="note err"><b>Ввод</b><span>Заполните размеры стен и листа.</span></div>`;
     return;
   }
-  const R=computeProject(G,walls,manualMoves,cornerLinks);
+  const R=computeProject(G,walls,manualMoves,cornerLinks,ledCircuits);
   LAST={G,R};
   // чистим верстак от ссылок на детали, которых больше не существует (например, после правки проёмов)
   {
@@ -2758,7 +2790,8 @@ $('#rail').addEventListener('change',e=>{ if(!e.target.closest('#openings')) run
 function snapshot(){
   formToWall();
   const o={v:3,walls:JSON.parse(JSON.stringify(walls)),active,manual:manualMoves,
-           cornerLinks:JSON.parse(JSON.stringify(cornerLinks)),fields:{}};
+           cornerLinks:JSON.parse(JSON.stringify(cornerLinks)),
+           ledCircuits:JSON.parse(JSON.stringify(ledCircuits)),fields:{}};
   document.querySelectorAll('#rail input,#rail select').forEach(el=>{
     if(!el.id||WALL_FIELDS.includes(el.id)) return;
     o.fields[el.id]= el.type==='checkbox'?el.checked:el.value;
@@ -2814,6 +2847,12 @@ $('#file-load').addEventListener('change',e=>{
         cornerLinks=(Array.isArray(o.cornerLinks)?o.cornerLinks:[])
           .filter(c=>ids.has(+c.aw)&&(c.bw===''||c.bw==null||ids.has(+c.bw)));
         cornerSeq=Math.max(0,...cornerLinks.map(c=>c.id||0));
+        // контуры без стены (после удаления) отбрасываем целиком, а не «вне проекта» — привязка
+        // LED-отрезка к конкретной стене осмысленна только пока эта стена существует
+        ledCircuits=(Array.isArray(o.ledCircuits)?o.ledCircuits:[])
+          .map(c=>Object.assign({},c,{legs:(c.legs||[]).filter(l=>ids.has(+l.wall))}))
+          .filter(c=>c.legs.length);
+        ledCircuitSeq=Math.max(0,...ledCircuits.map(c=>c.id||0));
       }
       renderWallTabs(); wallToForm(); renderOpenings(); renderCornerLinks(); run();
     }catch(err){

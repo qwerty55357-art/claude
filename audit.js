@@ -152,6 +152,32 @@ for(let t=0;t<N;t++){
       const a0=base.strips[0], a1=led.strips[0], b0=base.strips[1], b1=led.strips[1];
       chk('L130a',Math.abs((a1.insetEnd-a0.insetEnd)-5)<0.01,`${id}: верт. LED-стык — insetEnd левой полосы ${a1.insetEnd} вместо ${a0.insetEnd+5}`);
       chk('L130b',Math.abs((b1.insetStart-b0.insetStart)-5)<0.01,`${id}: верт. LED-стык — insetStart правой полосы ${b1.insetStart} вместо ${b0.insetStart+5}`);
+      // L134 (нов): ledCircuits — чистый оверлей поверх уже отмеченной 'led'-позиции стыка.
+      // Геометрия (insetStart/insetEnd выше) не зависит от контура вовсе — он влияет только
+      // на то, В КАКОЙ профильный пул попадает длина (соединитель/старт/без профиля), не на то,
+      // есть ли там LED вообще. Сравниваем ПОЛНЫЙ R (не только layouts[0]) до/после обёртки
+      // одной и той же позиции в контур с kind:'start' (переключаем «соединительный» -> «стартовый»)
+      // и с kind:'none' («без профиля» — длина не должна пропадать из суммарной ленты).
+      const R0=C.computeProject(Gt,[wT]);
+      const segLen=j0.segs[0][1]-j0.segs[0][0];
+      const legJ={wall:wT.id,el:'jointV',pos:j0.pos,segStart:j0.segs[0][0]};
+      const RStart=C.computeProject(Gt,[wT],{},[],[{id:1,kind:'start',legs:[legJ]}]);
+      const lj0=(R0.prof.find(p=>p.key==='ledjoint')||{total:0}).total;
+      const lj1=(RStart.prof.find(p=>p.key==='ledjoint')||{total:0}).total;
+      const ls1=(RStart.prof.find(p=>p.key==='ledstart')||{total:0}).total;
+      chk('L134a',Math.abs((lj0-lj1)-segLen)<0.5,
+        `${id}: LED-контур kind=start на стыке — ledjoint не уменьшился на длину сегмента (${lj0}->${lj1}, сегмент ${segLen})`);
+      chk('L134b',ls1>=segLen-0.5,
+        `${id}: LED-контур kind=start на стыке — ledstart не получил длину сегмента (${ls1} < ${segLen})`);
+      chk('L134c',!!R0.led&&!!RStart.led&&Math.abs(R0.led.auto-RStart.led.auto)<0.01,
+        `${id}: LED-контур сменил суммарную длину ленты (было ${R0.led&&R0.led.auto}, стало ${RStart.led&&RStart.led.auto}) — контур не должен влиять на длину, только на профиль`);
+      const RNone=C.computeProject(Gt,[wT],{},[],[{id:1,kind:'none',legs:[legJ]}]);
+      const ljN=(RNone.prof.find(p=>p.key==='ledjoint')||{total:0}).total;
+      const lsN=(RNone.prof.find(p=>p.key==='ledstart')||{total:0}).total;
+      chk('L134d',Math.abs(ljN-lj1)<0.01&&Math.abs(lsN)<0.01,
+        `${id}: LED-контур kind=none на стыке — сегмент не должен попасть ни в ledjoint (${ljN}), ни в ledstart (${lsN})`);
+      chk('L134e',!!RNone.led&&Math.abs(R0.led.auto-RNone.led.auto)<0.01,
+        `${id}: LED-контур kind=none изменил суммарную длину ленты (${R0.led&&R0.led.auto} -> ${RNone.led&&RNone.led.auto}) — «без профиля» всё равно считает метраж`);
     }
     if(base.seams.length){
       const sm0=base.seams[0];
