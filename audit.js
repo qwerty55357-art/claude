@@ -177,6 +177,17 @@ for(let t=0;t<N;t++){
   chk('L8',R.sheetsTotal<=nPieces+R.parts.length+3,`${id}: панелей абсурдно много`);
   chk('L9',R.waste>=-0.001&&R.waste<=1.001,`${id}: waste=${R.waste}`);
   chk('L10',Number.isFinite(R.tubes)&&R.tubes>=0,`${id}: tubes`);
+  // L12 (нов): «реальная площадь приклейки» — netArea уже включает любую деталь стены независимо
+  // от материала, поэтому фонд 'piece' добавлять в glueArea ещё раз нельзя (задвоение); 'opening'
+  // и 'otkos' обязаны быть добавлены — opsArea вычитает ВСЕ проёмы целиком, otkosArea считает
+  // только НЕпереопределённые стороны откоса. На БАЗОВОМ прогоне (без активного pieceMats/
+  // otkosMat) это гоняет как минимум ветку 'opening' (mkWall сам иногда даёт fillMat); ветки
+  // 'piece'/'otkos' дополнительно проверяются в момент их активации — см. L140-144/L160-162.
+  {
+    const addBack=R.fills.filter(f=>f.kind!=='piece').reduce((a,f)=>a+f.area,0);
+    chk('L12',Math.abs(R.glueArea-(R.netArea+R.otkosArea+addBack))<0.01,
+      `${id}: glueArea ${R.glueArea.toFixed(3)} != netArea+otkosArea+addBack ${(R.netArea+R.otkosArea+addBack).toFixed(3)}`);
+  }
   // L11: профиль
   R.prof.forEach(p=>{
     chk('L11',p.sticks>=Math.ceil(p.total/G.stock-1e-9),`${id}: ${p.name} мало хлыстов`);
@@ -646,8 +657,70 @@ for(let t=0;t<N;t++){
               `${id}: замощение ${p.label} материалом ${mat.id} — чистая площадь ${netTiled.toFixed(3)} != ${netWant.toFixed(3)}`);
           }
         }
+        // L144 (нов): именно в момент активного 'piece' fill'а — glueArea не задваивает его площадь
+        // (см. L12); тут это гоняется по-настоящему, в отличие от базового прогона, где 'piece' fill
+        // ещё не существует
+        {
+          const addBack=R2.fills.filter(x=>x.kind!=='piece').reduce((a,x)=>a+x.area,0);
+          chk('L144',Math.abs(R2.glueArea-(R2.netArea+R2.otkosArea+addBack))<0.01,
+            `${id}: glueArea при активном piece-fill ${R2.glueArea.toFixed(3)} != ${(R2.netArea+R2.otkosArea+addBack).toFixed(3)}`);
+        }
       }
       wallsArr[wi].pieceMats={};
+    }
+  }
+  // L160-162 (нов): индивидуальный материал стороны откоса (клик по линии откоса на схеме,
+  // o.otkosMat[side]) — та же механика пула, что у материала детали стены, но через packOtkos.
+  // Берём случайную сторону, у которой реально есть деталь откоса (режим corner/butt — иначе
+  // резать нечего), назначаем ей материал из PRESETS и пересчитываем: деталь обязана уйти из
+  // главного пула откосов, в R2.fills обязана появиться запись kind:'otkos' для этого материала,
+  // а её деталь(и) в этом пуле — либо суммарно дать ровно номинальную площадь depth×len, либо
+  // (если материал физически не подошёл, напр. глубина больше листа) попасть в R2.failed —
+  // третьего не дано, площадь либо цела, либо явно потеряна и об этом сказано пользователю.
+  if(rand()<0.4){
+    const cands=[];
+    wallsArr.forEach((w,wi)=>w.ops.forEach((o,oi)=>{
+      if(!o.otkos||!(o.depth>0)) return;
+      ['left','right','top','bottom'].forEach(side=>{
+        if(side==='bottom'&&o.kind==='door') return;
+        const m=(o.otkosMode&&o.otkosMode[side])||'corner';
+        if(m==='corner'||m==='butt') cands.push({wi,oi,side,o});
+      });
+    }));
+    if(cands.length){
+      const c=cands[Math.floor(rand()*cands.length)];
+      const opts=C.PRESETS.filter(m=>m.id!=='custom');
+      const mat=opts[Math.floor(rand()*opts.length)];
+      c.o.otkosMat={}; c.o.otkosMat[c.side]=mat.id;
+      let R2;
+      try{ R2=C.computeProject(G,wallsArr); }
+      catch(e){ FAIL++; if(bugs.length<30) bugs.push('CRASH-OTKOSMAT #'+t+' :: '+e.message); R2=null; }
+      if(R2){
+        let base='О'+(c.oi+1)+'·'+{left:'лев',right:'прав',top:'верх',bottom:'низ'}[c.side];
+        if(wallsArr.length>1) base='С'+(c.wi+1)+'·'+base;
+        const nameMatch=nm=>nm===base||nm.startsWith(base+' (');
+        const stillMain=R2.sheets.some(sh=>sh.otk.some(x=>nameMatch(x.name)));
+        chk('L160',!stillMain,`${id}: ${base} с индивидуальным материалом осталась в главном пуле откосов`);
+        const f=R2.fills.find(x=>x.kind==='otkos'&&x.matColorId===mat.id);
+        chk('L161',!!f,`${id}: не найден fill kind:'otkos' для материала ${mat.id}`);
+        if(f){
+          const nomLen=(c.side==='left'||c.side==='right')?c.o.h:c.o.w;
+          const nomArea=c.o.depth*nomLen;
+          const placedArea=f.sheets.reduce((a,sh)=>a+sh.otk.filter(x=>nameMatch(x.name))
+            .reduce((b,x)=>b+(x.dw||x.dep)*(x.dh||x.len),0),0);
+          const failed=R2.failed.some(x=>nameMatch(x.name));
+          if(failed) chk('L162',placedArea===0,`${id}: ${base} — и failed, и частично размещена (${placedArea})`);
+          else chk('L162',Math.abs(placedArea-nomArea)<1,`${id}: ${base} площадь в пуле ${placedArea} != номинальной ${nomArea}`);
+        }
+        // L163 (нов): при активном 'otkos' fill'е glueArea обязана его учесть (в отличие от
+        // 'piece' — otkosArea в этот момент УЖЕ не включает переопределённую сторону, см. L12)
+        {
+          const addBack=R2.fills.filter(x=>x.kind!=='piece').reduce((a,x)=>a+x.area,0);
+          chk('L163',Math.abs(R2.glueArea-(R2.netArea+R2.otkosArea+addBack))<0.01,
+            `${id}: glueArea при активном otkos-fill ${R2.glueArea.toFixed(3)} != ${(R2.netArea+R2.otkosArea+addBack).toFixed(3)}`);
+        }
+      }
+      delete c.o.otkosMat;
     }
   }
 }
