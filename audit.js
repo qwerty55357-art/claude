@@ -51,6 +51,49 @@ for(let t=0;t<N;t++){
   catch(e){ crashed++; FAIL++; if(bugs.length<30)bugs.push('CRASH #'+t+' :: '+e.message); continue; }
   const id=`#${t} walls:${nWalls}`;
 
+  // L135: граф «перекрёстков» для протяжки LED мышкой (wallLedGraph) — чисто геометрическая
+  // проверка, независимая от денег/раскроя: узлы обязаны включать все 4 угла стены и лежать в
+  // её границах, каждое ребро — ссылаться на существующие узлы и иметь положительную длину, а
+  // суммарная длина рёбер типа jointV/jointH в графе обязана совпадать с тем, что реально видит
+  // сам расчёт (L.joints/L.seams) — иначе граф разошёлся бы с геометрией, по которой ведётся раскрой.
+  wallsArr.forEach((w,wi)=>{
+    let graph;
+    try{ graph=C.wallLedGraph(w,G); }
+    catch(e){ chk('L135crash',false,`${id} стена ${wi}: wallLedGraph упал — ${e.message}`); return; }
+    const byKey=new Map(graph.nodes.map(n=>[n.key,n]));
+    [[0,0],[w.W,0],[0,w.H],[w.W,w.H]].forEach(([cx,cy])=>{
+      chk('L135a',graph.nodes.some(n=>Math.abs(n.x-cx)<1&&Math.abs(n.y-cy)<1),
+        `${id} стена ${wi}: угол стены (${cx},${cy}) отсутствует среди узлов графа`);
+    });
+    graph.nodes.forEach(n=>{
+      chk('L135b',n.x>=-1&&n.x<=w.W+1&&n.y>=-1&&n.y<=w.H+1,
+        `${id} стена ${wi}: узел (${n.x},${n.y}) вне границ стены ${w.W}x${w.H}`);
+    });
+    let jvSum=0, jhSum=0;
+    graph.edges.forEach(e=>{
+      const a=byKey.get(e.a), b=byKey.get(e.b);
+      chk('L135c',!!a&&!!b,`${id} стена ${wi}: ребро графа (${e.leg.el}) ссылается на несуществующий узел`);
+      if(!a||!b) return;
+      const len=Math.hypot(a.x-b.x,a.y-b.y);
+      chk('L135d',len>0.5,`${id} стена ${wi}: ребро графа нулевой/отриц. длины (${e.leg.el})`);
+      if(e.leg.el==='jointV') jvSum+=len;
+      if(e.leg.el==='jointH') jhSum+=len;
+    });
+    const L=C.buildLayout(C.wallS(G,w));
+    const expJv=L.joints.reduce((a,j)=>a+j.segs.reduce((s,sg)=>s+(sg[1]-sg[0]),0),0);
+    const expJh=L.seams.reduce((a,sm)=>{
+      const gaps=[];
+      w.ops.forEach(o=>{
+        const [a0,aL]=L.vert?[o.x,o.w]:[o.y,o.h];
+        const [b0,bL]=L.vert?[o.y,o.h]:[o.x,o.w];
+        if(b0<sm.pos-1 && b0+bL>sm.pos+1){ gaps.push([Math.max(sm.a0,a0),Math.min(sm.a1,a0+aL)]); }
+      });
+      return a+C.subIn(sm.a0,sm.a1,gaps.filter(g=>g[1]>g[0])).reduce((s,g)=>s+(g[1]-g[0]),0);
+    },0);
+    chk('L135e',Math.abs(jvSum-expJv)<1,`${id} стена ${wi}: сумма рёбер jointV в графе ${jvSum} != ${expJv} по L.joints`);
+    chk('L135f',Math.abs(jhSum-expJh)<1,`${id} стена ${wi}: сумма рёбер jointH в графе ${jhSum} != ${expJh} по L.seams`);
+  });
+
   // L1: деталь внутри листа
   R.sheets.forEach(sh=>sh.list.forEach(p=>chk('L1',p.x>=-0.5&&p.y>=-0.5&&p.x+p.w<=G.pw+0.5&&p.y+p.len<=G.pl+0.5,
     `${id}: ${p.label} вне листа`)));

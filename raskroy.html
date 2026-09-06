@@ -1710,6 +1710,80 @@ function ledCircuitOf(ledCircuits,leg){
   for(const c of (ledCircuits||[])) if(c.legs.some(l=>ledLegKey(l)===key)) return c;
   return null;
 }
+// ---- Граф «перекрёстков» стены для протяжки LED-отрезков мышкой ----
+// Узлы — точки, где можно ставить точку A/Б (4 угла стены, пересечения вертикальных
+// стыков с горизонтальными швами/краями, пересечения горизонтальных швов с боковыми
+// краями, все 4 угла контура каждого проёма с откосом). Рёбра — атомарные позиции между
+// СОСЕДНИМИ узлами (тот же кусок края/стыка/контура откоса, что и в profile-bucketing
+// внутри computeProject) с адресом-«ножкой» leg в формате ledLegKey (без wall — его
+// добавляет вызывающий код). Один отрезок, проведённый мышкой через несколько узлов —
+// это путь по нескольким рёбрам подряд; каждое ребро на пути становится своей ножкой
+// одного и того же ledCircuits[].legs (см. обсуждение — «один непрерывный отрезок»).
+function wallLedGraph(w,G){
+  const L=buildLayout(wallS(G,w));
+  const W=w.W,H=w.H;
+  const nodes=new Map();
+  const nkey=(x,y)=>Math.round(x)+'_'+Math.round(y);
+  const addNode=(x,y)=>{ const k=nkey(x,y); if(!nodes.has(k)) nodes.set(k,{key:k,x:Math.round(x),y:Math.round(y)}); return k; };
+  const edges=[];
+  const addEdge=(x0,y0,x1,y1,leg)=>{
+    if(Math.abs(x0-x1)<1&&Math.abs(y0-y1)<1) return;   // вырожденный (нулевой длины) отрезок — не ребро
+    edges.push({a:addNode(x0,y0),b:addNode(x1,y1),leg});
+  };
+  addNode(0,0); addNode(W,0); addNode(0,H); addNode(W,H);
+
+  const edgeSides=[
+    ['top',  W, w.ops.filter(o=>o.y+o.h>=H-1).map(o=>[o.x,o.x+o.w])],
+    ['bot',  W, w.ops.filter(o=>o.y<=1).map(o=>[o.x,o.x+o.w])],
+    ['left', H, w.ops.filter(o=>o.x<=1).map(o=>[o.y,o.y+o.h])],
+    ['right',H, w.ops.filter(o=>o.x+o.w>=W-1).map(o=>[o.y,o.y+o.h])]
+  ];
+  edgeSides.forEach(([k,len,gaps])=>{
+    subRanges(len,gaps).forEach(([s,e])=>{
+      if(k==='top')   addEdge(s,H,e,H,{el:'edge',side:'top'});
+      if(k==='bot')   addEdge(s,0,e,0,{el:'edge',side:'bot'});
+      if(k==='left')  addEdge(0,s,0,e,{el:'edge',side:'left'});
+      if(k==='right') addEdge(W,s,W,e,{el:'edge',side:'right'});
+    });
+  });
+
+  // «joint» — граница между полосами материала, «seam» — рез внутри полосы; их роль в системе
+  // координат (v'/'h' в адресации ножки) не совпадает с осью X/Y напрямую, а зависит от того,
+  // как реально уложены полосы (L.vert) — при горизонтальной раскладке они меняются местами
+  // геометрически (joint становится горизонтальной линией, seam — вертикальной), хотя адрес
+  // ножки (jointSegKey/jointSegMode) остаётся тем же самым 'v'/'h', как и во всём остальном коде.
+  L.joints.forEach(j=>{
+    j.segs.forEach(sg=>{
+      if(L.vert) addEdge(j.pos,sg[0],j.pos,sg[1],{el:'jointV',pos:j.pos,segStart:sg[0]});
+      else       addEdge(sg[0],j.pos,sg[1],j.pos,{el:'jointV',pos:j.pos,segStart:sg[0]});
+    });
+  });
+
+  L.seams.forEach(sm=>{
+    const gaps=[];
+    w.ops.forEach(o=>{
+      const [a0,aL]=L.vert?[o.x,o.w]:[o.y,o.h];
+      const [b0,bL]=L.vert?[o.y,o.h]:[o.x,o.w];
+      if(b0<sm.pos-1 && b0+bL>sm.pos+1){ gaps.push([Math.max(sm.a0,a0),Math.min(sm.a1,a0+aL)]); }
+    });
+    subIn(sm.a0,sm.a1,gaps.filter(g=>g[1]>g[0])).forEach(g=>{
+      if(L.vert) addEdge(g[0],sm.pos,g[1],sm.pos,{el:'jointH',pos:sm.pos,segStart:g[0]});
+      else       addEdge(sm.pos,g[0],sm.pos,g[1],{el:'jointH',pos:sm.pos,segStart:g[0]});
+    });
+  });
+
+  // контур каждого проёма с откосом — 4 угла, стороны между ними как отдельные рёбра
+  // (нижняя сторона у двери не существует — это пол, а не откос)
+  w.ops.forEach((o,oi)=>{
+    if(!o.otkos||!(o.depth>0)) return;
+    if(o.kind!=='door') addEdge(o.x,o.y,o.x+o.w,o.y,{el:'otkos',op:oi,side:'bottom'});
+    addEdge(o.x,o.y+o.h,o.x+o.w,o.y+o.h,{el:'otkos',op:oi,side:'top'});
+    addEdge(o.x,o.y,o.x,o.y+o.h,{el:'otkos',op:oi,side:'left'});
+    addEdge(o.x+o.w,o.y,o.x+o.w,o.y+o.h,{el:'otkos',op:oi,side:'right'});
+  });
+
+  return {nodes:[...nodes.values()], edges};
+}
 function computeProject(G,walls,manual,cornerLinks,ledCircuits){
   manual=manual||{};
   ledCircuits=ledCircuits||[];
