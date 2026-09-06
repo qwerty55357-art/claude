@@ -247,15 +247,15 @@ tbody tr:hover td{background:var(--surface)}
   <section class="sect" data-sect>
     <div class="sect-h"><span class="sect-n">05</span><span class="sect-t">LED</span><span class="sect-arrow">▾</span></div>
     <div class="sect-b">
-      <p class="hint">Всё про свет — в одном месте. Быстрее переключать прямо на схеме: клик по краю стены или по линии стыка открывает то же меню на месте.</p>
+      <p class="hint">Всё про свет — в одном месте. Сама подсветка теперь ставится рисованием мышью в разделе «LED» ниже схемы раскладки; здесь — сводка по проекту и обычные (не LED) края/стыки, которые по-прежнему можно переключать прямо на схеме.</p>
       <label class="sub-l">Края стены</label>
       <div class="row">
-        <div class="f"><label>Верх</label><select id="i-e-top" class="edge-sel"><option value="none">— нет</option><option value="cap" selected>Заглушка</option><option value="led" disabled>LED-стартовый (только рисованием, см. раздел «LED»)</option></select></div>
-        <div class="f"><label>Низ</label><select id="i-e-bot" class="edge-sel"><option value="none" selected>— нет</option><option value="cap">Заглушка</option><option value="led" disabled>LED-стартовый (только рисованием, см. раздел «LED»)</option></select></div>
+        <div class="f"><label>Верх</label><select id="i-e-top" class="edge-sel"><option value="none">— нет</option><option value="cap" selected>Заглушка</option><option value="led" disabled title="Ставится и снимается рисованием в разделе «LED»">LED (рисование)</option></select></div>
+        <div class="f"><label>Низ</label><select id="i-e-bot" class="edge-sel"><option value="none" selected>— нет</option><option value="cap">Заглушка</option><option value="led" disabled title="Ставится и снимается рисованием в разделе «LED»">LED (рисование)</option></select></div>
       </div>
       <div class="row">
-        <div class="f"><label>Слева</label><select id="i-e-left" class="edge-sel"><option value="none">— нет</option><option value="cap" selected>Заглушка</option><option value="led" disabled>LED-стартовый (только рисованием, см. раздел «LED»)</option></select></div>
-        <div class="f"><label>Справа</label><select id="i-e-right" class="edge-sel"><option value="none">— нет</option><option value="cap" selected>Заглушка</option><option value="led" disabled>LED-стартовый (только рисованием, см. раздел «LED»)</option></select></div>
+        <div class="f"><label>Слева</label><select id="i-e-left" class="edge-sel"><option value="none">— нет</option><option value="cap" selected>Заглушка</option><option value="led" disabled title="Ставится и снимается рисованием в разделе «LED»">LED (рисование)</option></select></div>
+        <div class="f"><label>Справа</label><select id="i-e-right" class="edge-sel"><option value="none">— нет</option><option value="cap" selected>Заглушка</option><option value="led" disabled title="Ставится и снимается рисованием в разделе «LED»">LED (рисование)</option></select></div>
       </div>
       <label class="sub-l">Вертикальные стыки активной стены</label>
       <div id="jointsv-list"></div>
@@ -570,7 +570,7 @@ function renderJointsV(R){
           <select data-jvpos="${Math.round(j.pos)}" data-jvseg="${Math.round(sg[0])}">
             <option value="cap"${cur==='cap'?' selected':''}>Соединитель</option>
             <option value="butt"${cur==='butt'?' selected':''}>Встык (без профиля)</option>
-            <option value="led"${cur==='led'?' selected':''} disabled>LED-соединитель (только рисованием, см. раздел «LED»)</option>
+            <option value="led"${cur==='led'?' selected':''} disabled title="Ставится и снимается рисованием в разделе «LED»">LED (рисование)</option>
           </select>
         </div>
       </div>`);
@@ -900,7 +900,7 @@ function otkosSideSelect(o,side,label){
     <optgroup label="Без откоса (напр. подоконник)">
       <option value="none"${cur==='none'?' selected':''}>Открытый край, без профиля</option>
       <option value="cap"${cur==='cap'?' selected':''}>Заглушка на краю панели</option>
-      <option value="led"${cur==='led'?' selected':''} disabled>LED-профиль на краю панели (только рисованием, см. раздел «LED»)</option>
+      <option value="led"${cur==='led'?' selected':''} disabled title="Ставится и снимается рисованием в разделе «LED»">LED (рисование)</option>
     </optgroup>
   </select>
   ${seamable?`<input type="text" data-k="otkosSeam" data-side="${side}" value="${esc(seamVal)}" placeholder="шов авто (мм от ${side==='left'||side==='right'?'пола':'левого края'})" style="margin-top:4px" title="Позиция шва, если деталь придётся стыковать. Пусто — автоматически.">`:''}
