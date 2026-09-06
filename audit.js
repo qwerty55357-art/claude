@@ -31,8 +31,9 @@ function mkWall(r){
     // а откосы/изгиб на «наложенных» проёмах дают физически бессмысленную сцену (не баг раскроя)
     const overlaps=w.ops.some(p=>ox<p.x+p.w && ox+ow>p.x && oy<p.y+p.h && oy+oh>p.y);
     if(overlaps) continue;
-    const modes=()=>['corner','butt','bend','none','cap','led'][Math.floor(r()*6)];
+    const modes=()=>['corner','butt','bend','none','cap','led','protrude'][Math.floor(r()*7)];
     w.ops.push({kind:['window','door','niche'][Math.floor(r()*3)],w:ow,h:oh,x:ox,y:oy,otkos:r()<0.5,depth:[100,150,200,250][Math.floor(r()*4)],
+      otkosOverlap:r()<0.5?[50,100,150,200,300][Math.floor(r()*5)]:0,
       fillMat:r()<0.3?['marble','slat','rockL','rockS'][Math.floor(r()*4)]:null,id:i+1,
       otkosMode:{left:modes(),right:modes(),top:modes(),bottom:modes()}});
   }
@@ -87,11 +88,25 @@ for(let t=0;t<N;t++){
       const segLen=st.segs.reduce((x,sg)=>x+(sg[1]-sg[0]),0);
       ledLoss+=((st.insetStart||0)+(st.insetEnd||0))*segLen;
     });
-    L.seams.forEach(sm=>{
-      if(C.jointSegMode(wallsArr[wi],G,'h',sm.pos,sm.a0)==='led'){
-        const st=L.strips[sm.strip];
-        ledLoss+=10*(st.w-(st.insetStart||0)-(st.insetEnd||0));
-      }
+    // горизонтальные LED-швы: независимый пересчёт ПО ПОЛОСЕ через ОБЪЕДИНЕНИЕ отрезков
+    // [pos-5,pos+5] по LED-меткам seamsU, реально попадающим ВНУТРЬ одного из сегментов этой
+    // полосы (строго внутри — «шов» на самой границе сегмента ничего не режет) — а не через
+    // L.seams: L.seams МОЛЧА теряет метку, если из-за неё и соседней LED-метки ближе LED_GAP=10мм
+    // друг от друга кусок между ними схлопнулся до нулевой длины и был отброшен ДО seams.push
+    // (см. buildLayout) — тогда пересчёт через L.seams недосчитал бы эту потерю площади. Ограничение
+    // «строго внутри сегмента ЭТОЙ полосы» — чтобы не считать метку там, где для этой полосы шва
+    // вообще нет (проём разбил сегмент иначе, чем у соседних полос).
+    L.strips.forEach(st=>{
+      const inSeg=p=>st.segs.some(sg=>p>sg[0]+0.5 && p<sg[1]-0.5);
+      const pos=(wallsArr[wi].seamsU||[]).filter(u=>u.led&&inSeg(u.pos)).map(u=>u.pos).sort((a,b)=>a-b);
+      const merged=[];
+      pos.forEach(p=>{
+        const iv=[p-5,p+5];
+        if(merged.length && iv[0]<=merged[merged.length-1][1]+0.01) merged[merged.length-1][1]=Math.max(merged[merged.length-1][1],iv[1]);
+        else merged.push(iv);
+      });
+      const uni=merged.reduce((a,iv)=>a+(iv[1]-iv[0]),0);
+      ledLoss+=uni*(st.w-(st.insetStart||0)-(st.insetEnd||0));
     });
     ea-=ledLoss;
     chk('L4',Math.abs(pa-ea)<1,`${id} стена ${wi}: площадь деталей ${pa} != ${ea}`);
@@ -209,7 +224,7 @@ for(let t=0;t<N;t++){
         const raw=(o.otkosMode&&o.otkosMode[k])||'corner';
         return raw==='bend'&&rej.has(oi+'|'+k) ? 'corner' : raw;   // отклонённый изгиб = деталь есть
       };
-      const has=v=>v==='corner'||v==='butt';
+      const has=v=>v==='corner'||v==='butt'||v==='protrude';
       if(has(m('left'))) expOtk++;
       if(has(m('right'))) expOtk++;
       if(has(m('top'))) expOtk++;
@@ -218,18 +233,21 @@ for(let t=0;t<N;t++){
   });
   chk('L21',R.parts.length===expOtk,`${id}: откосов ${R.parts.length}!=${expOtk}`);
   // L70 (нов): площадь «откосов» честно учитывает изгиб — она равна сумме depth×len
-  // по ВСЕМ сторонам с материалом откоса (corner/butt/bend) — «нет»/«заглушка»/«led» на краю
-  // материала не расходуют вообще, только профиль
+  // по ВСЕМ сторонам с материалом откоса (corner/butt/bend/protrude) — «нет»/«заглушка»/«led»
+  // на краю материала не расходуют вообще, только профиль. «Выступающий» (protrude) добавляет
+  // вылет накладки (otkosOverlap) к глубине именно на СВОИХ сторонах — та же depOf-логика,
+  // что и в buildOtkosParts.
   {
     let expArea=0;
     wallsArr.forEach(w=>w.ops.forEach(o=>{
       if(!o.otkos||!(o.depth>0)) return;
       const m=k=>(o.otkosMode&&o.otkosMode[k])||'corner';
-      const has=v=>v==='corner'||v==='butt'||v==='bend';
-      if(has(m('left')))  expArea+=(o.depth*o.h)/1e6;
-      if(has(m('right'))) expArea+=(o.depth*o.h)/1e6;
-      if(has(m('top')))   expArea+=(o.depth*o.w)/1e6;
-      if(o.kind!=='door' && has(m('bottom'))) expArea+=(o.depth*o.w)/1e6;
+      const has=v=>v==='corner'||v==='butt'||v==='bend'||v==='protrude';
+      const depOf=k=>o.depth+(m(k)==='protrude'?(o.otkosOverlap||0):0);
+      if(has(m('left')))  expArea+=(depOf('left')*o.h)/1e6;
+      if(has(m('right'))) expArea+=(depOf('right')*o.h)/1e6;
+      if(has(m('top')))   expArea+=(depOf('top')*o.w)/1e6;
+      if(o.kind!=='door' && has(m('bottom'))) expArea+=(depOf('bottom')*o.w)/1e6;
     }));
     // неразмещённые (failed) детали НЕ входят в otkosArea — вычитаем их площадь из ожидания
     const failedArea=R.failed.reduce((a,f)=>a+(f.dep*f.len)/1e6,0);
@@ -444,7 +462,7 @@ for(let t=0;t<N;t++){
         for(const side of ['left','right','top','bottom']){
           if(side==='bottom'&&o.kind==='door') continue;
           const m=(o.otkosMode&&o.otkosMode[side])||'corner';
-          if(m!=='corner'&&m!=='butt') continue;
+          if(m!=='corner'&&m!=='butt'&&m!=='protrude') continue;
           const len=(side==='left'||side==='right')?o.h:o.w;
           if(len>G.pl){ cand={wi,oi,side,len}; break outer; }
         }
@@ -684,7 +702,7 @@ for(let t=0;t<N;t++){
       ['left','right','top','bottom'].forEach(side=>{
         if(side==='bottom'&&o.kind==='door') return;
         const m=(o.otkosMode&&o.otkosMode[side])||'corner';
-        if(m==='corner'||m==='butt') cands.push({wi,oi,side,o});
+        if(m==='corner'||m==='butt'||m==='protrude') cands.push({wi,oi,side,o,m});
       });
     }));
     if(cands.length){
@@ -705,7 +723,8 @@ for(let t=0;t<N;t++){
         chk('L161',!!f,`${id}: не найден fill kind:'otkos' для материала ${mat.id}`);
         if(f){
           const nomLen=(c.side==='left'||c.side==='right')?c.o.h:c.o.w;
-          const nomArea=c.o.depth*nomLen;
+          const nomDep=c.o.depth+(c.m==='protrude'?(c.o.otkosOverlap||0):0);
+          const nomArea=nomDep*nomLen;
           const placedArea=f.sheets.reduce((a,sh)=>a+sh.otk.filter(x=>nameMatch(x.name))
             .reduce((b,x)=>b+(x.dw||x.dep)*(x.dh||x.len),0),0);
           const failed=R2.failed.some(x=>nameMatch(x.name));

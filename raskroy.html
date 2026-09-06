@@ -648,9 +648,11 @@ function renderOpenings(){
         ${PRESETS.filter(pp=>pp.id!=='custom').map(pp=>`<option value="${pp.id}"${o.fillMat===pp.id?' selected':''}>${pp.name}</option>`).join('')}
       </select></div></div>
       <label class="chk"><input type="checkbox" data-k="otkos"${o.otkos?' checked':''}><span>Отделывать откосы</span></label>
-      <div class="row row-1" ${o.otkos?'':'hidden'}>
+      <div class="row" ${o.otkos?'':'hidden'}>
         <div class="f"><label>Глубина откоса</label><input type="number" data-k="depth" value="${o.depth}"><span class="unit">мм</span></div>
+        <div class="f"><label>Вылет накладки</label><input type="number" data-k="otkosOverlap" value="${o.otkosOverlap||0}"><span class="unit">мм</span></div>
       </div>
+      <p class="hint" ${o.otkos?'':'hidden'} style="margin:0 0 6px">Вылет — для сторон в режиме «Выступающий»: насколько накладка выходит на стену за край проёма (0 — не выступает).</p>
       <div ${o.otkos?'':'hidden'} style="margin-bottom:8px">
         <p class="hint" style="margin:0 0 4px">Как отделана каждая сторона — то же самое можно кликом по контуру на схеме</p>
         <div class="row">
@@ -666,13 +668,14 @@ function renderOpenings(){
 }
 function otkosSideSelect(o,side,label){
   const cur=otkosModeJs(o,side);
-  const seamable=cur==='corner'||cur==='butt';         // шов возможен только там, где реально режется материал
+  const seamable=cur==='corner'||cur==='butt'||cur==='protrude';   // шов возможен там, где реально режется материал
   const seamVal=((o.otkosSeamPos&&o.otkosSeamPos[side])||[]).join(', ');
   return `<div class="f"><label>${label}</label><select data-k="otkosMode" data-side="${side}">
     <optgroup label="С материалом откоса">
       <option value="corner"${cur==='corner'?' selected':''}>Г-образный угол</option>
       <option value="butt"${cur==='butt'?' selected':''}>Встык (без профиля)</option>
       <option value="bend"${cur==='bend'?' selected':''}>Изгиб панели</option>
+      <option value="protrude"${cur==='protrude'?' selected':''}>Выступающий (накладка на стену)</option>
     </optgroup>
     <optgroup label="Без откоса (напр. подоконник)">
       <option value="none"${cur==='none'?' selected':''}>Открытый край, без профиля</option>
@@ -1231,17 +1234,23 @@ function buildOtkosParts(S){
   S.ops.forEach((o,i)=>{
     if(!o.otkos||o.depth<=0) return;
     const t='О'+(i+1);
-    // деталь откоса режется, только если сторона реально отделывается материалом
-    // («Г-образный» и «встык»). «Изгиб» материал берёт из удлинённой панели стены — отдельной
+    // деталь откоса режется, если сторона реально отделывается материалом («Г-образный»,
+    // «встык», «выступающий»). «Изгиб» материал берёт из удлинённой панели стены — отдельной
     // детали не режем. Остальные режимы («нет», «заглушка на краю», «LED на краю») — это про
     // то, ЧЕМ закрыт голый торец панели, когда откоса вообще нет — материала там нет никакого.
-    const has=k=>{ const m=otkosMode(o,k); return m==='corner'||m==='butt'; };
+    const has=k=>{ const m=otkosMode(o,k); return m==='corner'||m==='butt'||m==='protrude'; };
+    // «выступающий» — деталь заодно с накладкой на стену (одна L-образная деталь без шва):
+    // глубина для раскроя увеличена на вылет накладки, сама длина стороны не меняется. overlap>0
+    // отмечает деталь как составную — линия сгиба на карте раскроя рисуется на отметке o.depth
+    // от края, обращённого в проём (см. cutmapSvg)
+    const depOf=k=>o.depth+(otkosMode(o,k)==='protrude'?(o.otkosOverlap||0):0);
+    const overlapOf=k=>otkosMode(o,k)==='protrude'?(o.otkosOverlap||0):0;
     // ручной шов: позиции (мм от пола — лев/прав, от левого края — верх/низ), где стыковка неизбежна/выбрана
     const seamsOf=k=>((o.otkosSeamPos&&o.otkosSeamPos[k])||[]).filter(v=>Number.isFinite(v));
-    if(has('left'))   parts.push({name:t+'·лев', len:o.h, dep:o.depth, op:i, side:'left',  seamPos:seamsOf('left')});
-    if(has('right'))  parts.push({name:t+'·прав',len:o.h, dep:o.depth, op:i, side:'right', seamPos:seamsOf('right')});
-    if(has('top'))    parts.push({name:t+'·верх',len:o.w, dep:o.depth, op:i, side:'top',   seamPos:seamsOf('top')});
-    if(o.kind!=='door' && has('bottom')) parts.push({name:t+'·низ',len:o.w, dep:o.depth, op:i, side:'bottom', seamPos:seamsOf('bottom')});
+    if(has('left'))   parts.push({name:t+'·лев', len:o.h, dep:depOf('left'), op:i, side:'left',  seamPos:seamsOf('left'), overlap:overlapOf('left'), revealDep:o.depth});
+    if(has('right'))  parts.push({name:t+'·прав',len:o.h, dep:depOf('right'), op:i, side:'right', seamPos:seamsOf('right'), overlap:overlapOf('right'), revealDep:o.depth});
+    if(has('top'))    parts.push({name:t+'·верх',len:o.w, dep:depOf('top'), op:i, side:'top',   seamPos:seamsOf('top'), overlap:overlapOf('top'), revealDep:o.depth});
+    if(o.kind!=='door' && has('bottom')) parts.push({name:t+'·низ',len:o.w, dep:depOf('bottom'), op:i, side:'bottom', seamPos:seamsOf('bottom'), overlap:overlapOf('bottom'), revealDep:o.depth});
   });
   return parts;
 }
@@ -2441,6 +2450,18 @@ function cutmapSvg(sheets,S){
     sh.otk.forEach(o=>{
       const dw=o.dw||o.dep, dh=o.dh||o.len;
       g+=`<rect x="${cx+o.x}" y="${cy+o.y}" width="${dw}" height="${dh}" fill="var(--alu-face)" fill-opacity=".9" stroke="var(--alu-deep)" stroke-width="${fs*0.07}"${o._uid?` data-cmdrag="${o._uid}" style="cursor:grab"`:''}/>`;
+      // «выступающий» откос — одна L-образная деталь (глубина проёма + вылет накладки без шва),
+      // линия сгиба на отметке revealDep от края, обращённого в проём (см. buildOtkosParts)
+      if(o.overlap>0 && o.revealDep>0){
+        const foldX=o.rot?cx+o.x:cx+o.x+o.revealDep, foldY=o.rot?cy+o.y+o.revealDep:cy+o.y;
+        g+=o.rot
+          ?`<line x1="${cx+o.x}" y1="${foldY}" x2="${cx+o.x+dw}" y2="${foldY}" stroke="var(--warn)" stroke-width="${fs*0.09}" stroke-dasharray="${fs*0.22} ${fs*0.16}"/>`
+          :`<line x1="${foldX}" y1="${cy+o.y}" x2="${foldX}" y2="${cy+o.y+dh}" stroke="var(--warn)" stroke-width="${fs*0.09}" stroke-dasharray="${fs*0.22} ${fs*0.16}"/>`;
+        const lblTxt=`сгиб · накладка ${fmt(o.overlap)} мм`;
+        const vert=!o.rot;
+        if((vert?dh:dw)>fs*2.4 && tw(lblTxt,fs*0.5)<(vert?dh:dw)*0.9)
+          g+=txt(o.rot?cx+o.x+dw/2:foldX+fs*0.9,o.rot?foldY+fs*0.9:cy+o.y+dh/2,lblTxt,fs*0.5,'var(--warn)','var(--alu-face)',vert?{rot:-90}:{});
+      }
       const mid=cy+o.y+dh/2, mx=cx+o.x+dw/2;
       const cap=`${o.name} ${fmt(o.dep)}×${fmt(o.len)}${o.rot?' ↻':''}`;
       const vert=dh>dw, along=vert?dh:dw, thick=vert?dw:dh;
@@ -2953,7 +2974,8 @@ $('#btn-print').addEventListener('click',()=>window.print());
     const names={top:'Сверху',bottom:'Снизу',left:'Слева',right:'Справа'};
     const menu=menuShell(ev,`Откос · ${names[side]||side}`);
     const cur=(o.otkosMode&&o.otkosMode[side])||'corner';
-    [['corner','Г-образный угол'],['butt','Встык (без профиля)'],['bend','Изгиб панели']].forEach(([val,label])=>{
+    [['corner','Г-образный угол'],['butt','Встык (без профиля)'],['bend','Изгиб панели'],
+     ['protrude','Выступающий (накладка на стену)']].forEach(([val,label])=>{
       menuBtn(menu,label,cur===val,()=>{
         o.otkosMode=o.otkosMode||{}; o.otkosMode[side]=val;
         closeMatMenu(); renderOpenings(); run();
@@ -2967,8 +2989,8 @@ $('#btn-print').addEventListener('click',()=>window.print());
       });
     });
     // индивидуальный материал ЭТОЙ стороны откоса — только если сторона вообще режется из
-    // материала (corner/butt); при «изгибе»/«нет»/«заглушке»/«led» отдельной детали нет вовсе
-    if(cur==='corner'||cur==='butt'){
+    // материала (corner/butt/protrude); при «изгибе»/«нет»/«заглушке»/«led» отдельной детали нет вовсе
+    if(cur==='corner'||cur==='butt'||cur==='protrude'){
       menuDivider(menu,'Материал этой стороны откоса');
       const curMat=(o.otkosMat&&o.otkosMat[side])||null;
       const mk=(id,name)=>{
