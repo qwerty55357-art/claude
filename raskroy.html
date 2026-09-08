@@ -235,22 +235,6 @@ tbody tr:hover td{background:var(--surface)}
     <div class="sect-h"><span class="sect-n">04</span><span class="sect-t">Профили</span><span class="sect-arrow">▾</span></div>
     <div class="sect-b">
       <div class="row row-1"><div class="f"><label>Длина хлыста</label><input type="number" id="i-stock" value="3000"><span class="unit">мм</span></div></div>
-      <label class="sub-l">Стыки между панелями</label>
-      <label class="chk"><input type="checkbox" id="i-joint-v" checked><span>Профиль на вертикальных стыках полос</span></label>
-      <label class="chk"><input type="checkbox" id="i-joint-h" checked><span>Профиль на горизонтальных стыках (лист короче стены)</span></label>
-      <p class="hint">Края стены, горизонтальные и вертикальные стыки, LED — в разделе «LED».</p>
-      <label class="sub-l">Профили на контуре проёмов (Г-образные)</label>
-      <label class="chk"><input type="checkbox" id="i-edgeops" checked><span>Окантовка торцов у проёмов без откосов</span></label>
-      <label class="sub-l">Углы между стенами (по проекту, не по активной стене)</label>
-      <div id="corners-list"></div>
-      <button class="btn btn-mini" id="btn-add-corner">+ Добавить угол</button>
-      <p class="hint">Один угол = один физический стык краёв двух стен (или край стены и внешней конструкции) — считается один раз, а не по разу с каждой стороны.</p>
-    </div>
-  </section>
-  <section class="sect" data-sect>
-    <div class="sect-h"><span class="sect-n">05</span><span class="sect-t">LED</span><span class="sect-arrow">▾</span></div>
-    <div class="sect-b">
-      <p class="hint">Всё про свет — в одном месте. Сама подсветка теперь ставится рисованием мышью в разделе «LED» ниже схемы раскладки; здесь — сводка по проекту и обычные (не LED) края/стыки, которые по-прежнему можно переключать прямо на схеме.</p>
       <label class="sub-l">Края стены</label>
       <div class="row">
         <div class="f"><label>Верх</label><select id="i-e-top" class="edge-sel"><option value="none">— нет</option><option value="cap" selected>Заглушка</option><option value="led" disabled title="Ставится и снимается рисованием в разделе «LED»">LED (рисование)</option></select></div>
@@ -260,30 +244,23 @@ tbody tr:hover td{background:var(--surface)}
         <div class="f"><label>Слева</label><select id="i-e-left" class="edge-sel"><option value="none">— нет</option><option value="cap" selected>Заглушка</option><option value="led" disabled title="Ставится и снимается рисованием в разделе «LED»">LED (рисование)</option></select></div>
         <div class="f"><label>Справа</label><select id="i-e-right" class="edge-sel"><option value="none">— нет</option><option value="cap" selected>Заглушка</option><option value="led" disabled title="Ставится и снимается рисованием в разделе «LED»">LED (рисование)</option></select></div>
       </div>
+      <label class="sub-l">Стыки между панелями</label>
+      <label class="chk"><input type="checkbox" id="i-joint-v" checked><span>Профиль на вертикальных стыках полос</span></label>
+      <label class="chk"><input type="checkbox" id="i-joint-h" checked><span>Профиль на горизонтальных стыках (лист короче стены)</span></label>
       <label class="sub-l">Вертикальные стыки активной стены</label>
       <div id="jointsv-list"></div>
-      <p class="hint">Между полосами всегда либо соединитель, либо (если отмечено) светящийся соединитель — то же самое можно переключить кликом по линии на схеме. Горизонтальные и дополнительные вертикальные стыки — в разделе «Объект».</p>
-      <label class="sub-l">Итого по проекту</label>
-      <div id="led-summary"></div>
-      <div class="row">
-        <div class="f"><label>Доп. лента вручную</label><input type="number" id="i-ledlen" value="0" step="0.1"><span class="unit">м</span></div>
-        <div class="f"><label>Мощность ленты</label><input type="number" id="i-ledw" value="14.4" step="0.1"><span class="unit">Вт/м</span></div>
-      </div>
-      <div class="row">
-        <div class="f"><label>Запас БП</label><input type="number" id="i-psur" value="30"><span class="unit">%</span></div>
-        <div class="f"><label>Температура свечения</label><select id="i-ledtemp"></select></div>
-      </div>
-      <div class="row row-1">
-        <div class="f"><label>Макс. длина луча от точки питания</label><input type="number" id="i-ledmaxrun" value="5000" step="100"><span class="unit">мм</span></div>
-      </div>
-      <p class="hint">Луч — это один непрерывный физический отрезок ленты от одной точки подключения к блоку питания
-        (один нарисованный в разделе «LED» контур; несвязанные позиции без контура каждая считается своим лучом).
-        Превышение этой длины из-за просадки напряжения требует доп. точку питания — добавляется отдельный блок
-        питания сверх того, что нужно только по нагрузке.</p>
+      <p class="hint">Между полосами всегда либо соединитель, либо (если отмечено рисованием в разделе «LED») светящийся
+        соединитель. Горизонтальные и дополнительные вертикальные стыки — в разделе «Объект».</p>
+      <label class="sub-l">Профили на контуре проёмов (Г-образные)</label>
+      <label class="chk"><input type="checkbox" id="i-edgeops" checked><span>Окантовка торцов у проёмов без откосов</span></label>
+      <label class="sub-l">Углы между стенами (по проекту, не по активной стене)</label>
+      <div id="corners-list"></div>
+      <button class="btn btn-mini" id="btn-add-corner">+ Добавить угол</button>
+      <p class="hint">Один угол = один физический стык краёв двух стен (или край стены и внешней конструкции) — считается один раз, а не по разу с каждой стороны.</p>
     </div>
   </section>
   <section class="sect" data-sect>
-    <div class="sect-h"><span class="sect-n">06</span><span class="sect-t">Клей</span><span class="sect-arrow">▾</span></div>
+    <div class="sect-h"><span class="sect-n">05</span><span class="sect-t">Клей</span><span class="sect-arrow">▾</span></div>
     <div class="sect-b">
       <div class="row">
         <div class="f"><label>Клея на панель</label><input type="number" id="i-glue" value="1.5" step="0.1"><span class="unit">туб/лист</span></div>
@@ -293,7 +270,7 @@ tbody tr:hover td{background:var(--surface)}
     </div>
   </section>
   <section class="sect closed" data-sect>
-    <div class="sect-h"><span class="sect-n">07</span><span class="sect-t">Цены</span><span class="sect-arrow">▾</span></div>
+    <div class="sect-h"><span class="sect-n">06</span><span class="sect-t">Цены</span><span class="sect-arrow">▾</span></div>
     <div class="sect-b">
       <div class="row">
         <div class="f"><label>Панель, шт</label><input type="number" id="p-panel" value="4500"></div>
@@ -340,11 +317,29 @@ tbody tr:hover td{background:var(--surface)}
   <div class="block" id="led-draw-block">
     <div class="stage-h"><h2>LED — рисование отрезков</h2><span class="meta" id="led-draw-meta"></span><span class="rule"></span></div>
     <p class="hint" style="margin:0 0 8px">Ведите мышью от одного узла схемы (угол стены, стык, край, угол контура откоса)
-      к другому по прямой — появится отрезок LED. Точку можно ставить только на узел; несколько узлов подряд на одной
-      прямой — это один непрерывный отрезок. Провести можно несколько раз — каждая протяжка добавляет новый контур ниже,
-      способ реализации (профиль/без профиля) выбирается там же.</p>
+      к другому по прямой — появится отрезок. Точку можно ставить только на узел; несколько узлов подряд на одной
+      прямой — это один непрерывный отрезок. Сразу после протяжки, а также в любой момент кликом по уже нарисованному
+      отрезку — меню выбора способа реализации (профиль/без профиля) и удаления. Список ниже — просто справка.</p>
     <div class="svg-wrap" id="led-draw"></div>
     <div id="led-circuits-list"></div>
+    <label class="sub-l">Настройки LED</label>
+    <div class="row">
+      <div class="f"><label>Доп. лента вручную</label><input type="number" id="i-ledlen" value="0" step="0.1"><span class="unit">м</span></div>
+      <div class="f"><label>Мощность ленты</label><input type="number" id="i-ledw" value="14.4" step="0.1"><span class="unit">Вт/м</span></div>
+    </div>
+    <div class="row">
+      <div class="f"><label>Запас БП</label><input type="number" id="i-psur" value="30"><span class="unit">%</span></div>
+      <div class="f"><label>Температура свечения</label><select id="i-ledtemp"></select></div>
+    </div>
+    <div class="row row-1">
+      <div class="f"><label>Макс. длина луча от точки питания</label><input type="number" id="i-ledmaxrun" value="5000" step="100"><span class="unit">мм</span></div>
+    </div>
+    <p class="hint">Луч — это один непрерывный физический отрезок ленты от одной точки подключения к блоку питания
+      (один нарисованный выше контур; несвязанная позиция без контура — сама себе луч). Превышение этой длины из-за
+      просадки напряжения требует доп. точку питания — добавляется отдельный блок питания сверх того, что нужно
+      только по нагрузке.</p>
+    <label class="sub-l">Итого по проекту</label>
+    <div id="led-summary"></div>
   </div>
   <div class="block">
     <div class="stage-h"><h2>Карта раскроя</h2><span class="meta" id="cut-meta"></span><span class="rule"></span></div>
@@ -595,6 +590,43 @@ $('#jointsv-list').addEventListener('change',e=>{
   w.jointModes[jointSegKey('v',+pos,+seg)]=e.target.value;
   run();
 });
+/* ---- общая заготовка всплывающего меню (позиция у курсора) — используется меню стыков/
+   краёв/откосов на основной схеме и меню LED-контура в разделе «LED» ---- */
+// [ОТРИСОВКА]
+function menuShell(ev,title,minW){
+  closeMatMenu();
+  const menu=document.createElement('div');
+  menu.id='mat-menu';
+  menu.style.cssText=`position:fixed;z-index:99;background:var(--surface);border:1px solid var(--line-2);border-radius:8px;padding:6px;box-shadow:0 8px 30px rgba(0,0,0,.5);font-size:12px;min-width:${minW||210}px`;
+  menu.style.left=Math.min(ev.clientX,window.innerWidth-260)+'px';
+  menu.style.top=Math.min(ev.clientY,window.innerHeight-160)+'px';
+  const t=document.createElement('div');
+  t.style.cssText='font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:4px 8px 6px';
+  t.textContent=title;
+  menu.appendChild(t);
+  document.body.appendChild(menu);
+  setTimeout(()=>document.addEventListener('pointerdown',closeOnOutside,{capture:true}),0);
+  return menu;
+}
+function menuBtn(menu,label,checked,onClick,danger){
+  const b=document.createElement('button');
+  b.style.cssText=`display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:none;border:none;color:${danger?'var(--err)':'var(--paper)'};padding:6px 8px;cursor:pointer;border-radius:6px;font-size:12px`;
+  b.onmouseenter=()=>b.style.background='var(--void)';
+  b.onmouseleave=()=>b.style.background='none';
+  b.innerHTML=`<span>${esc(label)}</span>`+(checked?' <span style="margin-left:auto">✓</span>':'');
+  b.onclick=onClick;
+  menu.appendChild(b);
+  return b;
+}
+function menuDivider(menu,label){
+  const t=document.createElement('div');
+  t.style.cssText='font-family:var(--mono);font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);padding:8px 8px 3px;border-top:1px solid var(--line-2);margin-top:4px';
+  t.textContent=label;
+  menu.appendChild(t);
+}
+function closeOnOutside(e){ const m=document.getElementById('mat-menu'); if(m&&!m.contains(e.target)) closeMatMenu(); }
+function closeMatMenu(){ const m=document.getElementById('mat-menu'); if(m){m.remove(); document.removeEventListener('pointerdown',closeOnOutside,{capture:true});} }
+
 /* ---- сводка LED по проекту (раздел LED) ---- */
 // [ОТРИСОВКА]
 function renderLedSummary(R){
@@ -645,6 +677,19 @@ function legRawClear(w,leg){
   delete w.jointModes[jointSegKey(kind,leg.pos,leg.segStart)];
 }
 // [ОТРИСОВКА]
+// суммарная длина (мм) той части контура, что лежит на данной стене — по факту совпадающих
+// рёбер графа этой стены; используется и в справочном списке, и (в будущем) где ещё понадобится
+function circuitLenMm(c,wall,graph){
+  let sum=0;
+  c.legs.filter(l=>l.wall===wall.id).forEach(l=>{
+    const key=ledLegKey(l);
+    const e=graph.edges.find(ge=>ledLegKey(Object.assign({wall:wall.id},ge.leg))===key);
+    if(!e) return;
+    const a=graph.nodes.find(n=>n.key===e.a), b=graph.nodes.find(n=>n.key===e.b);
+    if(a&&b) sum+=Math.hypot(a.x-b.x,a.y-b.y);
+  });
+  return sum;
+}
 function renderLedDraw(G,R){
   const box=$('#led-draw'); if(!box) return;
   const wall=AW(), wi=active;
@@ -653,64 +698,93 @@ function renderLedDraw(G,R){
   const graph=wallLedGraph(wall,G);
   const H=wall.H, fs=Math.max(wall.W,wall.H)/48;
   let overlay='';
-  // уже подтверждённые LED-отрезки этой стены — рёбра графа, покрытые каким-то контуром
+  // все узлы этой стены, пронумерованные в том же порядке, что и справочный список ниже
+  const numbered=ledCircuits.filter(c=>c.legs.some(l=>l.wall===wall.id));
+  const numByCircId=new Map(numbered.map((c,i)=>[c.id,i+1]));
+  // «доступные для LED» рёбра графа (все, не только уже нарисованные) — бледная сетка поверх
+  // затемнённой панели, чтобы было видно, где вообще можно провести отрезок
+  graph.edges.forEach(e=>{
+    const leg=Object.assign({wall:wall.id},e.leg);
+    if(ledCircuitOf(ledCircuits,leg)) return;   // уже нарисованный — рисуется отдельно ниже, ярко
+    const a=graph.nodes.find(n=>n.key===e.a), b=graph.nodes.find(n=>n.key===e.b);
+    overlay+=`<line x1="${a.x}" y1="${H-a.y}" x2="${b.x}" y2="${H-b.y}" stroke="var(--alu)" stroke-width="${fs*0.09}" stroke-dasharray="${fs*0.05} ${fs*0.14}" opacity=".55" pointer-events="none"/>`;
+  });
+  // уже подтверждённые LED-отрезки этой стены — группируем по контуру (не по ребру), чтобы у
+  // каждого контура была ОДНА подпись-номер и клик по любой его ножке открывал одно и то же меню
+  const byCircuit=new Map();
   graph.edges.forEach(e=>{
     const leg=Object.assign({wall:wall.id},e.leg);
     const c=ledCircuitOf(ledCircuits,leg);
     if(!c) return;
     const a=graph.nodes.find(n=>n.key===e.a), b=graph.nodes.find(n=>n.key===e.b);
-    const col=c.kind==='none'?'var(--ok)':'var(--warn)';
-    overlay+=`<line x1="${a.x}" y1="${H-a.y}" x2="${b.x}" y2="${H-b.y}" stroke="${col}" stroke-width="${fs*0.32}" stroke-linecap="round" opacity=".85" pointer-events="none"/>`;
+    if(!byCircuit.has(c.id)) byCircuit.set(c.id,{kind:c.kind,segs:[]});
+    byCircuit.get(c.id).segs.push({a,b});
   });
-  // узлы-«перекрёстки» — точки захвата под мышь (см. wallLedGraph)
+  byCircuit.forEach((info,cid)=>{
+    const col=info.kind==='none'?'var(--ok)':'var(--warn)';
+    info.segs.forEach(seg=>{
+      overlay+=`<line x1="${seg.a.x}" y1="${H-seg.a.y}" x2="${seg.b.x}" y2="${H-seg.b.y}" stroke="${col}" stroke-width="${fs*0.34}" stroke-linecap="round" opacity=".92" data-ledcircuit="${cid}" style="cursor:pointer"/>`;
+    });
+    // подпись-номер — кружок с цифрой на середине «средней» по счёту ножки контура
+    const mid=info.segs[Math.floor(info.segs.length/2)];
+    const lx=(mid.a.x+mid.b.x)/2, ly=H-(mid.a.y+mid.b.y)/2;
+    const num=numByCircId.get(cid);
+    if(num!=null){
+      overlay+=`<circle cx="${lx}" cy="${ly}" r="${fs*0.36}" fill="${col}" stroke="var(--void)" stroke-width="${fs*0.06}" data-ledcircuit="${cid}" style="cursor:pointer"/>`+
+        `<text x="${lx}" y="${ly}" text-anchor="middle" dy=".32em" font-size="${fs*0.42}" font-family="var(--mono)" font-weight="700" fill="var(--void)" pointer-events="none">${num}</text>`;
+    }
+  });
+  // узлы-«перекрёстки»: увеличенная НЕВИДИМАЯ зона захвата (легко попасть мышью, не «соскальзывает»)
+  // + маленькая видимая точка поверх неё, у видимой точки pointer-events отключён — кликабельность
+  // целиком на невидимом круге, чтобы визуальный размер точки не приходилось раздувать вместе с ней
   graph.nodes.forEach(n=>{
-    overlay+=`<circle cx="${n.x}" cy="${H-n.y}" r="${fs*0.22}" fill="var(--paper)" fill-opacity=".85" stroke="var(--muted)" stroke-width="${fs*0.05}" data-lednode="${n.key}" style="cursor:crosshair"/>`;
+    const cx=n.x, cy=H-n.y;
+    overlay+=`<circle cx="${cx}" cy="${cy}" r="${fs*0.9}" fill="transparent" data-lednode="${n.key}" style="cursor:crosshair"/>`;
+    overlay+=`<circle cx="${cx}" cy="${cy}" r="${fs*0.24}" fill="var(--paper)" stroke="var(--muted)" stroke-width="${fs*0.06}" pointer-events="none"/>`;
   });
-  // тёмная сплошная «подложка» под пунктиром — иначе тонкий пунктир почти не виден на светлой
-  // панели (var(--straw-face) не зависит от темы, в отличие от var(--void)/var(--bg))
+  // превью протяжки — светлая подложка (не тёмная: сама панель теперь затемнена) + яркий пунктир поверх
   overlay+=`<g id="led-preview-g" opacity="0" pointer-events="none">`+
-    `<line id="led-preview-halo" x1="0" y1="0" x2="0" y2="0" stroke="#000" stroke-opacity=".4" stroke-width="${fs*0.4}" stroke-linecap="round"/>`+
+    `<line id="led-preview-halo" x1="0" y1="0" x2="0" y2="0" stroke="var(--paper)" stroke-opacity=".55" stroke-width="${fs*0.42}" stroke-linecap="round"/>`+
     `<line id="led-preview" x1="0" y1="0" x2="0" y2="0" stroke="var(--warn)" stroke-width="${fs*0.26}" stroke-linecap="round" stroke-dasharray="${fs*0.32} ${fs*0.24}"/>`+
     `</g>`;
-  box.innerHTML=sc.svg.replace('</svg>',overlay+'</svg>');
+  // затемняем САМУ панель (весь исходный g из schemeFor — раскладка/размеры/подписи), чтобы
+  // внимание было на перекрёстках и линиях LED, а не на цвете материала
+  const svgOpenEnd=sc.svg.indexOf('>')+1;
+  const dimmed=sc.svg.slice(0,svgOpenEnd)+'<g style="opacity:.4;filter:saturate(.5)">'+
+    sc.svg.slice(svgOpenEnd,-'</svg>'.length)+'</g>'+overlay+'</svg>';
+  box.innerHTML=dimmed;
   renderLedCircuitsList();
 }
+function showLedCircuitMenu(ev,circId){
+  const c=ledCircuits.find(x=>x.id===circId); if(!c) return;
+  const menu=menuShell(ev,'LED-отрезок');
+  const setKind=k=>{ c.kind=k; closeMatMenu(); run(); };
+  menuBtn(menu,'Стартовый профиль',c.kind==='start',()=>setKind('start'));
+  menuBtn(menu,'Соединительный профиль',c.kind==='joint',()=>setKind('joint'));
+  menuBtn(menu,'Без профиля',c.kind==='none',()=>setKind('none'));
+  menuDivider(menu,'');
+  menuBtn(menu,'Удалить отрезок',false,()=>{
+    const byId=new Map(walls.map(w=>[w.id,w]));
+    c.legs.forEach(l=>{ const w=byId.get(+l.wall); if(w) legRawClear(w,l); });
+    ledCircuits=ledCircuits.filter(x=>x.id!==circId);
+    closeMatMenu(); run();
+  },true);
+}
+// справочный список — только для чтения (номер/длина/способ), само редактирование — по клику
+// на отрезок на схеме (см. showLedCircuitMenu) или сразу после протяжки
 function renderLedCircuitsList(){
   const box=$('#led-circuits-list'); if(!box) return;
   const wall=AW();
+  const graph=wallLedGraph(wall,collect());
   const mine=ledCircuits.filter(c=>c.legs.some(l=>l.wall===wall.id));
   if(!mine.length){ box.innerHTML='<p class="hint" style="margin:4px 0">На этой стене пока нет нарисованных LED-отрезков.</p>'; return; }
-  box.innerHTML=mine.map(c=>{
-    const onWall=c.legs.filter(l=>l.wall===wall.id).length;
+  const kindLabel={start:'стартовый профиль',joint:'соединительный профиль',none:'без профиля'};
+  box.innerHTML=mine.map((c,i)=>{
+    const lenMm=circuitLenMm(c,wall,graph);
     const otherWalls=[...new Set(c.legs.filter(l=>l.wall!==wall.id).map(l=>l.wall))];
-    return `<div class="row" style="align-items:center;margin-bottom:4px" data-ledcirc="${c.id}">
-      <div class="f"><label>Контур #${c.id} (${onWall} уч.${otherWalls.length?` + на ${otherWalls.length} др. стене(-ах)`:''})</label>
-        <select data-ledkind="${c.id}">
-          <option value="start"${c.kind==='start'?' selected':''}>Стартовый профиль</option>
-          <option value="joint"${c.kind==='joint'?' selected':''}>Соединительный профиль</option>
-          <option value="none"${c.kind==='none'?' selected':''}>Без профиля</option>
-        </select>
-      </div>
-      <div class="f" style="display:flex;align-items:flex-end">
-        <button class="btn btn-del btn-mini" data-leddel="${c.id}">удалить весь контур</button>
-      </div>
-    </div>`;
+    return `<p class="hint" style="margin:2px 0">#${i+1} — ${fmt(lenMm)} мм · ${kindLabel[c.kind]||c.kind}${otherWalls.length?` · ещё на ${otherWalls.length} др. стене(-ах)`:''}</p>`;
   }).join('');
 }
-$('#led-circuits-list').addEventListener('change',e=>{
-  const id=e.target.dataset.ledkind; if(!id) return;
-  const c=ledCircuits.find(x=>x.id==id); if(!c) return;
-  c.kind=e.target.value;
-  run();
-});
-$('#led-circuits-list').addEventListener('click',e=>{
-  const id=e.target.dataset.leddel; if(!id) return;
-  const c=ledCircuits.find(x=>x.id==id); if(!c) return;
-  const byId=new Map(walls.map(w=>[w.id,w]));
-  c.legs.forEach(l=>{ const w=byId.get(+l.wall); if(w) legRawClear(w,l); });
-  ledCircuits=ledCircuits.filter(x=>x.id!=id);
-  run();
-});
 /* протяжка мышью: точка А — pointerdown на узле, дальше только вверх/вниз/вправо/влево вдоль
    графа (см. wallLedGraph); точка Б — тоже узел, снапится к ближайшему узлу на луче под мышью.
    Несколько узлов между А и Б — один непрерывный отрезок (все рёбра пути становятся ножками
@@ -724,8 +798,12 @@ $('#led-circuits-list').addEventListener('click',e=>{
     const m=svg.getScreenCTM(); if(!m) return null;
     return pt.matrixTransform(m.inverse());
   };
-  const dirOf=(dx,dy)=>{
-    if(Math.abs(dx)<15&&Math.abs(dy)<15) return null;
+  // порог до фиксации направления — в единицах масштаба стены (fs), а не в фиксированных мм:
+  // на маленькой стене фиксированные 15мм почти не занимают экрана и направление «дёргается»
+  // от любого дрожания руки; относительный порог даёт одинаковый экранный запас всегда
+  const dirOf=(dx,dy,fs)=>{
+    const th=fs*0.8;
+    if(Math.abs(dx)<th&&Math.abs(dy)<th) return null;
     return Math.abs(dx)>Math.abs(dy) ? (dx>0?'right':'left') : (dy>0?'up':'down');
   };
   function rayFrom(graph,startKey,dir){
@@ -761,8 +839,10 @@ $('#led-circuits-list').addEventListener('click',e=>{
     }
     return path;
   }
+  let downAt=null;
   box.addEventListener('pointerdown',ev=>{
     const t=ev.target;
+    downAt={x:ev.clientX,y:ev.clientY};
     if(t.dataset&&t.dataset.lednode!==undefined){
       const wall=AW(), G=collect();
       const graph=wallLedGraph(wall,G);
@@ -775,11 +855,11 @@ $('#led-circuits-list').addEventListener('click',e=>{
     if(!drag) return;
     const p=svgPoint(ev); if(!p) return;
     const wall=AW(); if(wall.id!==drag.wallId) return;
-    const H=wall.H;
+    const H=wall.H, fs=Math.max(wall.W,wall.H)/48;
     const startNode=drag.graph.nodes.find(n=>n.key===drag.startKey);
     const wallX=p.x, wallY=H-p.y;
     const dx=wallX-startNode.x, dy=wallY-startNode.y;
-    const dir=dirOf(dx,dy);
+    const dir=dirOf(dx,dy,fs);
     const svg=box.querySelector('svg'), previewG=svg&&svg.querySelector('#led-preview-g');
     const setPreview=(x1,y1,x2,y2,opacity)=>{
       if(!previewG) return;
@@ -800,23 +880,54 @@ $('#led-circuits-list').addEventListener('click',e=>{
     drag.target=best;
     setPreview(startNode.x,H-startNode.y,best.x,H-best.y,best===startNode?'0':'1');
   });
+  // клик (без сколь-нибудь заметного перетаскивания) по уже нарисованному отрезку — открыть его
+  // меню. Ищем ПО ВСЕМ элементам под курсором (elementsFromPoint), а не только по самому верхнему:
+  // невидимая (увеличенная под запрос «легко попасть») зона захвата узла часто лежит поверх линии
+  // отрезка, которая проходит ЧЕРЕЗ этот узел (например, стык посреди края) — иначе клик по такой
+  // точке молча проваливался бы в круг узла и никогда не находил линию под ним.
+  const findCircuitAt=(x,y)=>{
+    const stack=document.elementsFromPoint(x,y);
+    const el=stack.find(e=>e.dataset&&e.dataset.ledcircuit!==undefined);
+    return el?+el.dataset.ledcircuit:null;
+  };
   box.addEventListener('pointerup',ev=>{
-    if(!drag) return;
+    if(!drag){
+      // не тянули узел — возможно, кликнули по уже нарисованному отрезку/его номеру (без
+      // заметного смещения мыши — иначе выделение текста/случайное дрожание руки тоже открыло бы меню)
+      const moved=downAt&&(Math.abs(ev.clientX-downAt.x)>=5||Math.abs(ev.clientY-downAt.y)>=5);
+      const circId=!moved&&findCircuitAt(ev.clientX,ev.clientY);
+      if(circId!=null) showLedCircuitMenu(ev,circId);
+      downAt=null;
+      return;
+    }
     const wall=AW();
-    if(wall.id===drag.wallId && drag.target){
+    let newCircId=null, clickedExisting=null;
+    if(wall.id===drag.wallId){
       const startNode=drag.graph.nodes.find(n=>n.key===drag.startKey);
-      if(drag.target!==startNode){
+      // drag.target остаётся null, если не было ни единого pointermove между down и up (то есть
+      // клик без малейшего движения — mouse.click в тестах ведёт себя именно так) — приравниваем
+      // это к «не сдвинулись», а не пропускаем всю обработку молча
+      if(drag.target && drag.target!==startNode){
         const idx=drag.path.findIndex(s=>s.node===drag.target);
         const legs=drag.path.slice(0,idx+1).map(s=>Object.assign({wall:wall.id},s.edge.leg));
         legs.forEach(l=>legRawSet(wall,l,'led'));
         ledCircuitSeq++;
-        ledCircuits.push({id:ledCircuitSeq,kind:'start',legs});
+        newCircId=ledCircuitSeq;
+        ledCircuits.push({id:newCircId,kind:'start',legs});
         run();
+      } else {
+        // потянули из узла, но реально не сдвинулись — если этот узел лежит на уже нарисованном
+        // отрезке (например, стык посреди края), считаем это кликом на редактирование того отрезка
+        clickedExisting=findCircuitAt(ev.clientX,ev.clientY);
       }
     }
     drag=null;
     const svg=box.querySelector('svg'), previewG=svg&&svg.querySelector('#led-preview-g');
     if(previewG) previewG.setAttribute('opacity','0');
+    // сразу после протяжки — меню выбора способа реализации (профиль/без профиля) для НОВОГО
+    // отрезка, а не молчаливый дефолт 'start'; то же самое меню открывается кликом на отрезок позже
+    if(newCircId!=null) showLedCircuitMenu(ev,newCircId);
+    else if(clickedExisting!=null) showLedCircuitMenu(ev,clickedExisting);
   });
 })();
 
@@ -3275,38 +3386,8 @@ $('#btn-print').addEventListener('click',()=>window.print());
   };
   box.addEventListener('pointerup',stop);
   box.addEventListener('pointercancel',()=>{drag=null;downAt=null;});
-  // общая заготовка всплывающего меню — тот же вид, что у выбора материала заполнения
-  function menuShell(ev,title,minW){
-    closeMatMenu();
-    const menu=document.createElement('div');
-    menu.id='mat-menu';
-    menu.style.cssText=`position:fixed;z-index:99;background:var(--surface);border:1px solid var(--line-2);border-radius:8px;padding:6px;box-shadow:0 8px 30px rgba(0,0,0,.5);font-size:12px;min-width:${minW||210}px`;
-    menu.style.left=Math.min(ev.clientX,window.innerWidth-260)+'px';
-    menu.style.top=Math.min(ev.clientY,window.innerHeight-160)+'px';
-    const t=document.createElement('div');
-    t.style.cssText='font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:4px 8px 6px';
-    t.textContent=title;
-    menu.appendChild(t);
-    document.body.appendChild(menu);
-    setTimeout(()=>document.addEventListener('pointerdown',closeOnOutside,{capture:true}),0);
-    return menu;
-  }
-  function menuBtn(menu,label,checked,onClick,danger){
-    const b=document.createElement('button');
-    b.style.cssText=`display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:none;border:none;color:${danger?'var(--err)':'var(--paper)'};padding:6px 8px;cursor:pointer;border-radius:6px;font-size:12px`;
-    b.onmouseenter=()=>b.style.background='var(--void)';
-    b.onmouseleave=()=>b.style.background='none';
-    b.innerHTML=`<span>${esc(label)}</span>`+(checked?' <span style="margin-left:auto">✓</span>':'');
-    b.onclick=onClick;
-    menu.appendChild(b);
-    return b;
-  }
-  function menuDivider(menu,label){
-    const t=document.createElement('div');
-    t.style.cssText='font-family:var(--mono);font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);padding:8px 8px 3px;border-top:1px solid var(--line-2);margin-top:4px';
-    t.textContent=label;
-    menu.appendChild(t);
-  }
+  // menuShell/menuBtn/menuDivider/closeOnOutside/closeMatMenu — теперь общие функции верхнего
+  // уровня (см. рядом с renderLedSummary), их использует и меню LED-контура в разделе «LED»
   function showSeamMenu(ev,pos,segStart){
     const w=AW(); const G=collect();
     const key=jointSegKey('h',pos,segStart);
@@ -3439,8 +3520,6 @@ $('#btn-print').addEventListener('click',()=>window.print());
     mk(null,'— материал стены (по умолчанию) —');
     PRESETS.filter(pp=>pp.id!=='custom').forEach(pp=>mk(pp.id,pp.name));
   }
-  function closeOnOutside(e){ const m=document.getElementById('mat-menu'); if(m&&!m.contains(e.target)) closeMatMenu(); }
-  function closeMatMenu(){ const m=document.getElementById('mat-menu'); if(m){m.remove(); document.removeEventListener('pointerdown',closeOnOutside,{capture:true});} }
 })();
 // touch-action, чтобы палец не скроллил страницу при перетаскивании
 (function(){const st=document.createElement('style');st.textContent='#scheme svg{touch-action:none}';document.head.appendChild(st);})();
