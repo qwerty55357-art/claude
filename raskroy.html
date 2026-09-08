@@ -447,7 +447,7 @@ let ledCircuits=[], ledCircuitSeq=0;
 function newWall(){
   wallSeq++;
   return {id:wallSeq, name:'Стена '+wallSeq, W:4000, H:2300, ceil:2700, rowH:0,
-          ops:[], opSeq:0, seamsU:[], seamSeq:0, vseamsU:[], vseamSeq:0, jointsVLed:[], jointModes:{},
+          ops:[], opSeq:0, seamsU:[], seamSeq:0, vseamsU:[], vseamSeq:0, jointModes:{},
           pieceMats:{}, edges:{top:'cap',bot:'none',left:'cap',right:'cap'}, cout:0, cin:0};
 }
 const AW=()=>walls[active];
@@ -1922,9 +1922,6 @@ function jointSegMode(w,G,kind,pos,segStart){
   const key=jointSegKey(kind,pos,segStart);
   const explicit=(w.jointModes||{})[key];
   if(explicit) return explicit;
-  // резервный сигнал от старых полей (миграция без явной перезаписи данных)
-  if(kind==='v' && (w.jointsVLed||[]).some(v=>Math.abs(v-pos)<1.5)) return 'led';
-  if(kind==='h' && (w.seamsU||[]).some(u=>u.led&&Math.abs(u.pos-pos)<1.5)) return 'led';
   const globalOn = kind==='v' ? G.jointV : G.jointH;
   return globalOn ? 'cap' : 'butt';
 }
@@ -3162,7 +3159,6 @@ $('#file-load').addEventListener('change',e=>{
       manualMoves=(o.manual&&typeof o.manual==='object')?o.manual:{};
       walls.forEach(w=>{
         ['top','bot','left','right'].forEach(k=>{ w.edges[k]=edgeMode(w.edges[k]); });
-        (w.seamsU||[]).forEach(sm=>{ sm.led=!!sm.led; });
         w.ops.forEach(op=>{ if(!op.anchorH) op.anchorH='left'; if(!op.otkosMode) op.otkosMode={}; });
       });
       // углы: оставляем только ссылки на реально существующие стены (после миграции/удаления часть могла пропасть)

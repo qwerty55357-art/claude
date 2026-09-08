@@ -8,19 +8,15 @@ function rnd(seed){let x=seed;return()=>{x=(x*1103515245+12345)&0x7fffffff;retur
 function mkWall(r){
   const W=Math.round((1000+r()*11000)/10)*10, H=Math.round((500+r()*4000)/10)*10;
   const w={W,H,ceil:Math.max(H,2000),rowH:(r()<0.3?Math.round((500+r()*2400)/10)*10:0),
-    ops:[],seamsU:[],seamSeq:0,vseamsU:[],vseamSeq:0,jointsVLed:[],
+    ops:[],seamsU:[],seamSeq:0,vseamsU:[],vseamSeq:0,
     edges:{top:['cap','led','none'][Math.floor(r()*3)],bot:r()<0.3?'cap':'none',
            left:r()<0.8?'cap':'none',right:['cap','led','none'][Math.floor(r()*3)]},
     cout:Math.floor(r()*3),cin:Math.floor(r()*3),jointModes:{}};
   const nS=Math.floor(r()*3);
-  for(let i=0;i<nS;i++) w.seamsU.push({id:i+1,pos:Math.round((100+r()*(H-200))/10)*10,led:r()<0.4});
+  for(let i=0;i<nS;i++) w.seamsU.push({id:i+1,pos:Math.round((100+r()*(H-200))/10)*10});
   // ручные вертикальные стыки (в любом месте по ширине, не только на границе полос материала)
   const nVS=Math.floor(r()*3);
   for(let i=0;i<nVS;i++) w.vseamsU.push({id:i+1,pos:Math.round((100+r()*(W-200))/10)*10});
-  // случайные метки продольных LED-стыков: подставляем позиции, часть из которых реально совпадёт
-  // с фактическими границами полос (pw), часть — мимо (тогда просто не найдут соответствия, не баг)
-  const nJ=Math.floor(r()*3);
-  for(let i=0;i<nJ;i++) w.jointsVLed.push(Math.round((r()*W)/10)*10);
   const nOps=Math.floor(r()*4);
   for(let i=0;i<nOps;i++){
     const full=r()<0.3;
@@ -127,33 +123,15 @@ for(let t=0;t<N;t++){
     let widenArea=0;
     L.pieces.forEach(p=>(p.bend||[]).forEach(b=>{ if(!b.inner) widenArea+=b.extra||0; }));
     ea+=widenArea*1e6;
-    // LED физически шире обычного стыка (LED_GAP=10мм) — деталь по обе стороны такого стыка
-    // теряет материал: вертикальный LED-стык съедает insetStart+insetEnd по всей длине полосы,
-    // горизонтальный — 10мм на всю (уже уменьшенную вертикальными стыками) ширину полосы
+    // LED физически шире обычного стыка (LED_GAP=10мм) — деталь теряет insetStart+insetEnd по
+    // всей длине полосы. mkWall в основном цикле больше не расставляет 'led' на стыках/швах
+    // напрямую (только на краях w.edges и сторонах откоса) — insetStart/insetEnd читаем как есть,
+    // отдельного независимого пересчёта «откуда взялся LED» тут больше не нужно: горизонтальный
+    // LED-шов (через jointModes/ledCircuits) детерминированно покрыт отдельными L130/L131/L134.
     let ledLoss=0;
     L.strips.forEach(st=>{
       const segLen=st.segs.reduce((x,sg)=>x+(sg[1]-sg[0]),0);
       ledLoss+=((st.insetStart||0)+(st.insetEnd||0))*segLen;
-    });
-    // горизонтальные LED-швы: независимый пересчёт ПО ПОЛОСЕ через ОБЪЕДИНЕНИЕ отрезков
-    // [pos-5,pos+5] по LED-меткам seamsU, реально попадающим ВНУТРЬ одного из сегментов этой
-    // полосы (строго внутри — «шов» на самой границе сегмента ничего не режет) — а не через
-    // L.seams: L.seams МОЛЧА теряет метку, если из-за неё и соседней LED-метки ближе LED_GAP=10мм
-    // друг от друга кусок между ними схлопнулся до нулевой длины и был отброшен ДО seams.push
-    // (см. buildLayout) — тогда пересчёт через L.seams недосчитал бы эту потерю площади. Ограничение
-    // «строго внутри сегмента ЭТОЙ полосы» — чтобы не считать метку там, где для этой полосы шва
-    // вообще нет (проём разбил сегмент иначе, чем у соседних полос).
-    L.strips.forEach(st=>{
-      const inSeg=p=>st.segs.some(sg=>p>sg[0]+0.5 && p<sg[1]-0.5);
-      const pos=(wallsArr[wi].seamsU||[]).filter(u=>u.led&&inSeg(u.pos)).map(u=>u.pos).sort((a,b)=>a-b);
-      const merged=[];
-      pos.forEach(p=>{
-        const iv=[p-5,p+5];
-        if(merged.length && iv[0]<=merged[merged.length-1][1]+0.01) merged[merged.length-1][1]=Math.max(merged[merged.length-1][1],iv[1]);
-        else merged.push(iv);
-      });
-      const uni=merged.reduce((a,iv)=>a+(iv[1]-iv[0]),0);
-      ledLoss+=uni*(st.w-(st.insetStart||0)-(st.insetEnd||0));
     });
     ea-=ledLoss;
     chk('L4',Math.abs(pa-ea)<1,`${id} стена ${wi}: площадь деталей ${pa} != ${ea}`);
@@ -189,7 +167,7 @@ for(let t=0;t<N;t++){
   // мог бы не заметить компенсирующую пару ошибок в противоположных знаках).
   if(rand()<0.4){
     const wT={W:3200,H:2300,ceil:3000,rowH:0,ops:[],seamsU:[],seamSeq:0,vseamsU:[],vseamSeq:0,
-      jointsVLed:[],edges:{top:'none',bot:'none',left:'cap',right:'cap'},cout:0,cin:0,jointModes:{}};
+      edges:{top:'none',bot:'none',left:'cap',right:'cap'},cout:0,cin:0,jointModes:{}};
     const Gt=Object.assign({},G,{orient:'v',sym:false});
     const base=C.computeProject(Gt,[wT]).layouts[0];
     if(base.strips.length>=2){
@@ -246,7 +224,7 @@ for(let t=0;t<N;t++){
     // L133 (нов): «LED на краю панели» у откоса (без материала) — вырез под проём увеличивается
     // на LED_GAP именно с той стороны, где выбран этот режим, панель со стороны проёма отступает
     const wOp={W:3000,H:2300,ceil:3000,rowH:0,seamsU:[],seamSeq:0,vseamsU:[],vseamSeq:0,
-      jointsVLed:[],edges:{top:'none',bot:'none',left:'none',right:'none'},cout:0,cin:0,jointModes:{},
+      edges:{top:'none',bot:'none',left:'none',right:'none'},cout:0,cin:0,jointModes:{},
       ops:[{kind:'window',w:800,h:1000,x:1000,y:500,otkos:true,depth:150,id:1,
             otkosMode:{left:'cap',right:'cap',top:'cap',bottom:'cap'}}]};
     const baseOp=C.computeProject(Gt,[wOp]).layouts[0];
@@ -445,7 +423,7 @@ for(let t=0;t<N;t++){
     const bigLen=50+rand()*300;
     const Gx=Object.assign({},G,{ledLen:bigLen});
     const wSimple={W:3000,H:2300,ceil:3000,rowH:0,ops:[],seamsU:[],seamSeq:0,vseamsU:[],vseamSeq:0,
-      jointsVLed:[],edges:{top:'none',bot:'none',left:'none',right:'none'},cout:0,cin:0,jointModes:{}};
+      edges:{top:'none',bot:'none',left:'none',right:'none'},cout:0,cin:0,jointModes:{}};
     let Rx;
     try{ Rx=C.computeProject(Gx,[wSimple]); }
     catch(e){ FAIL++; if(bugs.length<30) bugs.push('CRASH-PSUBIG #'+t+' :: '+e.message); Rx=null; }
@@ -464,7 +442,7 @@ for(let t=0;t<N;t++){
   if(rand()<0.4){
     const W=4000;
     const wLen={W,H:2300,ceil:3000,rowH:0,ops:[],seamsU:[],seamSeq:0,vseamsU:[],vseamSeq:0,
-      jointsVLed:[],edges:{top:'led',bot:'none',left:'none',right:'none'},cout:0,cin:0,jointModes:{}};
+      edges:{top:'led',bot:'none',left:'none',right:'none'},cout:0,cin:0,jointModes:{}};
     const maxRun=[1000,1500,1700,2300][Math.floor(rand()*4)];
     const Gx=Object.assign({},G,{ledMaxRun:maxRun,ledLen:0});
     const circuits=[{id:1,kind:'start',legs:[{wall:wLen.id,el:'edge',side:'top'}]}];
@@ -740,7 +718,7 @@ for(let t=0;t<N;t++){
   {
     const rowHTest=rand()<0.5?0:Math.round((200+rand()*(G.pl-400))/10)*10;
     const wTest={W:Math.round((2000+rand()*4000)/10)*10, H:Math.round((3000+rand()*6000)/10)*10,
-      ceil:9000, rowH:rowHTest, ops:[], seamsU:[], seamSeq:0, jointsVLed:[],
+      ceil:9000, rowH:rowHTest, ops:[], seamsU:[], seamSeq:0, 
       edges:{top:'none',bot:'none',left:'none',right:'none'}, cout:0, cin:0, jointModes:{}};
     const Gb=Object.assign({},G,{brick:true});
     let Rb;
