@@ -124,6 +124,9 @@ tbody tr:hover td{background:var(--surface)}
 .legend{display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;font-family:var(--mono);font-size:10.5px;color:var(--muted)}
 .legend span{display:inline-flex;align-items:center;gap:6px}
 .legend svg{flex:none;display:block}
+/* копия схемы в разделе «LED» переиспользует ту же разметку (schemeFor), но перетаскивание/
+   ресайз проёма там не подключены вовсе — ручка ресайза без функции только сбивала бы с толку */
+#led-draw [data-resize],#led-draw [data-cmrot]{display:none !important}
 @media print{
   .wall-scheme{display:block !important;break-inside:avoid;page-break-inside:avoid}
   .wall-scheme-h{display:block !important}
@@ -656,7 +659,12 @@ function renderLedDraw(G,R){
   graph.nodes.forEach(n=>{
     overlay+=`<circle cx="${n.x}" cy="${H-n.y}" r="${fs*0.22}" fill="var(--paper)" fill-opacity=".85" stroke="var(--muted)" stroke-width="${fs*0.05}" data-lednode="${n.key}" style="cursor:crosshair"/>`;
   });
-  overlay+=`<line id="led-preview" x1="0" y1="0" x2="0" y2="0" stroke="var(--warn)" stroke-width="${fs*0.18}" stroke-dasharray="${fs*0.3} ${fs*0.22}" opacity="0" pointer-events="none"/>`;
+  // тёмная сплошная «подложка» под пунктиром — иначе тонкий пунктир почти не виден на светлой
+  // панели (var(--straw-face) не зависит от темы, в отличие от var(--void)/var(--bg))
+  overlay+=`<g id="led-preview-g" opacity="0" pointer-events="none">`+
+    `<line id="led-preview-halo" x1="0" y1="0" x2="0" y2="0" stroke="#000" stroke-opacity=".4" stroke-width="${fs*0.4}" stroke-linecap="round"/>`+
+    `<line id="led-preview" x1="0" y1="0" x2="0" y2="0" stroke="var(--warn)" stroke-width="${fs*0.26}" stroke-linecap="round" stroke-dasharray="${fs*0.32} ${fs*0.24}"/>`+
+    `</g>`;
   box.innerHTML=sc.svg.replace('</svg>',overlay+'</svg>');
   renderLedCircuitsList();
 }
@@ -765,8 +773,15 @@ $('#led-circuits-list').addEventListener('click',e=>{
     const wallX=p.x, wallY=H-p.y;
     const dx=wallX-startNode.x, dy=wallY-startNode.y;
     const dir=dirOf(dx,dy);
-    const svg=box.querySelector('svg'), preview=svg&&svg.querySelector('#led-preview');
-    if(!dir){ if(preview) preview.setAttribute('opacity','0'); drag.dir=null; drag.path=[]; drag.target=startNode; return; }
+    const svg=box.querySelector('svg'), previewG=svg&&svg.querySelector('#led-preview-g');
+    const setPreview=(x1,y1,x2,y2,opacity)=>{
+      if(!previewG) return;
+      previewG.setAttribute('opacity',opacity);
+      previewG.querySelectorAll('line').forEach(l=>{
+        l.setAttribute('x1',x1); l.setAttribute('y1',y1); l.setAttribute('x2',x2); l.setAttribute('y2',y2);
+      });
+    };
+    if(!dir){ setPreview(0,0,0,0,'0'); drag.dir=null; drag.path=[]; drag.target=startNode; return; }
     if(dir!==drag.dir){ drag.dir=dir; drag.path=rayFrom(drag.graph,drag.startKey,dir); }
     const horiz=dir==='right'||dir==='left';
     const mouseProj=horiz?wallX:wallY;
@@ -776,11 +791,7 @@ $('#led-circuits-list').addEventListener('click',e=>{
       if(diff<bestDiff){ bestDiff=diff; best=step.node; }
     });
     drag.target=best;
-    if(preview){
-      preview.setAttribute('x1',startNode.x); preview.setAttribute('y1',H-startNode.y);
-      preview.setAttribute('x2',best.x); preview.setAttribute('y2',H-best.y);
-      preview.setAttribute('opacity',best===startNode?'0':'0.9');
-    }
+    setPreview(startNode.x,H-startNode.y,best.x,H-best.y,best===startNode?'0':'1');
   });
   box.addEventListener('pointerup',ev=>{
     if(!drag) return;
@@ -797,8 +808,8 @@ $('#led-circuits-list').addEventListener('click',e=>{
       }
     }
     drag=null;
-    const svg=box.querySelector('svg'), preview=svg&&svg.querySelector('#led-preview');
-    if(preview) preview.setAttribute('opacity','0');
+    const svg=box.querySelector('svg'), previewG=svg&&svg.querySelector('#led-preview-g');
+    if(previewG) previewG.setAttribute('opacity','0');
   });
 })();
 
