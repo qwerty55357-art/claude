@@ -3133,29 +3133,20 @@ $('#file-load').addEventListener('change',e=>{
   r.onload=()=>{
     try{
       const o=JSON.parse(r.result);
+      // формат до v3 (одна стена, без массива walls) больше не поддерживается — такие файлы
+      // считаются нечитаемыми (см. catch ниже), как и любой другой повреждённый JSON
+      if(!(o.v===3 && Array.isArray(o.walls) && o.walls.length)) throw new Error('неподдерживаемый формат файла');
       Object.entries(o.fields||{}).forEach(([id,v])=>{
-        if(WALL_FIELDS.includes(id)) return;                    // стеновые поля берём из walls/миграции
+        if(WALL_FIELDS.includes(id)) return;                    // стеновые поля берём из walls
         if(id==='i-joint'){ $('#i-joint-v').checked=!!v; $('#i-joint-h').checked=!!v; return; }
         if(id==='i-glue' && v>=10) return;                      // старое «м²/туба» не тащим
         const el=document.getElementById(id); if(!el) return;
         if(el.type==='checkbox') el.checked=v; else el.value=v;
       });
-      if(o.v===3 && Array.isArray(o.walls) && o.walls.length){
-        // сохраняем исходные id стен (на них могут ссылаться cornerLinks) — донумеровываем только то, чего не было
-        walls=o.walls.map((w,i)=>Object.assign(newWall(),w,{id:w.id||(i+1)}));
-        wallSeq=Math.max(walls.length,...walls.map(w=>w.id||0));
-        active=Math.min(o.active||0,walls.length-1);
-      } else {
-        // миграция одностенового формата: поля + openings -> одна стена
-        const f2=o.fields||{};
-        const w=newWall();
-        w.W=+f2['i-w']||4000; w.H=+f2['i-h']||2300; w.ceil=+f2['i-ceil']||2700;
-        w.edges={top:!!f2['i-e-top'],bot:!!f2['i-e-bot'],left:!!f2['i-e-left'],right:!!f2['i-e-right']};
-        w.cout=+f2['i-cout']||0; w.cin=+f2['i-cin']||0;
-        w.ops=(o.openings||[]).map((x,i)=>Object.assign({anchorH:'left'},x,{id:i+1}));
-        w.opSeq=w.ops.length;
-        walls=[w]; wallSeq=1; active=0;
-      }
+      // сохраняем исходные id стен (на них могут ссылаться cornerLinks) — донумеровываем только то, чего не было
+      walls=o.walls.map((w,i)=>Object.assign(newWall(),w,{id:w.id||(i+1)}));
+      wallSeq=Math.max(walls.length,...walls.map(w=>w.id||0));
+      active=Math.min(o.active||0,walls.length-1);
       manualMoves=(o.manual&&typeof o.manual==='object')?o.manual:{};
       walls.forEach(w=>{
         ['top','bot','left','right'].forEach(k=>{ w.edges[k]=edgeMode(w.edges[k]); });
