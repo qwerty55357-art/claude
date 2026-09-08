@@ -127,10 +127,15 @@ tbody tr:hover td{background:var(--surface)}
 /* копия схемы в разделе «LED» переиспользует ту же разметку (schemeFor), но перетаскивание/
    ресайз проёма там не подключены вовсе — ручка ресайза без функции только сбивала бы с толку */
 #led-draw [data-resize],#led-draw [data-cmrot]{display:none !important}
+/* список LED-отрезков стены — печатная замена раздела «LED» (см. renderScheme): на экране скрыт,
+   там и так есть интерактивный раздел «LED — рисование отрезков» с тем же списком */
+.led-print-list{display:none}
 @media print{
   .wall-scheme{display:block !important;break-inside:avoid;page-break-inside:avoid}
   .wall-scheme-h{display:block !important}
   [data-resize],[data-cmrot]{display:none !important}
+  #led-draw-block{display:none !important}
+  .led-print-list{display:block}
   *{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important }
   .svg-wrap{overflow:visible}
   svg{max-height:none !important}
@@ -690,27 +695,13 @@ function circuitLenMm(c,wall,graph){
   });
   return sum;
 }
-function renderLedDraw(G,R){
-  const box=$('#led-draw'); if(!box) return;
-  const wall=AW(), wi=active;
-  const sc=schemeFor(G,R,wi);
-  $('#led-draw-meta').textContent=sc.meta;
-  const graph=wallLedGraph(wall,G);
-  const H=wall.H, fs=Math.max(wall.W,wall.H)/48;
-  let overlay='';
-  // все узлы этой стены, пронумерованные в том же порядке, что и справочный список ниже
+// уже подтверждённые LED-отрезки стены — яркие линии + пронумерованный кружок на середине
+// «средней» по счёту ножки каждого контура (группируем по контуру, не по ребру, чтобы у контура
+// была ОДНА подпись и клик по любой его ножке вёл на один и тот же id). Общая для основной схемы
+// (печать/PDF) и для копии-холста в разделе «LED» — там сверху ещё рисуются узлы/превью протяжки.
+function ledCircuitBadgesSvg(wall,graph,fs,H,clickable){
   const numbered=ledCircuits.filter(c=>c.legs.some(l=>l.wall===wall.id));
   const numByCircId=new Map(numbered.map((c,i)=>[c.id,i+1]));
-  // «доступные для LED» рёбра графа (все, не только уже нарисованные) — бледная сетка поверх
-  // затемнённой панели, чтобы было видно, где вообще можно провести отрезок
-  graph.edges.forEach(e=>{
-    const leg=Object.assign({wall:wall.id},e.leg);
-    if(ledCircuitOf(ledCircuits,leg)) return;   // уже нарисованный — рисуется отдельно ниже, ярко
-    const a=graph.nodes.find(n=>n.key===e.a), b=graph.nodes.find(n=>n.key===e.b);
-    overlay+=`<line x1="${a.x}" y1="${H-a.y}" x2="${b.x}" y2="${H-b.y}" stroke="var(--alu)" stroke-width="${fs*0.09}" stroke-dasharray="${fs*0.05} ${fs*0.14}" opacity=".55" pointer-events="none"/>`;
-  });
-  // уже подтверждённые LED-отрезки этой стены — группируем по контуру (не по ребру), чтобы у
-  // каждого контура была ОДНА подпись-номер и клик по любой его ножке открывал одно и то же меню
   const byCircuit=new Map();
   graph.edges.forEach(e=>{
     const leg=Object.assign({wall:wall.id},e.leg);
@@ -720,20 +711,41 @@ function renderLedDraw(G,R){
     if(!byCircuit.has(c.id)) byCircuit.set(c.id,{kind:c.kind,segs:[]});
     byCircuit.get(c.id).segs.push({a,b});
   });
+  const cur=clickable?' style="cursor:pointer"':'';
+  let out='';
   byCircuit.forEach((info,cid)=>{
     const col=info.kind==='none'?'var(--ok)':'var(--warn)';
     info.segs.forEach(seg=>{
-      overlay+=`<line x1="${seg.a.x}" y1="${H-seg.a.y}" x2="${seg.b.x}" y2="${H-seg.b.y}" stroke="${col}" stroke-width="${fs*0.34}" stroke-linecap="round" opacity=".92" data-ledcircuit="${cid}" style="cursor:pointer"/>`;
+      out+=`<line x1="${seg.a.x}" y1="${H-seg.a.y}" x2="${seg.b.x}" y2="${H-seg.b.y}" stroke="${col}" stroke-width="${fs*0.34}" stroke-linecap="round" opacity=".92" data-ledcircuit="${cid}"${cur}/>`;
     });
-    // подпись-номер — кружок с цифрой на середине «средней» по счёту ножки контура
+    // крупный кружок с номером — на середине «средней» по счёту ножки контура
     const mid=info.segs[Math.floor(info.segs.length/2)];
     const lx=(mid.a.x+mid.b.x)/2, ly=H-(mid.a.y+mid.b.y)/2;
     const num=numByCircId.get(cid);
     if(num!=null){
-      overlay+=`<circle cx="${lx}" cy="${ly}" r="${fs*0.36}" fill="${col}" stroke="var(--void)" stroke-width="${fs*0.06}" data-ledcircuit="${cid}" style="cursor:pointer"/>`+
-        `<text x="${lx}" y="${ly}" text-anchor="middle" dy=".32em" font-size="${fs*0.42}" font-family="var(--mono)" font-weight="700" fill="var(--void)" pointer-events="none">${num}</text>`;
+      out+=`<circle cx="${lx}" cy="${ly}" r="${fs*0.58}" fill="${col}" stroke="var(--void)" stroke-width="${fs*0.08}" data-ledcircuit="${cid}"${cur}/>`+
+        `<text x="${lx}" y="${ly}" text-anchor="middle" dy=".33em" font-size="${fs*0.66}" font-family="var(--mono)" font-weight="700" fill="var(--void)" pointer-events="none">${num}</text>`;
     }
   });
+  return out;
+}
+function renderLedDraw(G,R){
+  const box=$('#led-draw'); if(!box) return;
+  const wall=AW(), wi=active;
+  const sc=schemeFor(G,R,wi);
+  $('#led-draw-meta').textContent=sc.meta;
+  const graph=wallLedGraph(wall,G);
+  const H=wall.H, fs=Math.max(wall.W,wall.H)/48;
+  let overlay='';
+  // «доступные для LED» рёбра графа (все, не только уже нарисованные) — бледная сетка поверх
+  // затемнённой панели, чтобы было видно, где вообще можно провести отрезок
+  graph.edges.forEach(e=>{
+    const leg=Object.assign({wall:wall.id},e.leg);
+    if(ledCircuitOf(ledCircuits,leg)) return;   // уже нарисованный — рисуется отдельно ниже, ярко
+    const a=graph.nodes.find(n=>n.key===e.a), b=graph.nodes.find(n=>n.key===e.b);
+    overlay+=`<line x1="${a.x}" y1="${H-a.y}" x2="${b.x}" y2="${H-b.y}" stroke="var(--alu)" stroke-width="${fs*0.09}" stroke-dasharray="${fs*0.05} ${fs*0.14}" opacity=".55" pointer-events="none"/>`;
+  });
+  overlay+=ledCircuitBadgesSvg(wall,graph,fs,H,true);
   // узлы-«перекрёстки»: увеличенная НЕВИДИМАЯ зона захвата (легко попасть мышью, не «соскальзывает»)
   // + маленькая видимая точка поверх неё, у видимой точки pointer-events отключён — кликабельность
   // целиком на невидимом круге, чтобы визуальный размер точки не приходилось раздувать вместе с ней
@@ -770,20 +782,24 @@ function showLedCircuitMenu(ev,circId){
     closeMatMenu(); run();
   },true);
 }
-// справочный список — только для чтения (номер/длина/способ), само редактирование — по клику
-// на отрезок на схеме (см. showLedCircuitMenu) или сразу после протяжки
-function renderLedCircuitsList(){
-  const box=$('#led-circuits-list'); if(!box) return;
-  const wall=AW();
-  const graph=wallLedGraph(wall,collect());
+// справочный список (номер/длина/способ) для ОДНОЙ стены — общий и для интерактивного блока
+// в разделе «LED» (кликов не показывает — правится по клику на схеме, см. showLedCircuitMenu),
+// и для печатной копии под основной схемой (renderScheme) — возвращает '' если контуров нет
+function ledCircuitsListHtml(wall,G){
+  const graph=wallLedGraph(wall,G);
   const mine=ledCircuits.filter(c=>c.legs.some(l=>l.wall===wall.id));
-  if(!mine.length){ box.innerHTML='<p class="hint" style="margin:4px 0">На этой стене пока нет нарисованных LED-отрезков.</p>'; return; }
+  if(!mine.length) return '';
   const kindLabel={start:'стартовый профиль',joint:'соединительный профиль',none:'без профиля'};
-  box.innerHTML=mine.map((c,i)=>{
+  return mine.map((c,i)=>{
     const lenMm=circuitLenMm(c,wall,graph);
     const otherWalls=[...new Set(c.legs.filter(l=>l.wall!==wall.id).map(l=>l.wall))];
     return `<p class="hint" style="margin:2px 0">#${i+1} — ${fmt(lenMm)} мм · ${kindLabel[c.kind]||c.kind}${otherWalls.length?` · ещё на ${otherWalls.length} др. стене(-ах)`:''}</p>`;
   }).join('');
+}
+function renderLedCircuitsList(){
+  const box=$('#led-circuits-list'); if(!box) return;
+  const html=ledCircuitsListHtml(AW(),collect());
+  box.innerHTML=html||'<p class="hint" style="margin:4px 0">На этой стене пока нет нарисованных LED-отрезков.</p>';
 }
 /* протяжка мышью: точка А — pointerdown на узле, дальше только вверх/вниз/вправо/влево вдоль
    графа (см. wallLedGraph); точка Б — тоже узел, снапится к ближайшему узлу на луче под мышью.
@@ -2837,6 +2853,10 @@ function schemeFor(G,R,wi){
     });
   }
   g+=dimV(0,H,colB,fs,'var(--paper)',true);
+  // пронумерованные LED-отрезки — прямо на основной схеме (не только в копии-холсте раздела
+  // «LED»): нужны и на экране, и в первую очередь в PDF/печати, где раздела «LED» вообще нет
+  // (см. @media print — #led-draw-block скрыт целиком, вместо него список под самой схемой)
+  g+=ledCircuitBadgesSvg(wall,wallLedGraph(wall,G),fs,H,false);
 
   const vb=`${-padL} ${-padT} ${W+padL+padR} ${H+padT+padB}`;
   return {
@@ -2846,9 +2866,14 @@ function schemeFor(G,R,wi){
 }
 function renderScheme(G,R){
   const parts=walls.map((w,wi)=>({w,wi,sc:schemeFor(G,R,wi)}));
-  $('#scheme').innerHTML=parts.map(({w,wi,sc})=>
-    `<div class="wall-scheme${wi===active?' on':''}" data-wallscheme="${wi}">`+
-    `<div class="wall-scheme-h">${esc(w.name)}</div>${sc.svg}</div>`).join('');
+  $('#scheme').innerHTML=parts.map(({w,wi,sc})=>{
+    // список LED-отрезков этой стены — на экране скрыт (он и так есть в разделе «LED» ниже
+    // схемы раскладки), но нужен при печати/PDF, где раздел «LED» целиком не выводится
+    const ledHtml=ledCircuitsListHtml(w,G);
+    const ledBlock=ledHtml?`<div class="led-print-list"><label class="sub-l">LED-отрезки</label>${ledHtml}</div>`:'';
+    return `<div class="wall-scheme${wi===active?' on':''}" data-wallscheme="${wi}">`+
+      `<div class="wall-scheme-h">${esc(w.name)}</div>${sc.svg}${ledBlock}</div>`;
+  }).join('');
   $('#scheme-meta').textContent=parts[active].sc.meta;
 }
 
