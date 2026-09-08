@@ -40,7 +40,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .btn-del{border-color:transparent;color:var(--muted);padding:4px 8px}
 .btn-del:hover{color:var(--err);border-color:var(--err)}
 .shell{display:grid;grid-template-columns:392px minmax(0,1fr);align-items:start}
-.rail{border-right:1px solid var(--line);background:var(--surface);padding:0 0 60px;position:sticky;top:53px;max-height:calc(100vh - 53px);overflow-y:auto;z-index:1}
+.rail{border-right:1px solid var(--line);background:var(--surface);padding:0 0 60px;position:sticky;top:var(--topbar-h,53px);max-height:calc(100vh - var(--topbar-h,53px));overflow-y:auto;z-index:1}
 .stage{padding:24px 26px 90px;min-width:0}
 .sect{border-bottom:1px solid var(--line)}
 .sect-h{display:flex;align-items:center;gap:10px;padding:12px 18px;cursor:pointer;user-select:none}
@@ -429,6 +429,18 @@ const fmt = (v,d=0) => Number(v).toLocaleString('ru-RU',{minimumFractionDigits:d
 const money = v => Math.round(v).toLocaleString('ru-RU') + ' ₽';
 const plu=(n,a,b,c)=>{const n1=n%10,n2=n%100;return (n2>=11&&n2<=19)?c:(n1===1)?a:(n1>=2&&n1<=4)?b:c;};
 const esc = s => String(s).replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+
+// [УПРАВЛЕНИЕ] реальная высота шапки (.topbar) — переменной, а не жёстким числом в CSS: шапка
+// сама переносится на две строки на узких экранах (flex-wrap), плюс метрики шрифта чуть отличаются
+// между браузерами/ОС — захардкоженный top:53px у .rail мог разойтись с фактической высотой шапки
+// на несколько пикселей, и её край перекрывал верх меню. Меряем реально и держим в синхроне.
+(function(){
+  const topbar=$('.topbar'); if(!topbar) return;
+  const sync=()=>document.documentElement.style.setProperty('--topbar-h',topbar.getBoundingClientRect().height+'px');
+  sync();
+  if(window.ResizeObserver) new ResizeObserver(sync).observe(topbar);
+  else window.addEventListener('resize',sync);
+})();
 
 /* ===================== СТЕНЫ И ПРОЁМЫ ===================== */
 let walls=[], wallSeq=0, active=0;
