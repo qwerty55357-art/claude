@@ -44,7 +44,11 @@ for(let t=0;t<N;t++){
   const nWalls=1+Math.floor(rand()*3);
   const G=Object.assign({},base,{pl:[2900,2500,2700][Math.floor(rand()*3)],pw:1150,
     orient:rand()<0.3?'h':'v',sym:rand()<0.5,offcut:rand()<0.85,splice:rand()<0.4,rot:rand()<0.3,
-    brick:rand()<0.5,jointV:rand()<0.85,jointH:rand()<0.9});
+    brick:rand()<0.5,jointV:rand()<0.85,jointH:rand()<0.9,
+    // без явных ledCircuits каждая 'led'-позиция сама себе луч (см. ledRunLens) — варьируем
+    // максимальную длину луча, чтобы иногда она реально становилась ограничивающим фактором
+    // даже без контуров (длинная стена, короткая максимальная длина луча)
+    ledMaxRun:rand()<0.5?[2000,3500,5000,8000][Math.floor(rand()*4)]:5000});
   const wallsArr=Array.from({length:nWalls},()=>mkWall(rand));
   let R;
   try{ R=C.computeProject(G,wallsArr); }
@@ -423,14 +427,16 @@ for(let t=0;t<N;t++){
   // L150-152 (нов): несколько БП вместо одного нереального номинала. Суммарная мощность
   // psuCount×psuW обязана покрывать реальную потребность need, psuW — стандартный номинал,
   // а psuCount — минимально возможное число единиц (меньшим числом не покрыть потребность
-  // даже самым крупным доступным номиналом).
+  // даже самым крупным доступным номиналом) — ЕСЛИ ТОЛЬКО не сработало правило максимальной
+  // длины луча (см. L154 ниже): тогда минимум диктует уже оно, а не нагрузка, и «избыточное»
+  // на первый взгляд число БП (по одной чистой нагрузке) на самом деле корректно.
   if(R.led){
     const maxNom=C.PSU_NOMINALS[C.PSU_NOMINALS.length-1];
     chk('L150',R.led.psuCount*R.led.psuW>=R.led.need-0.01,
       `${id}: БП суммарно ${R.led.psuCount}×${R.led.psuW}=${R.led.psuCount*R.led.psuW} < потребности ${R.led.need}`);
     chk('L151',C.PSU_NOMINALS.includes(R.led.psuW),`${id}: номинал БП ${R.led.psuW} не из стандартного ряда`);
-    chk('L152',R.led.psuCount===1||(R.led.psuCount-1)*maxNom<R.led.need-0.01,
-      `${id}: БП ${R.led.psuCount} шт избыточно — хватило бы ${R.led.psuCount-1}`);
+    chk('L152',R.led.psuCount===Math.max(R.led.wattCount,R.led.runCount),
+      `${id}: БП ${R.led.psuCount} шт != max(по нагрузке ${R.led.wattCount}, по длине луча ${R.led.runCount})`);
   }
   // L153 (нов): обычные случайные стены почти никогда не набирают на несколько БП сами —
   // принудительно большая лента (ручная добавка, 50-350м), чтобы реально прогнать ветку
@@ -448,6 +454,32 @@ for(let t=0;t<N;t++){
       chk('L153a',Rx.led.psuCount>1,`${id}: большая лента ${bigLen.toFixed(1)}м не потребовала нескольких БП (psuCount=${Rx.led.psuCount})`);
       chk('L153b',Rx.led.psuCount*Rx.led.psuW>=Rx.led.need-0.01,`${id}: БП недостаточно для большой ленты`);
       chk('L153c',Rx.led.psuCount===1||(Rx.led.psuCount-1)*maxNom<Rx.led.need-0.01,`${id}: БП избыточно для большой ленты`);
+    }
+  }
+  // L154 (нов): максимальная длина луча от точки питания — прямая, независимо посчитанная
+  // проверка на изолированном случае. Одна LED-позиция (весь верхний край стены, W=4000мм,
+  // без разрывов проёмами) собрана в ОДИН контур, поэтому весь её пробег — один луч. Нагрузка
+  // короткого куска ленты требует всего 1 БП (see wattCount), а лучевой лимит короче полного
+  // пробега — минимум БП обязан определяться делением длины на лимит, а не нагрузкой.
+  if(rand()<0.4){
+    const W=4000;
+    const wLen={W,H:2300,ceil:3000,rowH:0,ops:[],seamsU:[],seamSeq:0,vseamsU:[],vseamSeq:0,
+      jointsVLed:[],edges:{top:'led',bot:'none',left:'none',right:'none'},cout:0,cin:0,jointModes:{}};
+    const maxRun=[1000,1500,1700,2300][Math.floor(rand()*4)];
+    const Gx=Object.assign({},G,{ledMaxRun:maxRun,ledLen:0});
+    const circuits=[{id:1,kind:'start',legs:[{wall:wLen.id,el:'edge',side:'top'}]}];
+    let Rx;
+    try{ Rx=C.computeProject(Gx,[wLen],undefined,undefined,circuits); }
+    catch(e){ FAIL++; if(bugs.length<30) bugs.push('CRASH-PSURUN #'+t+' :: '+e.message); Rx=null; }
+    if(Rx&&Rx.led){
+      const expRunCount=Math.ceil(W/maxRun-1e-9);
+      chk('L154a',Rx.led.runCount===expRunCount,
+        `${id}: по лучу W=${W} maxRun=${maxRun} ожидался runCount ${expRunCount}, получен ${Rx.led.runCount}`);
+      chk('L154b',Rx.led.wattCount===1,`${id}: короткий кусок ленты (${W}мм) неожиданно потребовал по нагрузке больше 1 БП (${Rx.led.wattCount})`);
+      chk('L154c',expRunCount>1,`${id}: тестовые числа подобраны неверно — руч. лимит не должен давать 1`);
+      chk('L154d',Rx.led.psuCount===expRunCount,
+        `${id}: итоговый psuCount ${Rx.led.psuCount} != ожидаемого по длине луча ${expRunCount} (при wattCount=1 луч обязан быть определяющим)`);
+      chk('L154e',Rx.led.psuCount*Rx.led.psuW>=Rx.led.need-0.01,`${id}: БП по лучу всё равно обязаны покрывать нагрузку`);
     }
   }
   // L51 (нов): не должно быть задвоения длины одного шва в двух профилях сразу —

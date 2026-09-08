@@ -273,6 +273,13 @@ tbody tr:hover td{background:var(--surface)}
         <div class="f"><label>Запас БП</label><input type="number" id="i-psur" value="30"><span class="unit">%</span></div>
         <div class="f"><label>Температура свечения</label><select id="i-ledtemp"></select></div>
       </div>
+      <div class="row row-1">
+        <div class="f"><label>Макс. длина луча от точки питания</label><input type="number" id="i-ledmaxrun" value="5000" step="100"><span class="unit">мм</span></div>
+      </div>
+      <p class="hint">Луч — это один непрерывный физический отрезок ленты от одной точки подключения к блоку питания
+        (один нарисованный в разделе «LED» контур; несвязанные позиции без контура каждая считается своим лучом).
+        Превышение этой длины из-за просадки напряжения требует доп. точку питания — добавляется отдельный блок
+        питания сверх того, что нужно только по нагрузке.</p>
     </div>
   </section>
   <section class="sect" data-sect>
@@ -1657,6 +1664,7 @@ function collect(){
     jointV:chk('#i-joint-v'), jointH:chk('#i-joint-h'), edgeOps:chk('#i-edgeops'),
     tubesPerSheet:num('#i-glue'), glueR:num('#i-gluer'),
     ledLen:num('#i-ledlen'), ledW:num('#i-ledw'), psuR:num('#i-psur'), ledTemp:num('#i-ledtemp'),
+    ledMaxRun:num('#i-ledmaxrun'),
     price:{panel:num('#p-panel'),glue:num('#p-glue'),edge:num('#p-edge'),joint:num('#p-joint'),
            cout:num('#p-cout'),cin:num('#p-cin'),ledstart:num('#p-ledprof'),ledjoint:num('#p-ledjoint'),
            led:num('#p-led'),psu:num('#p-psu'),markup:num('#p-markup')},
@@ -2150,10 +2158,16 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
   // LED-позиция может входить в контур (см. ledCircuits) — тогда способ реализации (старт/
   // соединитель/без профиля) берётся из контура целиком, а не из типа позиции по умолчанию;
   // без контура (старые данные, миграция) — прежнее поведение по умолчанию для этого типа позиции.
-  const ledDst=(leg,def)=>{
+  // ledRunLens — суммарная длина КАЖДОГО физического луча от одной точки питания: все ножки
+  // одного контура складываются в один луч (ключ 'c'+id), позиция без контура — сама себе луч
+  // (ключ по её собственной ledLegKey) — нужно для проверки максимальной длины луча ниже.
+  const ledRunLens=new Map();
+  const pushLed=(leg,def,L)=>{
     const c=ledCircuitOf(ledCircuits,leg);
     const kind=c?c.kind:def;
-    return kind==='none'?ledPlainRuns:kind==='start'?ledStartRuns:ledJointRuns;
+    (kind==='none'?ledPlainRuns:kind==='start'?ledStartRuns:ledJointRuns).push(L);
+    const key=c?('c'+c.id):('leg:'+ledLegKey(leg));
+    ledRunLens.set(key,(ledRunLens.get(key)||0)+L);
   };
   walls.forEach((w,i)=>{
     const W=w.W,H=w.H,L=layouts[i];
@@ -2166,16 +2180,19 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
     ];
     sides.forEach(([k,len,gaps])=>{
       const mode=edgeMode(w.edges[k]); if(mode==='none') return;
-      const dst=mode==='led'?ledDst({wall:w.id,el:'edge',side:k},'start'):capRuns;
-      subRanges(len,gaps).forEach(sg=>dst.push(sg[1]-sg[0]));
+      subRanges(len,gaps).forEach(sg=>{
+        const L=sg[1]-sg[0];
+        if(mode==='led') pushLed({wall:w.id,el:'edge',side:k},'start',L); else capRuns.push(L);
+      });
     });
 
     // продольный стык: режим выбирается по каждому отрезку независимо (проём мог разбить стык на части)
     L.joints.forEach(j=>{
       j.segs.forEach(sg=>{
         const mode=jointSegMode(w,G,'v',j.pos,sg[0]);
-        const dst=mode==='led'?ledDst({wall:w.id,el:'jointV',pos:j.pos,segStart:sg[0]},'joint'):(mode==='cap'?jvRuns:null);
-        if(dst) dst.push(sg[1]-sg[0]);
+        const len=sg[1]-sg[0];
+        if(mode==='led') pushLed({wall:w.id,el:'jointV',pos:j.pos,segStart:sg[0]},'joint',len);
+        else if(mode==='cap') jvRuns.push(len);
       });
     });
 
@@ -2189,8 +2206,9 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
       });
       subIn(sm.a0,sm.a1,gaps.filter(g=>g[1]>g[0])).forEach(g=>{
         const mode=jointSegMode(w,G,'h',sm.pos,g[0]);
-        const dst=mode==='led'?ledDst({wall:w.id,el:'jointH',pos:sm.pos,segStart:g[0]},'joint'):(mode==='cap'?jhRuns:null);
-        if(dst) dst.push(g[1]-g[0]);
+        const len=g[1]-g[0];
+        if(mode==='led') pushLed({wall:w.id,el:'jointH',pos:sm.pos,segStart:g[0]},'joint',len);
+        else if(mode==='cap') jhRuns.push(len);
       });
     });
 
@@ -2224,7 +2242,7 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
       sides.forEach(([k,len])=>{
         const md=otkosMode(o,k);
         if(md==='cap'){ opsRuns.push(len); return; }
-        if(md==='led'){ ledDst({wall:w.id,el:'otkos',op:oi,side:k},'start').push(len); return; }
+        if(md==='led'){ pushLed({wall:w.id,el:'otkos',op:oi,side:k},'start',len); return; }
         if(md==='none') return;
         if(md==='corner') cornerRuns.cout.push(len);
         frameRuns.push(len);
@@ -2397,10 +2415,18 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
     // минимальное число блоков максимального номинала (500 Вт), затем берём наименьший номинал,
     // которого хватает на ОДНУ такую долю — psuCount*psuW гарантированно >= need (см. audit L150)
     const maxNom=PSU_NOMINALS[PSU_NOMINALS.length-1];
-    const psuCount=Math.max(1,Math.ceil(need/maxNom-1e-9));
+    const wattCount=Math.max(1,Math.ceil(need/maxNom-1e-9));
+    // максимальная длина луча от ОДНОЙ точки питания: каждый физический луч (ledRunLens —
+    // контур целиком, либо одиночная позиция без контура) требует минимум одну свою точку
+    // питания, а на каждые начатые maxRun мм длины — ещё одну (просадка напряжения). Ручная
+    // добавка G.ledLen ни к какому конкретному лучу не привязана — в этот подсчёт не входит.
+    const maxRun=G.ledMaxRun>0?G.ledMaxRun:5000;
+    let runCount=0;
+    ledRunLens.forEach(L=>{ runCount+=Math.max(1,Math.ceil(L/maxRun-1e-9)); });
+    const psuCount=Math.max(wattCount,runCount);
     const psuW=PSU_NOMINALS.find(n=>n>=need/psuCount-1e-9);
     led={len:ledTotal,auto:ledAutoM,manual:G.ledLen,watt:ledTotal*G.ledW,need,psuW,psuCount,
-         psuTotalW:psuW*psuCount,temp:G.ledTemp};
+         psuTotalW:psuW*psuCount,temp:G.ledTemp,maxRun,wattCount,runCount};
   }
 
   const fillArea=fills.reduce((a,f)=>a+f.area,0);
@@ -2943,7 +2969,8 @@ function renderSpec(G,R){const S=G;
   if(R.led){
     const tempTxt=(LED_TEMPS.find(t=>t.k===R.led.temp)||{}).name;
     rows.push(['LED-лента', fmt(R.led.len,1)+' м', `${R.led.auto>0?`из профилей ${fmt(R.led.auto,1)} м`:''}${R.led.manual>0?`${R.led.auto>0?' + ':''}вручную ${fmt(R.led.manual,1)} м`:''} · ${fmt(S.ledW,1)} Вт/м · ${fmt(R.led.watt,0)} Вт${tempTxt?' · '+tempTxt:''}`]);
-    rows.push(['Блок питания', `${R.led.psuCount} шт × ${R.led.psuW} Вт`, `нужно ${fmt(R.led.need,0)} Вт с запасом ${fmt(S.psuR)}% · суммарно ${fmt(R.led.psuTotalW,0)} Вт`]);
+    rows.push(['Блок питания', `${R.led.psuCount} шт × ${R.led.psuW} Вт`, `нужно ${fmt(R.led.need,0)} Вт с запасом ${fmt(S.psuR)}% · суммарно ${fmt(R.led.psuTotalW,0)} Вт`+
+      (R.led.runCount>R.led.wattCount?` · по нагрузке хватило бы ${R.led.wattCount}, но макс. луч ${fmt(R.led.maxRun)} мм требует ${R.led.runCount}`:'')]);
   }
   $('#spec').innerHTML=`<thead><tr><th>Позиция</th><th class="num">Кол-во</th><th>Примечание</th></tr></thead><tbody>`+
     rows.map(r=>{
@@ -3041,6 +3068,8 @@ function renderNotes(G,R){
     const totalShelf=(R.shelf?R.shelf.length:0)+R.fills.reduce((a,f)=>a+(f.shelf?f.shelf.length:0),0);
     if(totalShelf) n.push(['warn','На верстаке',`${totalShelf} ${plu(totalShelf,'деталь временно отложена','детали временно отложены','деталей временно отложены')} и не входит в лист/материал/смету, пока не будет возвращена на карту раскроя.`]);
   }
+  if(R.led&&R.led.runCount>R.led.wattCount)
+    n.push(['warn','БП по длине луча',`Часть LED-лучей длиннее ${fmt(R.led.maxRun)} мм (макс. длина от одной точки питания) — по нагрузке хватило бы ${R.led.wattCount} ${plu(R.led.wattCount,'блока','блоков','блоков')}, но по длине нужно ${R.led.runCount}: заложено ${R.led.psuCount}.`]);
   $('#notes').innerHTML=n.map(([t,b,x])=>`<div class="note ${t}"><b>${b}</b><span>${esc(x)}</span></div>`).join('');
 }
 
