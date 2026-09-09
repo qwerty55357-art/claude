@@ -236,6 +236,38 @@ for(let t=0;t<N;t++){
       `${id}: LED на краю откоса (left) — ax ${c1&&c1.ax} вместо ${c0&&(c0.ax-10)}`);
     chk('L133b',!!c0&&!!c1&&Math.abs((c1.aw-c0.aw)-10)<0.5,
       `${id}: LED на краю откоса (left) — aw ${c1&&c1.aw} вместо ${c0&&(c0.aw+10)}`);
+    // L136 (нов): свободный LED-отрезок (el:'free') — соединяет любые две точки НАПРЯМУЮ, в обход
+    // реального стыка/края/контура откоса. Проверяем, что раскрой (все layouts — площадь, куски,
+    // insetStart/insetEnd) от него не зависит вовсе, а его длина (по прямой между эндами) идёт
+    // ТОЛЬКО в смету, через тот же профильный/метражный пул, что и обычные ножки (start/joint/none).
+    {
+      const wF={W:3400,H:2500,ceil:3000,rowH:0,ops:[],seamsU:[],seamSeq:0,vseamsU:[],vseamSeq:0,
+        edges:{top:'none',bot:'none',left:'cap',right:'cap'},cout:0,cin:0,jointModes:{}};
+      const baseF=C.computeProject(Gt,[wF]);
+      const baseAuto=baseF.led?baseF.led.auto:0;   // без LED вообще R.led==null — это ожидаемо
+      const freeLen=Math.hypot(wF.W,wF.H);
+      const legF={wall:wF.id,el:'free',id:1,ax:0,ay:0,bx:wF.W,by:wF.H};
+      const RfStart=C.computeProject(Gt,[wF],{},[],[{id:1,kind:'start',legs:[legF]}]);
+      chk('L136a',JSON.stringify(RfStart.layouts)===JSON.stringify(baseF.layouts),
+        `${id}: свободный LED-отрезок изменил раскрой стены (геометрия не должна зависеть от него)`);
+      const lsBase=(baseF.prof.find(p=>p.key==='ledstart')||{total:0}).total;
+      const lsF=(RfStart.prof.find(p=>p.key==='ledstart')||{total:0}).total;
+      chk('L136b',Math.abs((lsF-lsBase)-freeLen)<0.5,
+        `${id}: свободный отрезок kind=start — ledstart не получил его длину (${lsBase}->${lsF}, ожидалось +${freeLen})`);
+      chk('L136c',!!RfStart.led&&Math.abs((RfStart.led.auto-baseAuto)-freeLen/1000)<0.01,
+        `${id}: свободный отрезок — суммарная лента (R.led.auto, в метрах) не выросла ровно на его длину (${baseAuto}->${RfStart.led&&RfStart.led.auto}, ожидалось +${freeLen/1000})`);
+      const RfJoint=C.computeProject(Gt,[wF],{},[],[{id:1,kind:'joint',legs:[legF]}]);
+      const ljF=(RfJoint.prof.find(p=>p.key==='ledjoint')||{total:0}).total;
+      chk('L136d',Math.abs(ljF-freeLen)<0.5,
+        `${id}: свободный отрезок kind=joint — ledjoint не получил его длину (${ljF} вместо ${freeLen})`);
+      const RfNone=C.computeProject(Gt,[wF],{},[],[{id:1,kind:'none',legs:[legF]}]);
+      const lsN=(RfNone.prof.find(p=>p.key==='ledstart')||{total:0}).total;
+      const ljN=(RfNone.prof.find(p=>p.key==='ledjoint')||{total:0}).total;
+      chk('L136e',lsN<0.5&&ljN<0.5,
+        `${id}: свободный отрезок kind=none — длина не должна попасть ни в ledstart(${lsN}), ни в ledjoint(${ljN})`);
+      chk('L136f',!!RfNone.led&&Math.abs((RfNone.led.auto-baseAuto)-freeLen/1000)<0.01,
+        `${id}: свободный отрезок kind=none — суммарная лента всё равно должна вырасти на его длину (${baseAuto}->${RfNone.led&&RfNone.led.auto})`);
+    }
   }
   // L7/L8: панелей в разумных пределах
   const needArea=(R.netArea+R.otkosArea)*1e6;

@@ -321,7 +321,11 @@ tbody tr:hover td{background:var(--surface)}
   </div>
   <div class="block" id="led-draw-block">
     <div class="stage-h"><h2>LED — рисование отрезков</h2><span class="meta" id="led-draw-meta"></span><span class="rule"></span></div>
-    <p class="hint" style="margin:0 0 8px">Ведите мышью от одного узла схемы (угол стены, стык, край, угол контура откоса)
+    <div class="row" style="margin-bottom:6px">
+      <button class="btn btn-mini btn-key" id="btn-led-mode-snap">По стыкам</button>
+      <button class="btn btn-mini" id="btn-led-mode-free">Свободная линия</button>
+    </div>
+    <p class="hint" style="margin:0 0 8px" id="led-draw-hint">Ведите мышью от одного узла схемы (угол стены, стык, край, угол контура откоса)
       к другому по прямой — появится отрезок. Точку можно ставить только на узел; несколько узлов подряд на одной
       прямой — это один непрерывный отрезок. Сразу после протяжки, а также в любой момент кликом по уже нарисованному
       отрезку — меню выбора способа реализации (профиль/без профиля) и удаления. Список ниже — просто справка.</p>
@@ -455,7 +459,12 @@ let cornerLinks=[], cornerSeq=0;   // углы между стенами: {id,ty
 // {id, kind:'joint'|'start'|'none', legs:[...]}, kind='none' — «без профиля» (щель есть,
 // но профиль на этот отрезок не покупается — длина ленты всё равно считается).
 // leg: {wall,el:'edge',side} | {wall,el:'jointV'|'jointH',pos,segStart} | {wall,el:'otkos',op,side}
-let ledCircuits=[], ledCircuitSeq=0;
+// | {wall,el:'free',id,ax,ay,bx,by} — свободный отрезок между двумя любыми узлами схемы,
+// не привязан ни к какому реальному стыку/краю; на раскрой не влияет, только длина ленты в смету
+let ledCircuits=[], ledCircuitSeq=0, freeLegSeq=0;
+// режим рисования LED: 'snap' — только вдоль рёбер графа (стыки/края/откосы), 'free' — прямая
+// между любыми двумя узлами под любым углом (см. leg el:'free' выше)
+let ledDrawMode='snap';
 function newWall(){
   wallSeq++;
   return {id:wallSeq, name:'Стена '+wallSeq, W:4000, H:2300, ceil:2700, rowH:0,
@@ -672,6 +681,7 @@ function renderLedSummary(R){
 // иначе следующий же run() тут же затрёт её обратно тем, что показано в форме. Если правим
 // текущую активную стену — синхронизируем и сам select.
 function legRawSet(w,leg,mode){
+  if(leg.el==='free') return;   // свободный отрезок ни к какому полю стены не привязан
   if(leg.el==='edge'){
     w.edges=w.edges||{}; w.edges[leg.side]=mode;
     if(w===AW()){ const el=document.getElementById('i-e-'+leg.side); if(el) el.value=mode; }
@@ -683,6 +693,7 @@ function legRawSet(w,leg,mode){
   w.jointModes[jointSegKey(kind,leg.pos,leg.segStart)]=mode;
 }
 function legRawClear(w,leg){
+  if(leg.el==='free') return;   // свободный отрезок ни к какому полю стены не привязан
   if(leg.el==='edge'){
     w.edges=w.edges||{}; w.edges[leg.side]='cap';
     if(w===AW()){ const el=document.getElementById('i-e-'+leg.side); if(el) el.value='cap'; }
@@ -699,6 +710,7 @@ function legRawClear(w,leg){
 function circuitLenMm(c,wall,graph){
   let sum=0;
   c.legs.filter(l=>l.wall===wall.id).forEach(l=>{
+    if(l.el==='free'){ sum+=Math.hypot(l.bx-l.ax,l.by-l.ay); return; }
     const key=ledLegKey(l);
     const e=graph.edges.find(ge=>ledLegKey(Object.assign({wall:wall.id},ge.leg))===key);
     if(!e) return;
@@ -722,6 +734,14 @@ function ledCircuitBadgesSvg(wall,graph,fs,H,clickable){
     const a=graph.nodes.find(n=>n.key===e.a), b=graph.nodes.find(n=>n.key===e.b);
     if(!byCircuit.has(c.id)) byCircuit.set(c.id,{kind:c.kind,segs:[]});
     byCircuit.get(c.id).segs.push({a,b});
+  });
+  // свободные отрезки (el:'free') не лежат на рёбрах графа — координаты у них свои
+  ledCircuits.forEach(c=>{
+    c.legs.forEach(l=>{
+      if(l.wall!==wall.id||l.el!=='free') return;
+      if(!byCircuit.has(c.id)) byCircuit.set(c.id,{kind:c.kind,segs:[]});
+      byCircuit.get(c.id).segs.push({a:{x:l.ax,y:l.ay},b:{x:l.bx,y:l.by}});
+    });
   });
   const cur=clickable?' style="cursor:pointer"':'';
   let out='';
@@ -778,6 +798,7 @@ function renderLedDraw(G,R){
     sc.svg.slice(svgOpenEnd,-'</svg>'.length)+'</g>'+overlay+'</svg>';
   box.innerHTML=dimmed;
   renderLedCircuitsList();
+  syncLedModeButtons();
 }
 function showLedCircuitMenu(ev,circId){
   const c=ledCircuits.find(x=>x.id===circId); if(!c) return;
@@ -874,7 +895,7 @@ function renderLedCircuitsList(){
     if(t.dataset&&t.dataset.lednode!==undefined){
       const wall=AW(), G=collect();
       const graph=wallLedGraph(wall,G);
-      drag={wallId:wall.id,graph,startKey:t.dataset.lednode,dir:null,path:[],target:null};
+      drag={wallId:wall.id,graph,startKey:t.dataset.lednode,dir:null,path:[],target:null,free:ledDrawMode==='free'};
       ev.preventDefault();
       try{ box.setPointerCapture(ev.pointerId); }catch(_){}
     }
@@ -886,8 +907,6 @@ function renderLedCircuitsList(){
     const H=wall.H, fs=Math.max(wall.W,wall.H)/48;
     const startNode=drag.graph.nodes.find(n=>n.key===drag.startKey);
     const wallX=p.x, wallY=H-p.y;
-    const dx=wallX-startNode.x, dy=wallY-startNode.y;
-    const dir=dirOf(dx,dy,fs);
     const svg=box.querySelector('svg'), previewG=svg&&svg.querySelector('#led-preview-g');
     const setPreview=(x1,y1,x2,y2,opacity)=>{
       if(!previewG) return;
@@ -896,6 +915,21 @@ function renderLedCircuitsList(){
         l.setAttribute('x1',x1); l.setAttribute('y1',y1); l.setAttribute('x2',x2); l.setAttribute('y2',y2);
       });
     };
+    if(drag.free){
+      // свободный режим: цель — просто ближайший узел графа к курсору, без ограничения по
+      // направлению (в отличие от обычного режима, где движение зажато на луч вдоль осей)
+      let best=startNode, bestDist=Infinity;
+      drag.graph.nodes.forEach(n=>{
+        if(n===startNode) return;
+        const d=Math.hypot(n.x-wallX,n.y-wallY);
+        if(d<bestDist){ bestDist=d; best=n; }
+      });
+      drag.target=best;
+      setPreview(startNode.x,H-startNode.y,best.x,H-best.y,best===startNode?'0':'1');
+      return;
+    }
+    const dx=wallX-startNode.x, dy=wallY-startNode.y;
+    const dir=dirOf(dx,dy,fs);
     if(!dir){ setPreview(0,0,0,0,'0'); drag.dir=null; drag.path=[]; drag.target=startNode; return; }
     if(dir!==drag.dir){ drag.dir=dir; drag.path=rayFrom(drag.graph,drag.startKey,dir); }
     const horiz=dir==='right'||dir==='left';
@@ -936,8 +970,14 @@ function renderLedCircuitsList(){
       // клик без малейшего движения — mouse.click в тестах ведёт себя именно так) — приравниваем
       // это к «не сдвинулись», а не пропускаем всю обработку молча
       if(drag.target && drag.target!==startNode){
-        const idx=drag.path.findIndex(s=>s.node===drag.target);
-        const legs=drag.path.slice(0,idx+1).map(s=>Object.assign({wall:wall.id},s.edge.leg));
+        let legs;
+        if(drag.free){
+          freeLegSeq++;
+          legs=[{wall:wall.id,el:'free',id:freeLegSeq,ax:startNode.x,ay:startNode.y,bx:drag.target.x,by:drag.target.y}];
+        } else {
+          const idx=drag.path.findIndex(s=>s.node===drag.target);
+          legs=drag.path.slice(0,idx+1).map(s=>Object.assign({wall:wall.id},s.edge.leg));
+        }
         legs.forEach(l=>legRawSet(wall,l,'led'));
         ledCircuitSeq++;
         newCircId=ledCircuitSeq;
@@ -958,6 +998,25 @@ function renderLedCircuitsList(){
     else if(clickedExisting!=null) showLedCircuitMenu(ev,clickedExisting);
   });
 })();
+const LED_HINTS={
+  snap:'Ведите мышью от одного узла схемы (угол стены, стык, край, угол контура откоса) к другому '+
+    'по прямой — появится отрезок. Точку можно ставить только на узел; несколько узлов подряд на одной '+
+    'прямой — это один непрерывный отрезок. Сразу после протяжки, а также в любой момент кликом по уже '+
+    'нарисованному отрезку — меню выбора способа реализации (профиль/без профиля) и удаления. Список ниже — просто справка.',
+  free:'Ведите мышью от любого узла схемы к любому другому узлу — линия пройдёт напрямую, под любым '+
+    'углом, в обход стыков и краёв. Такой отрезок ничего не режет и не меняет геометрию стены — его длина '+
+    'идёт только в смету (лента/БП/профиль). Меню выбора способа реализации и удаления — как обычно, сразу '+
+    'после протяжки или по клику на линию.'
+};
+function syncLedModeButtons(){
+  const snapBtn=$('#btn-led-mode-snap'), freeBtn=$('#btn-led-mode-free'), hint=$('#led-draw-hint');
+  if(!snapBtn||!freeBtn) return;
+  snapBtn.classList.toggle('btn-key',ledDrawMode==='snap');
+  freeBtn.classList.toggle('btn-key',ledDrawMode==='free');
+  if(hint) hint.textContent=LED_HINTS[ledDrawMode];
+}
+$('#btn-led-mode-snap').addEventListener('click',()=>{ ledDrawMode='snap'; syncLedModeButtons(); });
+$('#btn-led-mode-free').addEventListener('click',()=>{ ledDrawMode='free'; syncLedModeButtons(); });
 
 /* ---- проёмы активной стены ---- */
 // стандартные размеры проёмов (РФ): дверной проём под полотно 800, типовое окно
@@ -2068,6 +2127,7 @@ function jointSegMode(w,G,kind,pos,segStart){
 // ledCircuits) — ключ ножки контура совпадает по смыслу с jointSegKey/otkosMode-адресацией ----
 const ledLegKey=l=>l.el==='edge'?'edge|'+l.wall+'|'+l.side
   :l.el==='otkos'?'otkos|'+l.wall+'|'+l.op+'|'+l.side
+  :l.el==='free'?'free|'+l.wall+'|'+l.id
   :l.el+'|'+l.wall+'|'+Math.round(l.pos)+'|'+Math.round(l.segStart);
 function ledCircuitOf(ledCircuits,leg){
   const key=ledLegKey(leg);
@@ -2382,6 +2442,17 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
         if(md==='none') return;
         if(md==='corner') cornerRuns.cout.push(len);
         frameRuns.push(len);
+      });
+    });
+
+    // свободные LED-отрезки (ledCircuits[].legs с el:'free') — соединяют любые два узла схемы
+    // напрямую, а не только через реальный стык/край/контур откоса; на раскрой панелей НЕ влияют
+    // вовсе (ни выреза, ни зазора LED_GAP — геометрия стены не трогается), только длина ленты
+    // для сметы, через тот же pushLed/ledRunLens, что и обычные ножки.
+    ledCircuits.forEach(c=>{
+      c.legs.forEach(l=>{
+        if(l.wall!==w.id||l.el!=='free') return;
+        pushLed(l,'start',Math.hypot(l.bx-l.ax,l.by-l.ay));
       });
     });
   });
@@ -3312,6 +3383,7 @@ $('#file-load').addEventListener('change',e=>{
           .map(c=>Object.assign({},c,{legs:(c.legs||[]).filter(l=>ids.has(+l.wall))}))
           .filter(c=>c.legs.length);
         ledCircuitSeq=Math.max(0,...ledCircuits.map(c=>c.id||0));
+        freeLegSeq=Math.max(0,...ledCircuits.flatMap(c=>c.legs).filter(l=>l.el==='free').map(l=>l.id||0));
       }
       renderWallTabs(); wallToForm(); renderOpenings(); renderCornerLinks(); run();
     }catch(err){
