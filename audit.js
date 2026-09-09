@@ -269,6 +269,65 @@ for(let t=0;t<N;t++){
         `${id}: свободный отрезок kind=none — суммарная лента всё равно должна вырасти на его длину (${baseAuto}->${RfNone.led&&RfNone.led.auto})`);
     }
   }
+  // L140 (нов): радиусный угол (cornerLinks kind:'radius', этап 2) — касательная длина
+  // t=R/tan(angle/2) урезает панельную зону ОБЕИХ смежных стен, деталь дуги (ширина
+  // R×(π-angle), угол ПОВОРОТА, не угол комнаты) появляется в общем пуле листов, обычный
+  // профиль угла (cout) не начисляется дважды, а невалидная геометрия (разная высота стен,
+  // радиус=0, деталь шире листа) детерминированно откатывается к обычному прямому стыку.
+  if(rand()<0.4){
+    const wR1={id:1,W:3000,H:2400,ceil:2700,rowH:0,ops:[],seamsU:[],seamSeq:0,vseamsU:[],vseamSeq:0,
+      edges:{top:'none',bot:'none',left:'cap',right:'cap'},cout:0,cin:0,jointModes:{}};
+    const wR2={id:2,W:3000,H:2400,ceil:2700,rowH:0,ops:[],seamsU:[],seamSeq:0,vseamsU:[],vseamSeq:0,
+      edges:{top:'none',bot:'none',left:'cap',right:'cap'},cout:0,cin:0,jointModes:{}};
+    const Gt2=Object.assign({},G,{orient:'v',sym:false});
+    const stripsW=Lx=>Lx.strips.reduce((a,s)=>a+s.w,0);
+
+    const linkSharp=[{id:1,kind:'sharp',type:'out',angle:90,aw:1,as:'right',bw:2,bs:'left'}];
+    const Rsharp=C.computeProject(Gt2,[wR1,wR2],{},linkSharp,[]);
+    const coutSharp=(Rsharp.prof.find(p=>p.key==='cout')||{total:0}).total;
+    chk('L140a',Math.abs(coutSharp-2400)<0.5,`${id}: радиус — обычный угол не дал длину cout=H (${coutSharp} вместо 2400)`);
+
+    // 90°, R=300 — tan(45°)=1, значит t=R=300 ровно
+    const radius=300, angle=90, t=radius/Math.tan(angle*Math.PI/180/2), arcW=radius*(Math.PI-angle*Math.PI/180);
+    const linkRadius=[{id:1,kind:'radius',type:'out',angle,radius,aw:1,as:'right',bw:2,bs:'left'}];
+    const Rrad=C.computeProject(Gt2,[wR1,wR2],{},linkRadius,[]);
+
+    const w1sharp=stripsW(Rsharp.layouts[0]), w1rad=stripsW(Rrad.layouts[0]);
+    const w2sharp=stripsW(Rsharp.layouts[1]), w2rad=stripsW(Rrad.layouts[1]);
+    chk('L140c',Math.abs((w1sharp-w1rad)-t)<0.5,`${id}: радиус — ширина панелей стены 1 не уменьшилась на t (${w1sharp}->${w1rad}, t=${t})`);
+    chk('L140d',Math.abs((w2sharp-w2rad)-t)<0.5,`${id}: радиус — ширина панелей стены 2 не уменьшилась на t (${w2sharp}->${w2rad}, t=${t})`);
+
+    const arcPiece=Rrad.sheets.flatMap(sh=>sh.list).find(p=>p.isCorner);
+    chk('L140e',!!arcPiece,`${id}: радиус — деталь угла не попала в раскрой листов`);
+    if(arcPiece) chk('L140f',Math.abs(arcPiece.w-arcW)<0.5&&Math.abs(arcPiece.len-2400)<0.5,
+      `${id}: радиус — размеры детали угла ${arcPiece.w}×${arcPiece.len} != ожидаемых ${arcW}×2400`);
+
+    const coutRad=(Rrad.prof.find(p=>p.key==='cout')||{total:0}).total;
+    chk('L140g',coutRad<0.5,`${id}: радиус — успешный радиусный угол всё равно начислил обычный профиль cout=${coutRad}`);
+
+    // fallback: разная высота стен
+    const wR2b=Object.assign({},wR2,{H:2000});
+    const RbadH=C.computeProject(Gt2,[wR1,wR2b],{},linkRadius,[]);
+    chk('L140i',(RbadH.cornerIssues||[]).length===1,`${id}: радиус — разная высота стен не дала issue (${JSON.stringify(RbadH.cornerIssues)})`);
+    const coutBadH=(RbadH.prof.find(p=>p.key==='cout')||{total:0}).total;
+    chk('L140j',coutBadH>0.5,`${id}: радиус — при разной высоте стен угол должен откатиться на обычный профиль`);
+
+    // fallback: радиус не задан (0)
+    const linkNoRadius=[{id:1,kind:'radius',type:'out',angle:90,radius:0,aw:1,as:'right',bw:2,bs:'left'}];
+    const Rnr=C.computeProject(Gt2,[wR1,wR2],{},linkNoRadius,[]);
+    chk('L140k',(Rnr.cornerIssues||[]).length===1,`${id}: радиус — radius=0 не дал issue`);
+
+    // fallback: деталь угла шире листа (R=1000, 90° -> t=1000 влезает в стену 3000, но
+    // arcW=1000×π/2≈1570.8 больше G.pw=1150) — стены всё равно урезаны геометрически, но деталь
+    // не попадает в раскрой, а обычный профиль угла (cout) начисляется как fallback
+    const linkWide=[{id:1,kind:'radius',type:'out',angle:90,radius:1000,aw:1,as:'right',bw:2,bs:'left'}];
+    const Rwide=C.computeProject(Gt2,[wR1,wR2],{},linkWide,[]);
+    const arcWide=Rwide.sheets.flatMap(sh=>sh.list).find(p=>p.isCorner);
+    chk('L140l',!arcWide,`${id}: радиус — деталь угла шире листа всё равно попала в раскрой`);
+    const coutWide=(Rwide.prof.find(p=>p.key==='cout')||{total:0}).total;
+    chk('L140m',coutWide>0.5,`${id}: радиус — угол со слишком широкой деталью должен откатиться на обычный профиль`);
+    chk('L140n',(Rwide.cornerIssues||[]).length===1,`${id}: радиус — деталь угла шире листа не дала issue`);
+  }
   // L7/L8: панелей в разумных пределах
   const needArea=(R.netArea+R.otkosArea)*1e6;
   chk('L7',R.sheetsTotal>=Math.ceil(needArea/(G.pl*G.pw)-1e-9),`${id}: панелей меньше минимума`);
@@ -724,9 +783,12 @@ for(let t=0;t<N;t++){
       catch(e){ FAIL++; if(bugs.length<30) bugs.push('CRASH-ROTCUTS-EMPTY #'+t+' :: '+e.message); R2=null; }
       if(R2){
         const sh2=R2.sheets[sh.no-1];
-        const p2=sh2&&sh2.list.find(x=>x.label===p.label);
-        chk('L103',!!p2&&Math.abs(p2.w-p.len)<0.5&&Math.abs(p2.len-p.w)<0.5,
-          `${id}: ${p.label} после поворота ${p2?p2.w+'x'+p2.len:'не найдена'}, ожидалось ${p.len}x${p.w}`);
+        // label не инъективен (несколько одинаковых по размеру полос могут получить одну и ту же
+        // подпись) — ищем среди ОДНОИМЁННЫХ деталей именно ту, что уже с повёрнутыми размерами,
+        // а не первую попавшуюся тёзку (иначе тест сравнивает не ту деталь, которую крутили)
+        const p2=sh2&&sh2.list.find(x=>x.label===p.label&&Math.abs(x.w-p.len)<0.5&&Math.abs(x.len-p.w)<0.5);
+        chk('L103',!!p2,
+          `${id}: ${p.label} после поворота не нашлась с размерами ${p.len}x${p.w} среди одноимённых деталей`);
       }
     }
     if(busyCand){
@@ -737,9 +799,10 @@ for(let t=0;t<N;t++){
       catch(e){ FAIL++; if(bugs.length<30) bugs.push('CRASH-ROTCUTS-BUSY #'+t+' :: '+e.message); R2=null; }
       if(R2){
         const sh2=R2.sheets[sh.no-1];
-        const p2=sh2&&sh2.list.find(x=>x.label===p.label);
-        chk('L104',!!p2 && Math.abs(p2.w-p.w)<0.5 && Math.abs(p2.len-p.len)<0.5,
-          `${id}: ${p.label} с занятым вырезом повернулась вопреки запрету`);
+        // та же оговорка про неинъективность label, что и в L103 выше
+        const p2=sh2&&sh2.list.find(x=>x.label===p.label&&Math.abs(x.w-p.w)<0.5&&Math.abs(x.len-p.len)<0.5);
+        chk('L104',!!p2,
+          `${id}: ${p.label} с занятым вырезом повернулась вопреки запрету (не нашлась с исходными размерами среди одноимённых деталей)`);
       }
     }
   }

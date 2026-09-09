@@ -774,7 +774,7 @@ function renderLedDraw(G,R){
   const wall=AW(), wi=active;
   const sc=schemeFor(G,R,wi);
   $('#led-draw-meta').textContent=sc.meta;
-  const graph=wallLedGraph(wall,G);
+  const graph=wallLedGraph(wall,G,R.cornerCuts&&R.cornerCuts.get(wall.id));
   const H=wall.H, fs=Math.max(wall.W,wall.H)/48;
   let overlay='';
   // «доступные для LED» рёбра графа (все, не только уже нарисованные) — бледная сетка поверх
@@ -826,8 +826,8 @@ function showLedCircuitMenu(ev,circId){
 // справочный список (номер/длина/способ) для ОДНОЙ стены — общий и для интерактивного блока
 // в разделе «LED» (кликов не показывает — правится по клику на схеме, см. showLedCircuitMenu),
 // и для печатной копии под основной схемой (renderScheme) — возвращает '' если контуров нет
-function ledCircuitsListHtml(wall,G){
-  const graph=wallLedGraph(wall,G);
+function ledCircuitsListHtml(wall,G,cuts){
+  const graph=wallLedGraph(wall,G,cuts);
   const mine=ledCircuits.filter(c=>c.legs.some(l=>l.wall===wall.id));
   if(!mine.length) return '';
   const kindLabel={start:'стартовый профиль',joint:'соединительный профиль',none:'без профиля'};
@@ -839,7 +839,9 @@ function ledCircuitsListHtml(wall,G){
 }
 function renderLedCircuitsList(){
   const box=$('#led-circuits-list'); if(!box) return;
-  const html=ledCircuitsListHtml(AW(),collect());
+  const wall=AW();
+  const cuts=LAST&&LAST.R&&LAST.R.cornerCuts&&LAST.R.cornerCuts.get(wall.id);
+  const html=ledCircuitsListHtml(wall,collect(),cuts);
   box.innerHTML=html||'<p class="hint" style="margin:4px 0">На этой стене пока нет нарисованных LED-отрезков.</p>';
 }
 /* протяжка мышью: точка А — pointerdown на узле, дальше только вверх/вниз/вправо/влево вдоль
@@ -902,7 +904,8 @@ function renderLedCircuitsList(){
     downAt={x:ev.clientX,y:ev.clientY};
     if(t.dataset&&t.dataset.lednode!==undefined){
       const wall=AW(), G=collect();
-      const graph=wallLedGraph(wall,G);
+      const cuts=LAST&&LAST.R&&LAST.R.cornerCuts&&LAST.R.cornerCuts.get(wall.id);
+      const graph=wallLedGraph(wall,G,cuts);
       drag={wallId:wall.id,graph,startKey:t.dataset.lednode,dir:null,path:[],target:null,free:ledDrawMode==='free'};
       ev.preventDefault();
       try{ box.setPointerCapture(ev.pointerId); }catch(_){}
@@ -2148,6 +2151,20 @@ function applyManual(sheets,mv,G,pl,pw,shelfList){
   return {moved,dropped,shelf:shelfOut};
 }
 
+// «урезанный» вид стены для радиусного угла (kind:'radius' в cornerLinks, см. computeProject):
+// касательная длина cuts.left/right «съедена» дугой у соответствующего края — панельная зона
+// начинается не от истинного угла комнаты, а от точки касания дуги. W уменьшается, проёмы и
+// ручные вертикальные стыки сдвигаются на ту же величину (их x по-прежнему «от истинного угла
+// комнаты» в форме ввода — здесь только для расчёта). Без cuts возвращает w как есть, без копии.
+function wallCutView(w,cuts){
+  if(!cuts||(!cuts.left&&!cuts.right)) return w;
+  const shift=cuts.left||0;
+  return Object.assign({},w,{
+    W:Math.max(w.W-(cuts.left||0)-(cuts.right||0),0),
+    ops:(w.ops||[]).map(o=>Object.assign({},o,{x:o.x-shift})),
+    vseamsU:(w.vseamsU||[]).map(s=>Object.assign({},s,{pos:s.pos-shift}))
+  });
+}
 function wallS(G,w){
   return Object.assign({},G,{W:w.W,H:w.H,ceil:w.ceil,rowH:w.rowH||0,
     userSeams:(w.seamsU||[]).map(x=>x.pos),userVSeams:(w.vseamsU||[]).map(x=>x.pos),ops:w.ops,
@@ -2187,7 +2204,8 @@ function ledCircuitOf(ledCircuits,leg){
 // добавляет вызывающий код). Один отрезок, проведённый мышкой через несколько узлов —
 // это путь по нескольким рёбрам подряд; каждое ребро на пути становится своей ножкой
 // одного и того же ledCircuits[].legs (см. обсуждение — «один непрерывный отрезок»).
-function wallLedGraph(w,G){
+function wallLedGraph(w,G,cuts){
+  w=wallCutView(w,cuts);
   const L=buildLayout(wallS(G,w));
   const W=w.W,H=w.H;
   const nodes=new Map();
@@ -2259,8 +2277,60 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
   const multi=walls.length>1;
   const tag=i=>'С'+(i+1);
 
+  // --- радиусные углы (cornerLinks kind:'radius') ---
+  // Касательная длина t=radius/tan(angle/2) «съедает» ширину панельной зоны обеих смежных стен
+  // с нужной стороны — там заканчивается обычная полоса и начинается сама гнутая деталь угла.
+  // Деталь дуги разворачивается в прямоугольник шириной radius×(π-angle) (по углу ПОВОРОТА
+  // 180°-angle, не по углу комнаты) и не может быть распилена по ширине на куски — если она не
+  // помещается в лист, это ошибка проекта (в notes), а не молчаливый раскрой как получится.
+  const wallById0=new Map(walls.map(w=>[w.id,w]));
+  const bumpCut=(map,id,side,amt)=>{
+    if(!id||!side) return;
+    const cur=map.get(id)||{left:0,right:0};
+    cur[side]+=amt; map.set(id,cur);
+  };
+  const cornerIssues=[];   // [{id,msg}] — показываются в notes (см. renderNotes)
+  const radiusOk=[];       // радиусные углы, прошедшие геометрическую проверку radius/angle/высоты
+  cornerLinks.forEach(c=>{
+    if((c.kind||'sharp')!=='radius') return;
+    const a=wallById0.get(+c.aw); if(!a) return;
+    const b=(c.bw!==''&&c.bw!=null)?wallById0.get(+c.bw):null;
+    const angle=+c.angle||0, radius=+c.radius||0;
+    if(!(radius>0)){ cornerIssues.push({id:c.id,msg:'радиус не задан — угол посчитан как обычный прямой стык'}); return; }
+    if(!(angle>0&&angle<180)){ cornerIssues.push({id:c.id,msg:'угол комнаты должен быть от 0° до 180° — угол посчитан как обычный прямой стык'}); return; }
+    if(b&&Math.abs(a.H-b.H)>1){ cornerIssues.push({id:c.id,msg:`разная высота стен (${fmt(a.H)} и ${fmt(b.H)} мм) — радиусная деталь требует одной высоты, угол посчитан как обычный прямой стык`}); return; }
+    const angleRad=angle*Math.PI/180;
+    radiusOk.push({c,a,b,t:radius/Math.tan(angleRad/2),arcW:radius*(Math.PI-angleRad)});
+  });
+  // суммарный «откус» ширины с одной стороны не может забрать больше самой стены
+  const rawCuts=new Map();
+  radiusOk.forEach(({c,t})=>{ bumpCut(rawCuts,+c.aw,c.as,t); if(c.bw!==''&&c.bw!=null) bumpCut(rawCuts,+c.bw,c.bs,t); });
+  const badWalls=new Set();
+  rawCuts.forEach((cuts,wallId)=>{
+    const w=wallById0.get(wallId);
+    if(w&&cuts.left+cuts.right>=w.W-10) badWalls.add(wallId);
+  });
+  const cornerCuts=new Map();
+  const arcPieces=[];
+  const radiusSuccessIds=new Set();
+  radiusOk.forEach(({c,a,b,t,arcW})=>{
+    if(badWalls.has(+c.aw)||(c.bw!==''&&c.bw!=null&&badWalls.has(+c.bw))){
+      cornerIssues.push({id:c.id,msg:'радиус слишком большой для ширины смежной стены — угол посчитан как обычный прямой стык'});
+      return;
+    }
+    bumpCut(cornerCuts,+c.aw,c.as,t);
+    if(b) bumpCut(cornerCuts,+c.bw,c.bs,t);
+    if(!(arcW<=G.pw+0.5&&a.H<=G.pl+0.5)){
+      cornerIssues.push({id:c.id,msg:`деталь угла ${fmt(arcW)}×${fmt(a.H)} мм не помещается в лист ${fmt(G.pw)}×${fmt(G.pl)} — нужен материал крупнее либо меньший радиус/угол`});
+      return;
+    }
+    arcPieces.push({len:a.H,w:arcW,cuts:[],label:'Угол R'+fmt(+c.radius),pk:'corner-'+c.id,isCorner:true});
+    radiusSuccessIds.add(c.id);
+  });
+
   // --- раскладка каждой стены ---
-  const layouts=walls.map((w,i)=>{
+  const layouts=walls.map((w0,i)=>{
+    const w=wallCutView(w0,cornerCuts.get(w0.id));
     const L=buildLayout(wallS(G,w));
     L.wall=i;
     L.pieces.forEach(p=>{ p.wall=i; if(multi) p.label=tag(i)+'·'+p.label; });
@@ -2278,8 +2348,9 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
   });
 
   // --- общий раскрой: куски всех стен в один пул листов (детали с индивидуальным материалом
-  //     сюда не идут — у них свой пул ниже, рядом с заполнением проёмов) ---
-  const allPieces=layouts.flatMap(L=>L.pieces).filter(p=>!p.matOverride);
+  //     сюда не идут — у них свой пул ниже, рядом с заполнением проёмов), плюс детали радиусных
+  //     углов (arcPieces выше) — та же кромка, тот же материал, тот же общий пул листов ---
+  const allPieces=layouts.flatMap(L=>L.pieces).filter(p=>!p.matOverride).concat(arcPieces);
 
   // Если «изгиб» геометрически не влез (см. buildLayout) — на эту сторону возвращаем
   // обычный «Г-образный» угол, иначе деталь откоса потеряется без замены (и опустится
@@ -2409,7 +2480,8 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
     const key=c?('c'+c.id):('leg:'+ledLegKey(leg));
     ledRunLens.set(key,(ledRunLens.get(key)||0)+L);
   };
-  walls.forEach((w,i)=>{
+  walls.forEach((w0,i)=>{
+    const w=wallCutView(w0,cornerCuts.get(w0.id));
     const W=w.W,H=w.H,L=layouts[i];
     // край области: каждая сторона — нет / заглушка / LED-стартовый
     const sides=[
@@ -2502,12 +2574,19 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
   });
 
   // углы между стенами (список связей): один физический стык — один прогон,
-  // длиной по более высокой из двух стен; конец «вне проекта» (bw='') — по своей стене
+  // длиной по более высокой из двух стен; конец «вне проекта» (bw='') — по своей стене.
+  // 'across' («напротив») — не физический стык, профиль не считается вовсе. Радиусный угол,
+  // успешно ставший реальной гнутой деталью (radiusSuccessIds), тоже не берёт обычный профиль —
+  // деталь угла заменяет его собой; а вот радиусный угол, откатившийся к прямому стыку из-за
+  // ошибки геометрии (см. cornerIssues выше), считается как обычный — иначе стоимость стыка
+  // потерялась бы молча.
   {
-    const wallById=new Map(walls.map(w=>[w.id,w]));
     cornerLinks.forEach(c=>{
-      const a=wallById.get(+c.aw); if(!a) return;
-      const b=(c.bw!==''&&c.bw!=null)?wallById.get(+c.bw):null;
+      const kind=c.kind||'sharp';
+      if(kind==='across') return;
+      if(kind==='radius'&&radiusSuccessIds.has(c.id)) return;
+      const a=wallById0.get(+c.aw); if(!a) return;
+      const b=(c.bw!==''&&c.bw!=null)?wallById0.get(+c.bw):null;
       const len=b?Math.max(a.H,b.H):a.H;
       (c.type==='in'?cornerRuns.cin:cornerRuns.cout).push(len);
     });
@@ -2686,7 +2765,12 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
           spliced:ot.spliced,forced:ot.forced,manualSeamIgnored:ot.manualIgnored,
           parts:parts.concat(otkosOverrideParts),sheetArea,
           grossArea,opsArea,netArea,otkosArea,offArea,offBest,sheetsTotal,usedArea,waste,wasteGross,
-          prof,tubes,glueArea,glueDetail,led,manual:man,shelf:man.shelf};
+          prof,tubes,glueArea,glueDetail,led,manual:man,shelf:man.shelf,
+          // радиусные углы: cornerCuts — Map(wallId -> {left,right} мм, «съедено» дугой, нужно
+          // и вне computeProject — wallLedGraph должен строить граф по той же урезанной геометрии,
+          // см. вызовы в renderLedDraw/ledCircuitsListHtml/schemeFor/drag-IIFE); cornerIssues —
+          // список проблем геометрии радиусных углов (см. renderNotes)
+          cornerCuts,cornerIssues};
 }
 // Обёртка для одностеновых расчётов (тесты, аудит)
 function compute(S){
@@ -2731,7 +2815,10 @@ const ext=(x1,y1,x2,y2,fs)=>`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" s
 
 /* ===================== СХЕМА СТЕНЫ ===================== */
 function schemeFor(G,R,wi){
-  const wall=walls[wi];
+  // радиусный угол «съедает» часть ширины стены (см. computeProject) — схема должна рисовать
+  // ровно ту же (урезанную) панельную зону, что и реальный раскрой L, иначе куски визуально не
+  // дотягивались бы до края канвы/размерных линий, а «4000» на схеме не совпадало бы с суммой полос
+  const wall=wallCutView(walls[wi],R.cornerCuts&&R.cornerCuts.get(walls[wi].id));
   const S=wallS(G,wall);
   const L=R.layouts[wi], W=S.W, H=S.H;
   const fs=Math.max(W,H)/48;
@@ -2983,6 +3070,7 @@ function schemeFor(G,R,wi){
   // пронумерованные LED-отрезки — прямо на основной схеме (не только в копии-холсте раздела
   // «LED»): нужны и на экране, и в первую очередь в PDF/печати, где раздела «LED» вообще нет
   // (см. @media print — #led-draw-block скрыт целиком, вместо него список под самой схемой)
+  // wall тут уже урезан (см. начало функции) — cuts НЕ передаём повторно, иначе урезание применится дважды
   g+=ledCircuitBadgesSvg(wall,wallLedGraph(wall,G),fs,H,false);
 
   const vb=`${-padL} ${-padT} ${W+padL+padR} ${H+padT+padB}`;
@@ -2996,7 +3084,7 @@ function renderScheme(G,R){
   $('#scheme').innerHTML=parts.map(({w,wi,sc})=>{
     // список LED-отрезков этой стены — на экране скрыт (он и так есть в разделе «LED» ниже
     // схемы раскладки), но нужен при печати/PDF, где раздел «LED» целиком не выводится
-    const ledHtml=ledCircuitsListHtml(w,G);
+    const ledHtml=ledCircuitsListHtml(w,G,R.cornerCuts&&R.cornerCuts.get(w.id));
     const ledBlock=ledHtml?`<div class="led-print-list"><label class="sub-l">LED-отрезки</label>${ledHtml}</div>`:'';
     return `<div class="wall-scheme${wi===active?' on':''}" data-wallscheme="${wi}">`+
       `<div class="wall-scheme-h">${esc(w.name)}</div>${sc.svg}${ledBlock}</div>`;
@@ -3308,6 +3396,10 @@ function renderNotes(G,R){
       });
       n.push(['warn','Изгиб не применился',wt(i)+`край проёма не совпал с границей полосы (или загнутая деталь не влезла в лист) — ${list.join(', ')}. Вернулся обычный Г-образный угол.`]);
     }
+  });
+  (R.cornerIssues||[]).forEach(({id,msg})=>{
+    const idx=cornerLinks.findIndex(c=>c.id===id);
+    n.push(['warn','Радиусный угол'+(idx>=0?' '+(idx+1):''),msg]);
   });
   if(R.parts.length){
     const onExtra=R.sheets.filter(sh=>sh.extra).flatMap(sh=>sh.otk);
