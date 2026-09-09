@@ -451,7 +451,14 @@ const esc = s => String(s).replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp
 let walls=[], wallSeq=0, active=0;
 let manualMoves={};   // ручные перестановки на карте раскроя: {pool:{uid:{sheet,x,y}}}
 let LAST=null;        // последний расчёт — нужен drag'у карты
-let cornerLinks=[], cornerSeq=0;   // углы между стенами: {id,type:'out'|'in',aw,as,bw,bs} — bw='' значит «вне проекта»
+// углы между стенами: {id,type:'out'|'in',aw,as,bw,bs,kind,angle,radius,distance} — bw='' значит
+// «вне проекта» (только для kind sharp/radius); kind:'sharp' — обычный стык (как раньше, угол
+// только для справки, на раскрой не влияет); 'radius' — радиусный угол, реальная гнутая деталь
+// (radius — мм по центральной линии панели, angle — угол комнаты в этой точке, град.); 'across' —
+// стены «напротив» без общего стыка (например, стены коридора) — distance, мм, между ними; ни на
+// какой профиль/раскрой не влияет, только позиционирование в 3D. kind отсутствует у старых
+// сохранённых проектов — читается как 'sharp' (см. миграцию при загрузке файла).
+let cornerLinks=[], cornerSeq=0;
 // LED-контуры: группировка уже отмеченных «led»-позиций (w.edges/w.jointModes/o.otkosMode)
 // в один физический отрезок ленты ради (а) суммарной длины/БП по контуру и (б) единого
 // способа реализации на весь отрезок. САМА разметка «здесь LED» не переезжает сюда —
@@ -1191,28 +1198,63 @@ function renderCornerLinks(){
   const box=$('#corners-list'); if(!box) return;
   const wallOpt=cur=>walls.map(w=>`<option value="${w.id}"${+cur===w.id?' selected':''}>${esc(w.name)}</option>`).join('');
   const sideOpt=cur=>`<option value="left"${cur==='left'?' selected':''}>Слева</option><option value="right"${cur==='right'?' selected':''}>Справа</option>`;
-  box.innerHTML=(cornerLinks.length?cornerLinks.map((c,i)=>`
+  const kindOpt=cur=>`<option value="sharp"${cur==='sharp'?' selected':''}>Прямой угол</option>`+
+    `<option value="radius"${cur==='radius'?' selected':''}>Радиусный угол</option>`+
+    `<option value="across"${cur==='across'?' selected':''}>Стены напротив</option>`;
+  box.innerHTML=(cornerLinks.length?cornerLinks.map((c,i)=>{
+    const kind=c.kind||'sharp', across=kind==='across';
+    return `
     <div class="opening" data-cornerrow="${c.id}">
       <div class="opening-h"><span class="tag">Угол ${i+1}</span><button class="btn btn-del btn-mini" data-cornerdel="${c.id}">удалить</button></div>
+      <div class="row row-1">
+        <div class="f"><label>Тип связи</label><select data-cf="kind">${kindOpt(kind)}</select></div>
+      </div>
       <div class="row">
         <div class="f"><label>Стена А</label><select data-cf="aw">${wallOpt(c.aw)}</select></div>
-        <div class="f"><label>Край А</label><select data-cf="as">${sideOpt(c.as)}</select></div>
+        ${across?'':`<div class="f"><label>Край А</label><select data-cf="as">${sideOpt(c.as)}</select></div>`}
       </div>
       <div class="row">
-        <div class="f"><label>Стена Б</label><select data-cf="bw"><option value=""${!c.bw?' selected':''}>— вне проекта</option>${wallOpt(c.bw)}</select></div>
-        <div class="f"><label>Край Б</label><select data-cf="bs"${c.bw?'':' disabled'}>${sideOpt(c.bs)}</select></div>
+        <div class="f"><label>Стена Б</label><select data-cf="bw">${across?'':`<option value=""${!c.bw?' selected':''}>— вне проекта</option>`}${wallOpt(c.bw)}</select></div>
+        ${across?'':`<div class="f"><label>Край Б</label><select data-cf="bs"${c.bw?'':' disabled'}>${sideOpt(c.bs)}</select></div>`}
       </div>
+      ${across?`
       <div class="row row-1">
+        <div class="f"><label>Расстояние между стенами</label><input type="number" data-cf="distance" value="${c.distance||0}" step="10"><span class="unit">мм</span></div>
+      </div>`:`
+      <div class="row">
+        <div class="f"><label>Угол комнаты здесь</label><input type="number" data-cf="angle" value="${c.angle||90}" step="1"><span class="unit">°</span></div>
         <div class="f"><label>Тип угла</label><select data-cf="type"><option value="out"${c.type==='out'?' selected':''}>Внешний</option><option value="in"${c.type==='in'?' selected':''}>Внутренний</option></select></div>
       </div>
-    </div>`).join('') : '<p class="hint" style="margin:4px 0">Углов пока нет.</p>');
+      ${kind==='radius'?`
+      <div class="row row-1">
+        <div class="f"><label>Радиус (по центральной линии панели)</label><input type="number" data-cf="radius" value="${c.radius||300}" step="10"><span class="unit">мм</span></div>
+      </div>`:''}`}
+    </div>`;
+  }).join('') : '<p class="hint" style="margin:4px 0">Углов пока нет.</p>');
 }
 $('#corners-list').addEventListener('input',e=>{
   const row=e.target.closest('[data-cornerrow]'); if(!row) return;
   const c=cornerLinks.find(x=>x.id==row.dataset.cornerrow); if(!c) return;
   const k=e.target.dataset.cf; if(!k) return;
-  c[k]=e.target.value;
-  if(k==='bw'){ if(!c.bw) c.bs=''; else if(!c.bs) c.bs='left'; renderCornerLinks(); }
+  const v=e.target.type==='number'?(parseFloat(e.target.value)||0):e.target.value;
+  c[k]=v;
+  if(k==='kind'){
+    // смена типа связи — сбрасываем поля, неактуальные для нового типа, чтобы не тащить
+    // призрачные старые значения (например, «край» у уже переключённой на «напротив» связи)
+    if(v==='across'){
+      c.as=''; c.bs=''; if(!c.distance) c.distance=0;
+      // «напротив» без второй стены (или сам с собой) бессмысленно — подставляем любую другую,
+      // если она есть в проекте; пользователь всё равно может сменить вручную
+      if(!c.bw||+c.bw===+c.aw){ const other=walls.find(w=>w.id!==+c.aw); if(other) c.bw=other.id; }
+    }
+    else { if(!c.as) c.as='left'; if(c.bw&&!c.bs) c.bs='left'; if(!c.angle) c.angle=90; }
+    renderCornerLinks(); run(); return;
+  }
+  if(k==='bw'){
+    if(!c.bw) c.bs='';
+    else if(!c.bs&&(c.kind||'sharp')!=='across') c.bs='left';
+    renderCornerLinks();
+  }
   run();
 });
 $('#corners-list').addEventListener('click',e=>{
@@ -1223,7 +1265,8 @@ $('#corners-list').addEventListener('click',e=>{
 $('#btn-add-corner').addEventListener('click',()=>{
   cornerSeq++;
   const w=AW(), other=walls.find(x=>x.id!==w.id);
-  cornerLinks.push({id:cornerSeq, type:'out', aw:w.id, as:'left', bw:other?other.id:'', bs:other?'right':''});
+  cornerLinks.push({id:cornerSeq, kind:'sharp', type:'out', angle:90, radius:300, distance:0,
+    aw:w.id, as:'left', bw:other?other.id:'', bs:other?'right':''});
   renderCornerLinks(); run();
 });
 
@@ -3376,7 +3419,9 @@ $('#file-load').addEventListener('change',e=>{
       {
         const ids=new Set(walls.map(w=>w.id));
         cornerLinks=(Array.isArray(o.cornerLinks)?o.cornerLinks:[])
-          .filter(c=>ids.has(+c.aw)&&(c.bw===''||c.bw==null||ids.has(+c.bw)));
+          .filter(c=>ids.has(+c.aw)&&(c.bw===''||c.bw==null||ids.has(+c.bw)))
+          // старые проекты не знали kind/angle/radius/distance — донормализуем как обычный прямой угол
+          .map(c=>Object.assign({kind:'sharp',angle:90,radius:300,distance:0},c));
         cornerSeq=Math.max(0,...cornerLinks.map(c=>c.id||0));
         // контуры без стены (после удаления) отбрасываем целиком, а не «вне проекта» — привязка
         // LED-отрезка к конкретной стене осмысленна только пока эта стена существует
