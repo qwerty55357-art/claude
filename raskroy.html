@@ -321,9 +321,10 @@ tbody tr:hover td{background:var(--surface)}
   </div>
   <div class="block" id="led-draw-block">
     <div class="stage-h"><h2>LED — рисование отрезков</h2><span class="meta" id="led-draw-meta"></span><span class="rule"></span></div>
-    <div class="row" style="margin-bottom:6px">
-      <button class="btn btn-mini btn-key" id="btn-led-mode-snap">По стыкам</button>
-      <button class="btn btn-mini" id="btn-led-mode-free">Свободная линия</button>
+    <label class="sub-l">Режим соединения</label>
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:8px">
+      <button class="btn btn-key" id="btn-led-mode-snap">По стыкам</button>
+      <button class="btn" id="btn-led-mode-free">Свободная линия — любые две точки</button>
     </div>
     <p class="hint" style="margin:0 0 8px" id="led-draw-hint">Ведите мышью от одного узла схемы (угол стены, стык, край, угол контура откоса)
       к другому по прямой — появится отрезок. Точку можно ставить только на узел; несколько узлов подряд на одной
