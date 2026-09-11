@@ -2390,6 +2390,10 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
   // 180°-angle, не по углу комнаты) и не может быть распилена по ширине на куски — если она не
   // помещается в лист, это ошибка проекта (в notes), а не молчаливый раскрой как получится.
   const wallById0=new Map(walls.map(w=>[w.id,w]));
+  // связь-угол (прямая или радиусная, не «напротив») на конкретном конце конкретной стены —
+  // нужна, чтобы не считать заглушку края там, где стык уже закрыт угловым профилем/деталью дуги
+  const hasCornerLink=(wallId,side)=>cornerLinks.some(c=>(c.kind||'sharp')!=='across'&&
+    ((+c.aw===wallId&&c.as===side)||(c.bw!==''&&c.bw!=null&&+c.bw===wallId&&c.bs===side)));
   const bumpCut=(map,id,side,amt)=>{
     if(!id||!side) return;
     const cur=map.get(id)||{left:0,right:0};
@@ -2597,7 +2601,14 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
       ['right',H, w.ops.filter(o=>o.x+o.w>=W-1).map(o=>[o.y,o.y+o.h])]
     ];
     sides.forEach(([k,len,gaps])=>{
-      const mode=edgeMode(w.edges[k]); if(mode==='none') return;
+      let mode=edgeMode(w.edges[k]);
+      // на левом/правом конце, где есть активная связь-угол (прямая или радиусная), заглушка по
+      // умолчанию не нужна — стык уже закрыт угловым профилем (см. ниже) или деталью дуги (см.
+      // arcPieces выше), отдельная заглушка была бы задвоением. LED, поставленный явно, всё ещё
+      // работает — тут его не трогаем (профиль самого угла для 'sharp' на этой стороне гасится
+      // отдельно, см. cornerLinks.forEach ниже, чтобы не задвоить и его тоже)
+      if((k==='left'||k==='right')&&mode==='cap'&&hasCornerLink(w.id,k)) mode='none';
+      if(mode==='none') return;
       subRanges(len,gaps).forEach(sg=>{
         const L=sg[1]-sg[0];
         if(mode==='led') pushLed({wall:w.id,el:'edge',side:k},'start',L); else capRuns.push(L);
@@ -2685,7 +2696,9 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
   // успешно ставший реальной гнутой деталью (radiusSuccessIds), тоже не берёт обычный профиль —
   // деталь угла заменяет его собой; а вот радиусный угол, откатившийся к прямому стыку из-за
   // ошибки геометрии (см. cornerIssues выше), считается как обычный — иначе стоимость стыка
-  // потерялась бы молча.
+  // потерялась бы молча. Если на любом из двух концов стыка явно стоит LED (см. sides.forEach
+  // выше — заглушка на связанном конце и так уже погашена) — угловой профиль тоже не берём,
+  // его целиком заменяет LED-стартовый.
   {
     cornerLinks.forEach(c=>{
       const kind=c.kind||'sharp';
@@ -2693,6 +2706,9 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
       if(kind==='radius'&&radiusSuccessIds.has(c.id)) return;
       const a=wallById0.get(+c.aw); if(!a) return;
       const b=(c.bw!==''&&c.bw!=null)?wallById0.get(+c.bw):null;
+      // если хоть один конец стыка явно переведён на LED — угловой профиль заменяется
+      // LED-стартовым (он уже посчитан выше, в sides.forEach той стены), а не добавляется поверх
+      if(edgeMode(a.edges[c.as])==='led'||(b&&edgeMode(b.edges[c.bs])==='led')) return;
       const len=b?Math.max(a.H,b.H):a.H;
       (c.type==='in'?cornerRuns.cin:cornerRuns.cout).push(len);
     });
@@ -3751,11 +3767,18 @@ function renderNotes(G,R){
     const last=L.strips[L.strips.length-1];
     if(L.strips.length>1&&last.w<150&&!G.sym)
       n.push(['warn','Раскладка',wt(i)+`крайняя полоса всего ${fmt(last.w)} мм. Включите симметричную раскладку.`]);
+    const cuts=R.cornerCuts&&R.cornerCuts.get(w.id);
     w.ops.forEach((o,k)=>{
       if(o.x<0||o.y<0||o.x+o.w>w.W+1||o.y+o.h>w.H+1)
         n.push(['err','Проём '+(k+1),wt(i)+'выходит за границы области — проверьте отступ и отметки.']);
       if(o.h<=50)
         n.push(['err','Проём '+(k+1),wt(i)+'отметка верха ниже отметки низа — высота проёма нулевая.']);
+      // проём задан в исходных (нерезаных) координатах стены и мог оказаться в зоне, которую
+      // съедает касательная радиусного угла (см. cornerCuts выше) — сама раскладка эту зону
+      // просто не использует, но по факту это значит, что проём наедет на панель угла/останется
+      // без материала с нужной стороны, а границы-то формально в пределах w.W и не поймает check выше
+      if(cuts&&(cuts.left>0.5||cuts.right>0.5)&&(o.x<cuts.left-0.5||o.x+o.w>w.W-cuts.right+0.5))
+        n.push(['warn','Проём '+(k+1),wt(i)+`заходит в зону среза радиусного угла (слева ${fmt(cuts.left)} мм, справа ${fmt(cuts.right)} мм от исходного края стены) — проверьте расположение проёма или радиус угла.`]);
     });
     const withCuts=L.pieces.filter(p=>p.cuts.length).map(p=>p.label);
     if(withCuts.length)

@@ -638,6 +638,10 @@ for(let t=0;t<N;t++){
       links.forEach(c=>{
         const a=byId.get(c.aw); if(!a) return;
         const b=c.bw?byId.get(c.bw):null;
+        // явный LED на связанном конце (a.edges.left / b.edges.right — стороны, которыми links
+        // всегда подключены выше) заменяет угловой профиль LED-стартовым целиком, а не добавляется
+        // поверх него (см. фикс computeProject: заглушка на этом конце и так уже погашена)
+        if(a.edges.left==='led'||(b&&b.edges.right==='led')) return;
         const len=b?Math.max(a.H,b.H):a.H;
         if(c.type==='in') addIn+=len; else addOut+=len;
       });
@@ -645,6 +649,30 @@ for(let t=0;t<N;t++){
       const expOut=(baseOut?baseOut.total:0)+addOut, expIn=(baseIn?baseIn.total:0)+addIn;
       chk('L80',Math.abs((outTot2?outTot2.total:0)-expOut)<1,`${id}: cout ${outTot2?outTot2.total:0} != ${expOut}`);
       chk('L81',Math.abs((inTot2?inTot2.total:0)-expIn)<1,`${id}: cin ${inTot2?inTot2.total:0} != ${expIn}`);
+      // L82 (нов): заглушка «Заглушка · край области» на связанном угловой связью конце (left у
+      // aw, right у bw) не должна считаться — стык уже закрыт угловым профилем/деталью дуги,
+      // отдельная заглушка была бы задвоением. Пропускаем стены, где на этой стороне есть проём
+      // (там заглушка и так режется по gaps, дублировать эту логику здесь не нужно — просто не
+      // проверяем такие сценарии, а не считаем их неправильно).
+      let capReduction=0, capSkip=false;
+      const reducedSides=new Set();   // гасим одну и ту же сторону лишь раз, даже если на неё
+                                       // случайно легло несколько связей (реальный фикс — булевый gate)
+      links.forEach(c=>{
+        const a=byId.get(c.aw); if(!a) return;
+        const b=c.bw?byId.get(c.bw):null;
+        if(a.ops.some(o=>o.x<=1)||(b&&b.ops.some(o=>o.x+o.w>=b.W-1))){ capSkip=true; return; }
+        const keyA=c.aw+'|left';
+        if(a.edges.left==='cap'&&!reducedSides.has(keyA)){ capReduction+=a.H; reducedSides.add(keyA); }
+        if(b){
+          const keyB=c.bw+'|right';
+          if(b.edges.right==='cap'&&!reducedSides.has(keyB)){ capReduction+=b.H; reducedSides.add(keyB); }
+        }
+      });
+      if(!capSkip){
+        const baseEdge=R.prof.find(p=>p.key==='edge'), edgeTot2=R2.prof.find(p=>p.key==='edge');
+        const expEdge=Math.max(0,(baseEdge?baseEdge.total:0)-capReduction);
+        chk('L82',Math.abs((edgeTot2?edgeTot2.total:0)-expEdge)<1,`${id}: edge-cap ${edgeTot2?edgeTot2.total:0} != ${expEdge} (заглушка на связанном конце должна гаситься)`);
+      }
     }
   }
   // L90/L91 (нов): ручной шов откоса (otkosSeamPos) при гарантированно вынужденной стыковке
