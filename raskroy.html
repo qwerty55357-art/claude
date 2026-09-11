@@ -66,12 +66,9 @@ button,input,select,textarea{font:inherit;color:inherit}
 .chk-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
 .hint{font-size:11.5px;color:var(--muted);line-height:1.4;margin:6px 0 0}
 .sub-l{font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);display:block;margin:10px 0 4px}
-.wall-tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px}
 .wall-tab{background:transparent;border:1px solid var(--line-2);border-radius:var(--r);padding:5px 11px;cursor:pointer;font-family:var(--mono);font-size:11px;color:var(--muted)}
 .wall-tab:hover{border-color:var(--straw);color:var(--straw)}
 .wall-tab.on{background:var(--straw);color:var(--void);border-color:var(--straw);font-weight:600}
-.compass-slot{display:flex;gap:4px;flex-wrap:wrap}
-.compass-slot .wall-tab{font-size:10px;padding:4px 8px}
 .wall-scheme{display:none}
 .wall-scheme.on{display:block}
 .wall-scheme-h{display:none;font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:10px 0 6px}
@@ -181,12 +178,8 @@ tbody tr:hover td{background:var(--surface)}
     <div class="sect-h"><span class="sect-n">01</span><span class="sect-t">Объект</span><span class="sect-arrow">▾</span></div>
     <div class="sect-b">
       <div class="row row-1"><div class="f"><label>Клиент / объект</label><input type="text" id="i-client" placeholder="Иванов, гостиная"></div></div>
-      <div class="wall-tabs" id="wall-tabs"></div>
-      <label class="sub-l">Связи активной стены (вид сверху)</label>
+      <label class="sub-l">Стены и углы (вид сверху)</label>
       <div id="wall-compass"></div>
-      <p class="hint" style="margin:0 0 8px">Слева/справа — конец активной стены: «+ стена» продолжает в ряд, «+ угол» соединяет
-        углом (всегда 90°, тип и радиус можно сменить кликом по уже созданной связи). Внизу — стена напротив, на расстоянии.
-        Занятый слот показывает имя связанной стены — клик открывает её настройки.</p>
       <div class="row row-1"><div class="f"><label>Название стены</label><input type="text" id="i-wname"></div></div>
       <div class="row">
         <div class="f"><label>Ширина области</label><input type="number" id="i-w" value="4000"><span class="unit">мм</span></div>
@@ -356,9 +349,9 @@ tbody tr:hover td{background:var(--surface)}
   </div>
   <div class="block" id="scene3d-block">
     <div class="stage-h"><h2>3D — макет комнаты</h2><span class="meta" id="scene3d-meta"></span><span class="rule"></span></div>
-    <p class="hint" style="margin:0 0 8px">Простая 3D-расстановка стен по связям из раздела «Углы»: прямые и радиусные углы
-      соединяют стены встык под заданным углом, «стены напротив» ставятся друг против друга на заданном расстоянии.
-      Стены без единой связи показаны отдельно, не наложением. На раскрой и смету никак не влияет — только вид.
+    <p class="hint" style="margin:0 0 8px">Простая 3D-расстановка стен по углам, заданным в компасе (раздел «Объект»):
+      прямые и радиусные углы соединяют стены встык под заданным углом. Стены без единой связи
+      показаны отдельно, не наложением. На раскрой и смету никак не влияет — только вид.
       Перетаскивание — вращение камеры, колесо мыши — масштаб.</p>
     <div id="scene3d" style="width:100%;height:520px;border-radius:var(--r);overflow:hidden"></div>
   </div>
@@ -507,17 +500,6 @@ const AW=()=>walls[active];
 const edgeMode=v=>v===true?'cap':(v===false||v==null)?'none':v;
 
 // [ОТРИСОВКА]
-function renderWallTabs(){
-  $('#wall-tabs').innerHTML = walls.map((w,i)=>
-    `<button class="wall-tab${i===active?' on':''}" data-wall="${i}">${esc(w.name)}</button>`
-  ).join('') + `<button class="wall-tab" data-wall="add">+ стена</button>`;
-}
-$('#wall-tabs').addEventListener('click',e=>{
-  const v=e.target.dataset.wall; if(v===undefined) return;
-  if(v==='add'){ walls.push(newWall()); active=walls.length-1; }
-  else active=+v;
-  renderWallTabs(); wallToForm(); renderOpenings(); renderWallCompass(); run();
-});
 $('#btn-del-wall').addEventListener('click',()=>{
   if(walls.length<=1) return;
   const deadId=AW().id;
@@ -525,7 +507,7 @@ $('#btn-del-wall').addEventListener('click',()=>{
   // угол, ссылавшийся на удалённую стену одним концом, теряет смысл целиком — не превращаем в «вне проекта» молча
   cornerLinks=cornerLinks.filter(c=>c.aw!=deadId&&c.bw!=deadId);
   ledCircuits=ledCircuits.map(c=>Object.assign({},c,{legs:c.legs.filter(l=>l.wall!=deadId)})).filter(c=>c.legs.length);
-  renderWallTabs(); wallToForm(); renderOpenings(); renderWallCompass(); run();
+  wallToForm(); renderOpenings(); renderWallCompass(); run();
 });
 
 // поля стены <-> форма
@@ -544,7 +526,7 @@ function formToWall(){
   w.edges={top:$('#i-e-top').value,bot:$('#i-e-bot').value,left:$('#i-e-left').value,right:$('#i-e-right').value};
 }
 const WALL_FIELDS=['i-wname','i-w','i-h','i-ceil','i-e-top','i-e-bot','i-e-left','i-e-right'];
-$('#i-wname').addEventListener('input',()=>{ AW().name=$('#i-wname').value.trim()||AW().name; renderWallTabs(); });
+$('#i-wname').addEventListener('input',()=>{ AW().name=$('#i-wname').value.trim()||AW().name; renderWallCompass(); });
 // [ОТРИСОВКА]
 function renderSeams(){
   const w=AW();
@@ -1240,13 +1222,6 @@ function cornerAt(wallId,side){
   return cornerLinks.find(c=>(c.kind||'sharp')!=='across'&&
     ((+c.aw===wallId&&c.as===side)||(c.bw!==''&&c.bw!=null&&+c.bw===wallId&&c.bs===side)));
 }
-function acrossFor(wallId){
-  return cornerLinks.find(c=>(c.kind||'sharp')==='across'&&(+c.aw===wallId||+c.bw===wallId));
-}
-function otherWallOf(c,wallId){
-  const otherId=+c.aw===wallId?c.bw:c.aw;
-  return (otherId!==''&&otherId!=null)?walls.find(w=>w.id===+otherId):null;
-}
 function cornerBadgeLabel(corner,otherWall){
   if(corner.bw===''||corner.bw==null) return `⌒ R${fmt(corner.radius||0)}`;
   return ((corner.kind||'sharp')==='radius'?'⌒ ':'')+esc(otherWall?otherWall.name:'?');
@@ -1268,11 +1243,6 @@ function renderWallCompass(){
     if(!wa&&!wb) return `<span class="wall-tab" style="opacity:.3">·</span>`;
     return `<button class="btn wall-tab" data-cpadd="${diag}">+ угол</button>`;
   };
-  const north=AW();
-  const ac=acrossFor(north.id), acOther=ac?otherWallOf(ac,north.id):null;
-  const acrossHtml=ac
-    ? `<button class="btn wall-tab on" data-cpedit="${ac.id}">${esc(acOther?acOther.name:'?')} · ${fmt(ac.distance||0)} мм</button>`
-    : `<button class="btn wall-tab" data-cpadd="across">+ стена напротив (${esc(north.name)})</button>`;
   box.innerHTML=`
     <div style="display:grid;grid-template-columns:1fr 1.3fr 1fr;gap:6px;align-items:center;text-align:center">
       <div>${cornerCell('NW')}</div>
@@ -1284,8 +1254,7 @@ function renderWallCompass(){
       <div>${cornerCell('SW')}</div>
       <div>${wallCell(S,'S')}</div>
       <div>${cornerCell('SE')}</div>
-    </div>
-    <div style="display:flex;justify-content:center;margin-top:8px">${acrossHtml}</div>`;
+    </div>`;
 }
 // быстрое создание: клик по пустому слоту стены (N/E/S/W) сразу создаёт стену и делает её
 // активной; клик по пустому слоту угла (NW/NE/SE/SW) создаёт прямой угол 90° между уже
@@ -1295,18 +1264,7 @@ function compassAdd(kind){
   if(kind==='N'||kind==='E'||kind==='S'||kind==='W'){
     const nw=newWall(); nw.slot=kind; walls.push(nw);
     active=walls.length-1;
-    renderWallTabs(); wallToForm(); renderOpenings(); renderWallCompass(); run();
-    return;
-  }
-  if(kind==='across'){
-    const north=AW();
-    const other=walls.find(x=>x.id!==north.id);
-    const bw=other?other.id:(()=>{ const nw=newWall(); walls.push(nw); active=walls.length-1; return nw.id; })();
-    cornerSeq++;
-    cornerLinks.push({id:cornerSeq,kind:'across',type:'out',angle:90,radius:300,distance:1000,
-      aw:north.id,as:'',bw,bs:''});
-    if(!other){ renderWallTabs(); wallToForm(); renderOpenings(); }
-    renderWallCompass(); run();
+    wallToForm(); renderOpenings(); renderWallCompass(); run();
     return;
   }
   const def=CORNER_DEF[kind]; if(!def) return;
@@ -1340,20 +1298,6 @@ function compassEdit(ev,cornerId){
   const del=menu=>{ menuDivider(menu,''); menuBtn(menu,'Удалить связь',false,()=>{
     cornerLinks=cornerLinks.filter(x=>x.id!==cornerId); closeMatMenu(); renderWallCompass(); run();
   },true); };
-  if(kind==='across'){
-    const menu=menuShell(ev,'Стена напротив');
-    const w=AW();
-    const wallOpt=walls.filter(x=>x.id!==w.id)
-      .map(x=>`<option value="${x.id}"${+c.bw===x.id?' selected':''}>${esc(x.name)}</option>`).join('');
-    const row=document.createElement('div'); row.style.cssText='padding:5px 8px';
-    row.innerHTML=`<label style="display:block;font-size:10px;color:var(--muted);margin-bottom:3px">Какая стена</label>`+
-      `<select style="width:100%;background:var(--void);border:1px solid var(--line-2);border-radius:6px;color:var(--paper);padding:5px 8px;font-family:var(--mono)">${wallOpt}</select>`;
-    row.querySelector('select').addEventListener('change',e=>{ c.bw=+e.target.value; run(); renderWallCompass(); });
-    menu.appendChild(row);
-    numRowMenu(menu,'Расстояние, мм',c.distance||0,v=>{ c.distance=v; run(); });
-    del(menu);
-    return;
-  }
   const menu=menuShell(ev,(c.bw===''||c.bw==null)?'Радиус без стены':'Угол');
   if(c.bw!==''&&c.bw!=null){
     menuBtn(menu,'Прямой угол',kind==='sharp',()=>{ c.kind='sharp'; closeMatMenu(); renderWallCompass(); run(); });
@@ -1373,7 +1317,7 @@ $('#wall-compass').addEventListener('click',e=>{
   const jumpId=e.target.dataset.cpjump;
   if(jumpId){
     const idx=walls.findIndex(w=>w.id===+jumpId); if(idx<0) return;
-    active=idx; renderWallTabs(); wallToForm(); renderOpenings(); renderWallCompass(); run();
+    active=idx; wallToForm(); renderOpenings(); renderWallCompass(); run();
   }
 });
 
@@ -3893,7 +3837,7 @@ $('#file-load').addEventListener('change',e=>{
         ledCircuitSeq=Math.max(0,...ledCircuits.map(c=>c.id||0));
         freeLegSeq=Math.max(0,...ledCircuits.flatMap(c=>c.legs).filter(l=>l.el==='free').map(l=>l.id||0));
       }
-      renderWallTabs(); wallToForm(); renderOpenings(); renderWallCompass(); run();
+      wallToForm(); renderOpenings(); renderWallCompass(); run();
     }catch(err){
       $('#notes').innerHTML=`<div class="note err"><b>Файл</b><span>Не удалось прочитать проект: файл повреждён или это не проект раскроя.</span></div>`;
     }
@@ -4417,7 +4361,7 @@ $('#btn-print').addEventListener('click',()=>window.print());
 /* ---------- старт ---------- */
 walls=[newWall()];
 walls[0].slot='N';
-renderWallTabs(); wallToForm();
+wallToForm();
 addOpening();
 renderWallCompass();
 run();
