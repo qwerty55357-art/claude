@@ -2434,7 +2434,13 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
       cornerIssues.push({id:c.id,msg:`деталь угла ${fmt(arcW)}×${fmt(a.H)} мм не помещается в лист ${fmt(G.pw)}×${fmt(G.pl)} — нужен материал крупнее либо меньший радиус/угол`});
       return;
     }
-    arcPieces.push({len:a.H,w:arcW,cuts:[],label:'Угол R'+fmt(+c.radius),pk:'corner-'+c.id,isCorner:true});
+    // подпись детали дуги — вместе с номерами стен (как «Угол A-B» в компасе): без них два разных
+    // радиусных угла ОДНОГО радиуса выглядели бы на карте раскроя как одна и та же деталь дважды,
+    // хотя это разные физические куски для разных углов комнаты
+    const aTag=tag(walls.indexOf(a));
+    const cornerLabel=b?`Угол R${fmt(+c.radius)} (${aTag}-${tag(walls.indexOf(b))})`
+      :`Угол R${fmt(+c.radius)} (${aTag}·${c.as==='right'?'справа':'слева'})`;
+    arcPieces.push({len:a.H,w:arcW,cuts:[],label:cornerLabel,pk:'corner-'+c.id,isCorner:true});
     radiusSuccessIds.add(c.id);
   });
 
