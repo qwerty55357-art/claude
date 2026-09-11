@@ -498,7 +498,8 @@ function newWall(){
   wallSeq++;
   return {id:wallSeq, name:'Стена '+wallSeq, W:4000, H:2300, ceil:2700, rowH:0,
           ops:[], opSeq:0, seamsU:[], seamSeq:0, vseamsU:[], vseamSeq:0, jointModes:{},
-          pieceMats:{}, edges:{top:'cap',bot:'none',left:'cap',right:'cap'}, cout:0, cin:0};
+          pieceMats:{}, edges:{top:'cap',bot:'none',left:'cap',right:'cap'}, cout:0, cin:0,
+          slot:null};
 }
 const AW=()=>walls[active];
 // старые проекты хранили края булевыми: true -> заглушка
@@ -1216,14 +1217,25 @@ document.addEventListener('click',e=>{
   if(e.target&&e.target.id==='btn-mreset'){ manualMoves={}; run(); }
 });
 
-/* ---- компас связей активной стены, вид сверху: «представь комнату, а ты в центре» — активная
-   стена (Север) в центре верхнего ряда, Запад/Восток по бокам, Юг снизу, четыре угла СЗ/СВ/ЮЗ/ЮВ
-   между соседними стенами. Запад/Восток/Юг выводятся из cornerLinks цепочкой от активной стены
-   (никаких новых полей — те же связи, что и раньше, просто раскладка «комнатой», а не списком).
-   СЗ/СВ создаются вместе со стеной (сразу и стена, и угол 90° — тип/радиус правится потом кликом
-   по слоту); ЮЗ/ЮВ — угол между Западом/Востоком и Югом, если обе стены уже созданы (иначе кнопки
-   нет — соединять пока нечего, ровно как обсуждали). ---- */
+/* ---- компас связей стен, вид сверху: фиксированная сетка комнаты 3×3 — Север сверху, Запад/
+   Восток по бокам, Юг снизу, четыре угла СЗ/СВ/ЮЗ/ЮВ между ними. Сетка НЕ перестраивается под
+   активную стену (в отличие от прежней версии) — каждая из 4 сторон жёстко закреплена за своим
+   местом (w.slot: 'N'|'E'|'S'|'W', хранится прямо на стене — переживает сохранение/загрузку
+   проекта бесплатно, как и остальные поля walls). Клик по пустому слоту стены создаёт стену
+   именно там; клик по занятому — делает её активной (как вкладка). Клик по пустому слоту угла
+   создаёт прямой угол между уже существующими соседними стенами (если существует только одна —
+   радиусный угол-заглушка на ней; если обеих ещё нет — нечего создавать). Обход по кругу всегда
+   через «правый» конец текущей стены к «левому» концу следующей — та же конвенция, что и в
+   computeWallPlacements3D/renderScene3D (знак поворота там не зависит от типа угла, только от
+   того, каким концом стена подключена, поэтому эта раскладка совместима с 3D без изменений там). ---- */
 // [ОТРИСОВКА]
+const CORNER_DEF={
+  NW:{sA:'W',sideA:'right',sB:'N',sideB:'left'},
+  NE:{sA:'N',sideA:'right',sB:'E',sideB:'left'},
+  SE:{sA:'E',sideA:'right',sB:'S',sideB:'left'},
+  SW:{sA:'S',sideA:'right',sB:'W',sideB:'left'}
+};
+function wallInSlot(slot){ return walls.find(w=>w.slot===slot); }
 function cornerAt(wallId,side){
   return cornerLinks.find(c=>(c.kind||'sharp')!=='across'&&
     ((+c.aw===wallId&&c.as===side)||(c.bw!==''&&c.bw!=null&&+c.bw===wallId&&c.bs===side)));
@@ -1235,83 +1247,59 @@ function otherWallOf(c,wallId){
   const otherId=+c.aw===wallId?c.bw:c.aw;
   return (otherId!==''&&otherId!=null)?walls.find(w=>w.id===+otherId):null;
 }
-// сторона стены wall, ПРОТИВОПОЛОЖНАЯ той, которой она уже соединена (corner) — там и нужно
-// искать/создавать следующий угол дальше по цепочке (запад->юг, восток->юг)
-function farSideOf(wall,corner){
-  const usedSide=(+corner.aw===wall.id)?corner.as:corner.bs;
-  return usedSide==='left'?'right':'left';
-}
-function roomNeighbors(north){
-  const cornerNW=cornerAt(north.id,'left'), west=cornerNW?otherWallOf(cornerNW,north.id):null;
-  const cornerNE=cornerAt(north.id,'right'), east=cornerNE?otherWallOf(cornerNE,north.id):null;
-  let south=null,cornerSW=null,cornerSE=null;
-  if(west){ cornerSW=cornerAt(west.id,farSideOf(west,cornerNW)); if(cornerSW) south=otherWallOf(cornerSW,west.id); }
-  if(east){ cornerSE=cornerAt(east.id,farSideOf(east,cornerNE)); if(cornerSE&&!south) south=otherWallOf(cornerSE,east.id); }
-  return {west,east,south,cornerNW,cornerNE,cornerSW,cornerSE};
-}
 function cornerBadgeLabel(corner,otherWall){
   if(corner.bw===''||corner.bw==null) return `⌒ R${fmt(corner.radius||0)}`;
   return ((corner.kind||'sharp')==='radius'?'⌒ ':'')+esc(otherWall?otherWall.name:'?');
 }
 function renderWallCompass(){
   const box=$('#wall-compass'); if(!box) return;
-  const north=AW();
-  const {west,east,south,cornerNW,cornerNE,cornerSW,cornerSE}=roomNeighbors(north);
-  const wallBtn=(wall,addKind)=>wall
-    ? `<button class="btn wall-tab on" data-cpjump="${wall.id}">${esc(wall.name)}</button>`
-    : `<button class="btn wall-tab" data-cpadd="${addKind}">+ стена</button>`;
-  // СЗ/СВ: угол создаётся ВМЕСТЕ со стеной (см. compassAdd('west'/'east')) — отдельного действия
-  // «просто угол» тут нет; пока стены нет, единственное, что можно поставить самостоятельно —
-  // радиусный выступ без смежной стены. ЮЗ/ЮВ — наоборот: обе стены (Запад/Восток и Юг) обычно
-  // уже существуют по отдельности, здесь именно соединяем их углом; пока одной из них нет —
-  // соединять нечего, показываем нейтральную точку.
-  const nCorner=(corner,otherWall,radiusSide)=>corner
-    ? `<button class="btn wall-tab on" data-cpedit="${corner.id}">${cornerBadgeLabel(corner,otherWall)}</button>`
-    : `<button class="btn wall-tab" data-cpadd="radiuscap" data-side="${radiusSide}" title="Радиусный угол без смежной стены">+ радиус</button>`;
-  const sCorner=(corner,otherWall,canLink,linkKind)=>{
+  const N=wallInSlot('N'),E=wallInSlot('E'),S=wallInSlot('S'),W=wallInSlot('W');
+  const wallCell=(wall,slot)=>wall
+    ? `<button class="btn wall-tab${wall.id===AW().id?' on':''}" data-cpjump="${wall.id}">${esc(wall.name)}</button>`
+    : `<button class="btn wall-tab" data-cpadd="${slot}">+ стена</button>`;
+  const cornerCell=diag=>{
+    const {sA,sideA,sB,sideB}=CORNER_DEF[diag];
+    const wa=wallInSlot(sA), wb=wallInSlot(sB);
+    let corner=null, otherWall=null;
+    if(wa&&wb){ corner=cornerAt(wa.id,sideA); otherWall=wb; }
+    else if(wa){ corner=cornerAt(wa.id,sideA); otherWall=null; }
+    else if(wb){ corner=cornerAt(wb.id,sideB); otherWall=null; }
     if(corner) return `<button class="btn wall-tab on" data-cpedit="${corner.id}">${cornerBadgeLabel(corner,otherWall)}</button>`;
-    if(canLink) return `<button class="btn wall-tab" data-cpadd="${linkKind}">+ угол</button>`;
-    return `<span class="wall-tab" style="opacity:.3">·</span>`;
+    if(!wa&&!wb) return `<span class="wall-tab" style="opacity:.3">·</span>`;
+    return `<button class="btn wall-tab" data-cpadd="${diag}">+ угол</button>`;
   };
+  const north=AW();
   const ac=acrossFor(north.id), acOther=ac?otherWallOf(ac,north.id):null;
   const acrossHtml=ac
     ? `<button class="btn wall-tab on" data-cpedit="${ac.id}">${esc(acOther?acOther.name:'?')} · ${fmt(ac.distance||0)} мм</button>`
-    : `<button class="btn wall-tab" data-cpadd="across">+ стена напротив</button>`;
+    : `<button class="btn wall-tab" data-cpadd="across">+ стена напротив (${esc(north.name)})</button>`;
   box.innerHTML=`
     <div style="display:grid;grid-template-columns:1fr 1.3fr 1fr;gap:6px;align-items:center;text-align:center">
-      <div>${nCorner(cornerNW,west,'left')}</div>
-      <div><span class="tag">${esc(north.name)}</span></div>
-      <div>${nCorner(cornerNE,east,'right')}</div>
-      <div>${wallBtn(west,'west')}</div>
+      <div>${cornerCell('NW')}</div>
+      <div>${wallCell(N,'N')}</div>
+      <div>${cornerCell('NE')}</div>
+      <div>${wallCell(W,'W')}</div>
       <div></div>
-      <div>${wallBtn(east,'east')}</div>
-      <div>${sCorner(cornerSW,south,!!(west&&south),'sw')}</div>
-      <div>${wallBtn(south,'south')}</div>
-      <div>${sCorner(cornerSE,south,!!(east&&south),'se')}</div>
+      <div>${wallCell(E,'E')}</div>
+      <div>${cornerCell('SW')}</div>
+      <div>${wallCell(S,'S')}</div>
+      <div>${cornerCell('SE')}</div>
     </div>
     <div style="display:flex;justify-content:center;margin-top:8px">${acrossHtml}</div>`;
 }
-// быстрое создание: угловые слоты СЗ/СВ создают стену вместе с углом (90°, тип/радиус правится
-// потом кликом по слоту); ЮЗ/ЮВ соединяют углом уже существующие Запад/Восток и Юг (если оба уже
-// есть — иначе кнопки там нет вовсе, соединять пока нечего); Юг цепляется к тому из Запад/Восток,
-// что уже существует (к обоим сразу, если существуют оба — тогда комната замыкается одним кликом)
-function compassAdd(kind,side){
-  const north=AW();
-  const addSharpWall=(as,bs)=>{
-    const nw=newWall(); walls.push(nw);
-    cornerSeq++;
-    cornerLinks.push({id:cornerSeq,kind:'sharp',type:'out',angle:90,radius:300,distance:0,
-      aw:north.id,as,bw:nw.id,bs});
-    return nw;
-  };
-  if(kind==='radiuscap'){
-    cornerSeq++;
-    cornerLinks.push({id:cornerSeq,kind:'radius',type:'out',angle:90,radius:300,distance:0,
-      aw:north.id,as:side,bw:'',bs:''});
-    renderWallCompass(); run();
+// быстрое создание: клик по пустому слоту стены (N/E/S/W) сразу создаёт стену и делает её
+// активной; клик по пустому слоту угла (NW/NE/SE/SW) создаёт прямой угол 90° между уже
+// существующими соседними стенами (тип/радиус потом правятся кликом по получившемуся слоту),
+// либо радиусную заглушку, если существует только одна из двух соседних стен
+function compassAdd(kind){
+  if(kind==='N'||kind==='E'||kind==='S'||kind==='W'){
+    const nw=newWall(); nw.slot=kind; walls.push(nw);
+    active=walls.length-1;
+    renderWallTabs(); wallToForm(); renderOpenings(); renderWallCompass(); run();
     return;
   }
   if(kind==='across'){
+    const north=AW();
     const other=walls.find(x=>x.id!==north.id);
     const bw=other?other.id:(()=>{ const nw=newWall(); walls.push(nw); active=walls.length-1; return nw.id; })();
     cornerSeq++;
@@ -1321,33 +1309,22 @@ function compassAdd(kind,side){
     renderWallCompass(); run();
     return;
   }
-  if(kind==='west'||kind==='east'){
-    const nw=addSharpWall(kind==='west'?'left':'right',kind==='west'?'right':'left');
-    active=walls.findIndex(w=>w.id===nw.id);
-    renderWallTabs(); wallToForm(); renderOpenings(); renderWallCompass(); run();
-    return;
-  }
-  if(kind==='south'){
-    const {west,east}=roomNeighbors(north);
-    const nw=newWall(); walls.push(nw);
-    if(west){ cornerSeq++; cornerLinks.push({id:cornerSeq,kind:'sharp',type:'out',angle:90,radius:300,distance:0,
-      aw:west.id,as:farSideOf(west,cornerAt(north.id,'left')),bw:nw.id,bs:'left'}); }
-    if(east){ cornerSeq++; cornerLinks.push({id:cornerSeq,kind:'sharp',type:'out',angle:90,radius:300,distance:0,
-      aw:east.id,as:farSideOf(east,cornerAt(north.id,'right')),bw:nw.id,bs:'right'}); }
-    active=walls.findIndex(w=>w.id===nw.id);
-    renderWallTabs(); wallToForm(); renderOpenings(); renderWallCompass(); run();
-    return;
-  }
-  if(kind==='sw'||kind==='se'){
-    const {west,east,south}=roomNeighbors(north);
-    const a=kind==='sw'?west:east;
-    if(!a||!south) return;
-    cornerSeq++;
+  const def=CORNER_DEF[kind]; if(!def) return;
+  const {sA,sideA,sB,sideB}=def;
+  const wa=wallInSlot(sA), wb=wallInSlot(sB);
+  if(!wa&&!wb) return;
+  cornerSeq++;
+  if(wa&&wb){
     cornerLinks.push({id:cornerSeq,kind:'sharp',type:'out',angle:90,radius:300,distance:0,
-      aw:a.id,as:farSideOf(a,cornerAt(north.id,kind==='sw'?'left':'right')),bw:south.id,
-      bs:kind==='sw'?'right':'left'});
-    renderWallCompass(); run();
+      aw:wa.id,as:sideA,bw:wb.id,bs:sideB});
+  } else if(wa){
+    cornerLinks.push({id:cornerSeq,kind:'radius',type:'out',angle:90,radius:300,distance:0,
+      aw:wa.id,as:sideA,bw:'',bs:''});
+  } else {
+    cornerLinks.push({id:cornerSeq,kind:'radius',type:'out',angle:90,radius:300,distance:0,
+      aw:wb.id,as:sideB,bw:'',bs:''});
   }
+  renderWallCompass(); run();
 }
 function numRowMenu(menu,label,val,onChange){
   const row=document.createElement('div');
@@ -1390,7 +1367,7 @@ function compassEdit(ev,cornerId){
 }
 $('#wall-compass').addEventListener('click',e=>{
   const addKind=e.target.dataset.cpadd;
-  if(addKind){ compassAdd(addKind,e.target.dataset.side); return; }
+  if(addKind){ compassAdd(addKind); return; }
   const editId=e.target.dataset.cpedit;
   if(editId){ compassEdit(e,+editId); return; }
   const jumpId=e.target.dataset.cpjump;
@@ -4439,6 +4416,7 @@ $('#btn-print').addEventListener('click',()=>window.print());
 
 /* ---------- старт ---------- */
 walls=[newWall()];
+walls[0].slot='N';
 renderWallTabs(); wallToForm();
 addOpening();
 renderWallCompass();
