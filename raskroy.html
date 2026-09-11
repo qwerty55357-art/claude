@@ -2071,7 +2071,12 @@ function applyManual(sheets,mv,G,pl,pw,shelfList){
     const holes=holeRects(it.o);
     return items.some(x=>x.kind==='o'&&x.homeSheetIdx===it.homeSheetIdx&&holes.some(h=>insideRect(rectOf(x),h,3)));
   };
-  const canRotate=it=>it.kind==='o'||!hasNestedChild(it);
+  // деталь угла (isCorner, радиусный угол) — гнутая, а не плоская: её ширина (arcW, развёртка
+  // дуги) обязана лечь на материал в одном строго определённом направлении относительно высоты
+  // (a.H, ось самого изгиба) — поворот на 90° не «тот же прямоугольник иначе на листе», как для
+  // обычной панели, а меняет, вдоль чего материал будет гнуться (поперёк волокна/структуры вместо
+  // вдоль), т.е. другая, физически иная деталь. Поворот такой детали не поддерживаем никогда.
+  const canRotate=it=>it.kind==='o'||(!it.o.isCorner&&!hasNestedChild(it));
 
   // деталь на верстаке — не на листе; правки её позиции (если остались от прошлого) отбрасываем
   const shelfUids=new Set(shelfList.map(s=>s.uid).filter(u=>byUid[u]));
@@ -2199,8 +2204,10 @@ function applyManual(sheets,mv,G,pl,pw,shelfList){
       const arr=it.kind==='w'?src.list:src.otk;
       const idx=arr.indexOf(it.o); if(idx>=0) arr.splice(idx,1);
       // на верстаке соседей нет (нести вырез с чужими «жильцами» уже не нужно — они переехали
-      // на верстак отдельными строками выше), поэтому поворот детали с вырезом здесь безусловен
-      if(rot){
+      // на верстак отдельными строками выше), поэтому поворот детали с вырезом здесь безусловен —
+      // КРОМЕ детали угла (isCorner): она гнутая, поворот на 90° меняет направление изгиба
+      // относительно материала (см. canRotate выше), это не поддерживается нигде и никогда
+      if(rot&&!it.o.isCorner){
         if(it.kind==='w'){
           const ow=it.o.w, ol=it.o.len; it.o.w=ol; it.o.len=ow; it.o.rot=!it.o.rot;
           if(it.o.cuts&&it.o.cuts.length) it.o.cuts=rotateCuts(it.o.cuts,ow,ol);
@@ -2208,7 +2215,7 @@ function applyManual(sheets,mv,G,pl,pw,shelfList){
         else { const odw=it.o.dw, odh=it.o.dh; it.o.dw=odh; it.o.dh=odw; it.o.rot=!it.o.rot; }
       }
       const r=rectOf(it);
-      shelfOut.push({uid,kind:it.kind,w:r.w,h:r.h,rot:!!it.o.rot,
+      shelfOut.push({uid,kind:it.kind,w:r.w,h:r.h,rot:!!it.o.rot,isCorner:!!it.o.isCorner,
         label:it.kind==='w'?it.o.label:it.o.name, cuts:it.kind==='w'?it.o.cuts:null});
     });
   }
@@ -3294,9 +3301,11 @@ function cutmapSvg(sheets,S){
       // кнопка поворота — доступна и у детали с вырезом, если только в вырезе сейчас никто не
       // сидит (иначе пришлось бы двигать «детей» под новую форму выреза — не поддерживаем), и
       // только если развёрнутая деталь в принципе способна лечь на лист (иначе кнопка обманывала
-      // бы — клик всегда бы отклонялся)
+      // бы — клик всегда бы отклонялся). Деталь угла (isCorner) — гнутая, не плоская: поворот на
+      // 90° меняет направление изгиба относительно материала, кнопки для неё не показываем никогда
+      // (не полагаемся на то, что развёрнутые габариты случайно не влезут в лист — см. canRotate)
       const holeBusy=p.cuts&&p.cuts.length&&holeRects(p).some(h=>sh.otk.some(k=>insideRect({x:k.x,y:k.y,w:k.dw||k.dep,h:k.dh||k.len},h,3)));
-      if(p._uid && !holeBusy && p.len<=S.pw+0.5 && p.w<=S.pl+0.5){
+      if(p._uid && !p.isCorner && !holeBusy && p.len<=S.pw+0.5 && p.w<=S.pl+0.5){
         const minSide=Math.min(p.w,p.len);
         if(minSide>fs*0.7){
           const ir=Math.min(fs*0.6,minSide/2.8), mg=ir*0.32;
@@ -4225,8 +4234,11 @@ $('#btn-print').addEventListener('click',()=>window.print());
   const rectOf=it=>it.kind==='w'?{x:it.o.x,y:it.o.y,w:it.o.w,h:it.o.len}
                                :{x:it.o.x,y:it.o.y,w:it.o.dw||it.o.dep,h:it.o.dh||it.o.len};
   // может ли деталь поворачиваться: с вырезом — да, если только в вырезе сейчас пусто (иначе
-  // «детей» в нём тоже пришлось бы двигать под новую форму выреза — этого мы не поддерживаем)
+  // «детей» в нём тоже пришлось бы двигать под новую форму выреза — этого мы не поддерживаем).
+  // Деталь угла (isCorner) — не поддерживаем никогда: она гнутая, а не плоская, поворот на 90°
+  // меняет направление изгиба относительно материала (см. тот же canRotate в applyManual)
   const canRotate=it=>{
+    if(it.o.isCorner) return false;
     if(it.kind==='o') return true;
     if(!(it.o.cuts&&it.o.cuts.length)) return true;
     const holes=holeRects(it.o);
@@ -4295,13 +4307,15 @@ $('#btn-print').addEventListener('click',()=>window.print());
   }
   // поворот детали, которая сейчас лежит на верстаке — там нет ограничений по месту и нет соседей
   // (её «дети» из выреза, если были, уже переехали на верстак отдельными строками), так что
-  // поворот безусловен даже для детали с вырезом — applyManual синхронно повернёт и сам вырез
+  // поворот безусловен даже для детали с вырезом — applyManual синхронно повернёт и сам вырез.
+  // Деталь угла (isCorner) — исключение, как и везде: она гнутая, поворот на 90° физически
+  // меняет направление изгиба относительно материала, не поддерживаем никогда
   function doShelfRotate(uid){
     if(!LAST) return;
     let pool=null,entry=null;
     if((LAST.R.shelf||[]).some(s=>s.uid===uid)){ pool='main'; entry=LAST.R.shelf.find(s=>s.uid===uid); }
     else{ for(const f of LAST.R.fills){ const e=(f.shelf||[]).find(s=>s.uid===uid); if(e){ pool=f.matId; entry=e; break; } } }
-    if(!entry) return;
+    if(!entry||entry.isCorner) return;
     manualMoves.shelf=(manualMoves.shelf||[]).filter(s=>s.uid!==uid);
     manualMoves.shelf.push({pool,uid,rot:!entry.rot});
     run();

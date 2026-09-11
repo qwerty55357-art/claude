@@ -305,6 +305,18 @@ for(let t=0;t<N;t++){
     const coutRad=(Rrad.prof.find(p=>p.key==='cout')||{total:0}).total;
     chk('L140g',coutRad<0.5,`${id}: радиус — успешный радиусный угол всё равно начислил обычный профиль cout=${coutRad}`);
 
+    // L140o (нов): деталь угла (isCorner) гнутая — поворот на 90° меняет направление изгиба
+    // относительно материала (физически другая, непригодная деталь), applyManual обязан
+    // игнорировать rot:true для неё, как и для любой попытки повернуть её на карте раскроя
+    if(arcPiece){
+      const arcSheetIdx=Rrad.sheets.findIndex(sh=>sh.list.includes(arcPiece));
+      const manRot={main:{[arcPiece._uid]:{sheet:arcSheetIdx,x:arcPiece.x,y:arcPiece.y,rot:true}}};
+      const Rrot=C.computeProject(Gt2,[wR1,wR2],manRot,linkRadius,[]);
+      const arcAfterRot=Rrot.sheets.flatMap(sh=>sh.list).find(p=>p.isCorner);
+      chk('L140o',!!arcAfterRot&&Math.abs(arcAfterRot.w-arcW)<0.5&&Math.abs(arcAfterRot.len-2400)<0.5,
+        `${id}: радиус — деталь угла повернулась на 90° вопреки запрету (${arcAfterRot?arcAfterRot.w+'x'+arcAfterRot.len:'не найдена'}, ожидали ${arcW}x2400)`);
+    }
+
     // fallback: разная высота стен
     const wR2b=Object.assign({},wR2,{H:2000});
     const RbadH=C.computeProject(Gt2,[wR1,wR2b],{},linkRadius,[]);
