@@ -3818,6 +3818,36 @@ function renderNotes(G,R){
     const idx=cornerLinks.findIndex(c=>c.id===id);
     n.push(['warn','Радиусный угол'+(idx>=0?' '+(idx+1):''),msg]);
   });
+  // деталь радиусного угла (гнутая, isCorner) всегда кроится из материала проекта по умолчанию —
+  // назначить ей свой материал через клик по детали нельзя (её вообще нет в схеме стены, см.
+  // schemeFor: там кликабельны только L.pieces). Если у прилегающей стены прямо у этого угла
+  // назначен свой материал (pieceMats), деталь угла молча останется другого цвета/фактуры —
+  // предупреждаем, а не молчим, как и для проёма/стыка в зоне среза выше
+  {
+    const defaultMatId=$('#i-preset').value;
+    const okRadius=new Set((R.cornerIssues||[]).map(x=>x.id));
+    cornerLinks.forEach(c=>{
+      if((c.kind||'sharp')!=='radius'||okRadius.has(c.id)) return;
+      const a=walls.find(w=>w.id===+c.aw); if(!a) return;
+      const b=(c.bw!==''&&c.bw!=null)?walls.find(w=>w.id===+c.bw):null;
+      const sideOverrides=(w,side)=>{
+        const idx2=walls.indexOf(w); const L=R.layouts[idx2]; if(!L) return [];
+        const Wcut=wallCutView(w,R.cornerCuts&&R.cornerCuts.get(w.id)).W;
+        return L.pieces.filter(p=>{
+          const st=L.strips[p.strip];
+          return L.vert?(side==='left'?st.start<=0.5:(st.start+st.w)>=Wcut-0.5)
+                       :(side==='left'?p.from<=0.5:(p.from+p.len)>=Wcut-0.5);
+        }).map(p=>p.matOverride).filter(Boolean);
+      };
+      const ov=new Set([...sideOverrides(a,c.as),...(b?sideOverrides(b,c.bs):[])].filter(id=>id!==defaultMatId));
+      if(ov.size){
+        const names=[...ov].map(id=>{const mp=PRESETS.find(x=>x.id===id); return mp?mp.name:id;});
+        const defName=(PRESETS.find(x=>x.id===defaultMatId)||{}).name||defaultMatId;
+        const idx=cornerLinks.findIndex(x=>x.id===c.id);
+        n.push(['warn','Радиусный угол'+(idx>=0?' '+(idx+1):''),`деталь угла кроится из материала по умолчанию (${defName}), а у прилегающей стены рядом с этим углом назначен свой материал (${names.join(', ')}) — назначить угловой детали отдельный материал нельзя, уточните это несоответствие при заказе.`]);
+      }
+    });
+  }
   if(R.parts.length){
     const onExtra=R.sheets.filter(sh=>sh.extra).flatMap(sh=>sh.otk);
     if(onExtra.length){
