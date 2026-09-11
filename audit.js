@@ -317,6 +317,23 @@ for(let t=0;t<N;t++){
         `${id}: радиус — деталь угла повернулась на 90° вопреки запрету (${arcAfterRot?arcAfterRot.w+'x'+arcAfterRot.len:'не найдена'}, ожидали ${arcW}x2400)`);
     }
 
+    // L140p/q/r (нов): LED явно стоит на одном из концов стыка (edges='led') — деталь угла
+    // физически не нужна (LED заменяет её целиком, как и обычный/прямой угловой профиль ниже),
+    // нельзя брать её геометрию/стоимость/тангенциальный срез ширины ПОВЕРХ уже посчитанной
+    // LED-подсветки на этой же стороне (см. фикс radiusOk в computeProject).
+    const wR1led=Object.assign({},wR1,{edges:Object.assign({},wR1.edges,{right:'led'})});
+    const Rled=C.computeProject(Gt2,[wR1led,wR2],{},linkRadius,[]);
+    const arcLed=Rled.sheets.flatMap(sh=>sh.list).find(p=>p.isCorner);
+    chk('L140p',!arcLed,`${id}: радиус — LED на конце стыка всё равно дал деталь угла в раскрое`);
+    const coutLed=(Rled.prof.find(p=>p.key==='cout')||{total:0}).total;
+    chk('L140q',coutLed<0.5,`${id}: радиус — LED на конце стыка всё равно начислил обычный угловой профиль cout=${coutLed}`);
+    const w1radLed=stripsW(Rled.layouts[0]);
+    chk('L140r',Math.abs(w1sharp-w1radLed)<0.5,
+      `${id}: радиус — LED на конце стыка всё равно урезал ширину панелей стены тангенциальным срезом (${w1sharp}->${w1radLed})`);
+    const ledstartLed=(Rled.prof.find(p=>p.key==='ledstart')||{total:0}).total;
+    chk('L140s',Math.abs(ledstartLed-2400)<0.5,
+      `${id}: радиус — LED на конце стыка не дал ожидаемую длину ledstart=H (${ledstartLed} вместо 2400)`);
+
     // fallback: разная высота стен
     const wR2b=Object.assign({},wR2,{H:2000});
     const RbadH=C.computeProject(Gt2,[wR1,wR2b],{},linkRadius,[]);

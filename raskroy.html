@@ -2412,6 +2412,11 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
     if((c.kind||'sharp')!=='radius') return;
     const a=wallById0.get(+c.aw); if(!a) return;
     const b=(c.bw!==''&&c.bw!=null)?wallById0.get(+c.bw):null;
+    // LED явно стоит на одном из концов стыка — гнутая деталь угла тут физически не нужна,
+    // угол целиком заменяется LED-стартовым (та же логика, что и у обычного/прямого угла ниже,
+    // см. cornerLinks.forEach(cout/cin)); без этой проверки деталь дуги всё равно бы вырезалась
+    // и легла в раскрой ПОВЕРХ уже посчитанной LED-подсветки на этой же стороне — задвоение
+    if(edgeMode(a.edges[c.as])==='led'||(b&&edgeMode(b.edges[c.bs])==='led')) return;
     const angle=+c.angle||0, radius=+c.radius||0;
     if(!(radius>0)){ cornerIssues.push({id:c.id,msg:'радиус не задан — угол посчитан как обычный прямой стык'}); return; }
     if(!(angle>0&&angle<180)){ cornerIssues.push({id:c.id,msg:'угол комнаты должен быть от 0° до 180° — угол посчитан как обычный прямой стык'}); return; }
@@ -3825,9 +3830,12 @@ function renderNotes(G,R){
   // предупреждаем, а не молчим, как и для проёма/стыка в зоне среза выше
   {
     const defaultMatId=$('#i-preset').value;
-    const okRadius=new Set((R.cornerIssues||[]).map(x=>x.id));
+    // деталь угла могла не появиться не только из-за cornerIssues (геометрия/лист не подошли),
+    // но и из-за явного LED на одном из концов стыка (LED заменяет её целиком, см. radiusOk выше) —
+    // в обоих случаях предупреждение о материале детали угла беспредметно, её просто нет в раскрое
+    const arcPks=new Set(R.sheets.flatMap(sh=>sh.list).filter(p=>p.isCorner).map(p=>p.pk));
     cornerLinks.forEach(c=>{
-      if((c.kind||'sharp')!=='radius'||okRadius.has(c.id)) return;
+      if((c.kind||'sharp')!=='radius'||!arcPks.has('corner-'+c.id)) return;
       const a=walls.find(w=>w.id===+c.aw); if(!a) return;
       const b=(c.bw!==''&&c.bw!=null)?walls.find(w=>w.id===+c.bw):null;
       const sideOverrides=(w,side)=>{
