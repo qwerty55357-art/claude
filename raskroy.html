@@ -3506,8 +3506,11 @@ function computeWallPlacements3D(walls,cornerLinks){
 // упрощённая текстура стены для 3D (не переиспользует основную SVG-схему — там подписи/размерные
 // линии, на маленьком масштабе стены в комнате они был бы нечитаемы и просто шумели бы): заливка
 // цветом материала, границы полос, проёмы тёмными вырезами. wv — уже «урезанный» вид стены
-// (wallCutView), тот же самый, что участвует в реальном раскрое этой стороны.
-function wallCanvasTexture3D(wv,L){
+// (wallCutView), тот же самый, что участвует в реальном раскрое этой стороны. baseColorHex —
+// реальный цвет ТЕКУЩЕГО материала проекта (см. вызов ниже) — раньше тут был жёстко зашит цвет
+// акцента интерфейса (--straw), который лишь случайно совпадает с бамбуком (материал по
+// умолчанию), а для любого другого материала (мрамор, рейка, скала) 3D-стена красилась неверно.
+function wallCanvasTexture3D(wv,L,baseColorHex){
   const effWidth=Math.max(wv.W,1), H=Math.max(wv.H,1);
   const scale=Math.min(1024/effWidth,1024/H,1.5);
   const cw=Math.max(2,Math.round(effWidth*scale)), ch=Math.max(2,Math.round(H*scale));
@@ -3515,8 +3518,19 @@ function wallCanvasTexture3D(wv,L){
   canvas.width=cw; canvas.height=ch;
   const ctx=canvas.getContext('2d');
   const cssVar=name=>(getComputedStyle(document.documentElement).getPropertyValue(name)||'').trim();
-  ctx.fillStyle=cssVar('--straw')||'#b08d57';
+  ctx.fillStyle=baseColorHex||cssVar('--straw')||'#b08d57';
   ctx.fillRect(0,0,cw,ch);
+  // индивидуальный материал отдельной детали стены (w.pieceMats, см. showPieceMatMenu/matOverride) —
+  // тем же цветом, что и в 2D-схеме (schemeFor), поверх заливки по умолчанию, иначе стена в 3D
+  // выглядела бы однородной, хотя часть панелей реально вырезана из другого материала
+  (L.pieces||[]).forEach(p=>{
+    if(!p.matOverride) return;
+    const st=L.strips[p.strip];
+    const x=(L.vert?st.start:p.from)*scale, y=(L.vert?H-p.to:H-st.end)*scale;
+    const w=(L.vert?st.w:p.len)*scale, h=(L.vert?p.len:st.w)*scale;
+    ctx.fillStyle=cssVar('--mat-'+p.matOverride)||baseColorHex;
+    ctx.fillRect(Math.max(0,x),Math.max(0,y),w,h);
+  });
   ctx.strokeStyle=cssVar('--void')||'#141414';
   ctx.lineWidth=Math.max(1,scale*3);
   (L.strips||[]).forEach(st=>{
@@ -3603,6 +3617,10 @@ function renderScene3D(G,R){
   }
   if(!walls.length){ $('#scene3d-meta').textContent=''; return; }
   const cssVar3d=name=>(getComputedStyle(document.documentElement).getPropertyValue(name)||'').trim();
+  // реальный цвет материала проекта по умолчанию (см. комментарий у wallCanvasTexture3D) — также
+  // служит цветом откоса по умолчанию, когда для его стороны не назначен свой материал (o.otkosMat)
+  const defaultMatId=$('#i-preset').value;
+  const defaultColorHex=cssVar3d('--mat-'+defaultMatId)||cssVar3d('--straw')||'#b08d57';
   const cornerCuts=R.cornerCuts||new Map();
   const positions=computeWallPlacements3D(walls,cornerLinks);
   let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity,maxH=0;
@@ -3611,7 +3629,7 @@ function renderScene3D(G,R){
     const cuts=cornerCuts.get(w.id);
     const wv=wallCutView(w,cuts);
     const L=R.layouts[wi];
-    const tex=wallCanvasTexture3D(wv,L);
+    const tex=wallCanvasTexture3D(wv,L,defaultColorHex);
     const mat=new THREE.MeshStandardMaterial({map:tex,side:THREE.DoubleSide,roughness:0.9,metalness:0.05});
     const geo=new THREE.PlaneGeometry(Math.max(wv.W,1),Math.max(wv.H,1));
     geo.translate(wv.W/2,wv.H/2,0);
@@ -3634,7 +3652,7 @@ function renderScene3D(G,R){
       if(o.kind!=='door') revealSides.push(['bottom',o.x,o.y,o.x+o.w,o.y]);
       revealSides.forEach(([side,x0,y0,x1,y1])=>{
         const mid=o.otkosMat&&o.otkosMat[side];
-        const colorHex=(mid&&cssVar3d('--mat-'+mid))||cssVar3d('--straw-deep')||'#8a6a3a';
+        const colorHex=(mid&&cssVar3d('--mat-'+mid))||defaultColorHex;
         const geo=new THREE.BufferGeometry();
         geo.setAttribute('position',new THREE.Float32BufferAttribute(
           [x0,y0,0, x0,y0,-dep, x1,y1,0, x1,y1,-dep],3));
