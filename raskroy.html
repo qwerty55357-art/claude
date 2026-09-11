@@ -473,6 +473,12 @@ let LAST=null;        // последний расчёт — нужен drag'у 
 // какой профиль/раскрой не влияет, только позиционирование в 3D. kind отсутствует у старых
 // сохранённых проектов — читается как 'sharp' (см. миграцию при загрузке файла).
 let cornerLinks=[], cornerSeq=0;
+// тип углов — ОДИН на весь проект (у комнаты не бывает вперемешку внешних и внутренних углов):
+// 'out' — отделка снаружи короба (углы выпуклые наружу), 'in' — отделка изнутри (как в обычной
+// комнате, углы вогнутые). Переключается общим тумблером в компасе, применяется сразу ко всем
+// cornerLinks — само поле type остаётся на каждой связи (нужно ядру для сметы cin/cout и 3D для
+// направления дуги радиусного угла), просто больше не редактируется поштучно.
+let cornerType='out';
 // LED-контуры: группировка уже отмеченных «led»-позиций (w.edges/w.jointModes/o.otkosMode)
 // в один физический отрезок ленты ради (а) суммарной длины/БП по контуру и (б) единого
 // способа реализации на весь отрезок. САМА разметка «здесь LED» не переезжает сюда —
@@ -1222,9 +1228,13 @@ function cornerAt(wallId,side){
   return cornerLinks.find(c=>(c.kind||'sharp')!=='across'&&
     ((+c.aw===wallId&&c.as===side)||(c.bw!==''&&c.bw!=null&&+c.bw===wallId&&c.bs===side)));
 }
-function cornerBadgeLabel(corner,otherWall){
-  if(corner.bw===''||corner.bw==null) return `⌒ R${fmt(corner.radius||0)}`;
-  return ((corner.kind||'sharp')==='radius'?'⌒ ':'')+esc(otherWall?otherWall.name:'?');
+// подпись угла — «Угол A-B» по номерам (id) соединяемых стен, «⌒» спереди — если угол радиусный;
+// радиусная заглушка без второй стены подписывается номером той единственной стены, что есть
+function cornerBadgeLabel(corner,wa,wb){
+  const arc=(corner.kind||'sharp')==='radius'?'⌒ ':'';
+  if(corner.bw===''||corner.bw==null){ const w=wa||wb; return `${arc}Угол ${w?w.id:'?'}`; }
+  const ids=[wa,wb].filter(Boolean).map(w=>w.id).sort((a,b)=>a-b);
+  return `${arc}Угол ${ids.join('-')}`;
 }
 function renderWallCompass(){
   const box=$('#wall-compass'); if(!box) return;
@@ -1235,15 +1245,19 @@ function renderWallCompass(){
   const cornerCell=diag=>{
     const {sA,sideA,sB,sideB}=CORNER_DEF[diag];
     const wa=wallInSlot(sA), wb=wallInSlot(sB);
-    let corner=null, otherWall=null;
-    if(wa&&wb){ corner=cornerAt(wa.id,sideA); otherWall=wb; }
-    else if(wa){ corner=cornerAt(wa.id,sideA); otherWall=null; }
-    else if(wb){ corner=cornerAt(wb.id,sideB); otherWall=null; }
-    if(corner) return `<button class="btn wall-tab on" data-cpedit="${corner.id}">${cornerBadgeLabel(corner,otherWall)}</button>`;
+    let corner=null;
+    if(wa&&wb) corner=cornerAt(wa.id,sideA);
+    else if(wa) corner=cornerAt(wa.id,sideA);
+    else if(wb) corner=cornerAt(wb.id,sideB);
+    if(corner) return `<button class="btn wall-tab on" data-cpedit="${corner.id}">${cornerBadgeLabel(corner,wa,wb)}</button>`;
     if(!wa&&!wb) return `<span class="wall-tab" style="opacity:.3">·</span>`;
     return `<button class="btn wall-tab" data-cpadd="${diag}">+ угол</button>`;
   };
   box.innerHTML=`
+    <div style="display:flex;gap:6px;margin-bottom:8px">
+      <button class="btn wall-tab${cornerType==='out'?' on':''}" data-ctype="out" style="flex:1">Внешние углы</button>
+      <button class="btn wall-tab${cornerType==='in'?' on':''}" data-ctype="in" style="flex:1">Внутренние углы</button>
+    </div>
     <div style="display:grid;grid-template-columns:1fr 1.3fr 1fr;gap:6px;align-items:center;text-align:center">
       <div>${cornerCell('NW')}</div>
       <div>${wallCell(N,'N')}</div>
@@ -1273,15 +1287,20 @@ function compassAdd(kind){
   if(!wa&&!wb) return;
   cornerSeq++;
   if(wa&&wb){
-    cornerLinks.push({id:cornerSeq,kind:'sharp',type:'out',angle:90,radius:300,distance:0,
+    cornerLinks.push({id:cornerSeq,kind:'sharp',type:cornerType,angle:90,radius:300,distance:0,
       aw:wa.id,as:sideA,bw:wb.id,bs:sideB});
   } else if(wa){
-    cornerLinks.push({id:cornerSeq,kind:'radius',type:'out',angle:90,radius:300,distance:0,
+    cornerLinks.push({id:cornerSeq,kind:'radius',type:cornerType,angle:90,radius:300,distance:0,
       aw:wa.id,as:sideA,bw:'',bs:''});
   } else {
-    cornerLinks.push({id:cornerSeq,kind:'radius',type:'out',angle:90,radius:300,distance:0,
+    cornerLinks.push({id:cornerSeq,kind:'radius',type:cornerType,angle:90,radius:300,distance:0,
       aw:wb.id,as:sideB,bw:'',bs:''});
   }
+  renderWallCompass(); run();
+}
+// общий тумблер типа углов (см. декларацию cornerType выше) — переключает разом ВСЕ связи
+function setCornerType(v){
+  if(v!==cornerType){ cornerType=v; cornerLinks.forEach(c=>{ c.type=v; }); }
   renderWallCompass(); run();
 }
 function numRowMenu(menu,label,val,onChange){
@@ -1304,12 +1323,13 @@ function compassEdit(ev,cornerId){
     menuBtn(menu,'Радиусный угол',kind==='radius',()=>{ c.kind='radius'; if(!c.radius) c.radius=300; closeMatMenu(); renderWallCompass(); run(); });
     menuDivider(menu,'Параметры');
     numRowMenu(menu,'Угол комнаты, °',c.angle||90,v=>{ c.angle=v; run(); });
-    menuBtn(menu,c.type==='in'?'Внутренний угол ✓':'Внешний угол ✓',false,()=>{ c.type=c.type==='in'?'out':'in'; closeMatMenu(); renderWallCompass(); run(); });
   }
   if(kind==='radius') numRowMenu(menu,'Радиус, мм',c.radius||300,v=>{ c.radius=v; run(); });
   del(menu);
 }
 $('#wall-compass').addEventListener('click',e=>{
+  const ctype=e.target.dataset.ctype;
+  if(ctype){ setCornerType(ctype); return; }
   const addKind=e.target.dataset.cpadd;
   if(addKind){ compassAdd(addKind); return; }
   const editId=e.target.dataset.cpedit;
@@ -3780,7 +3800,7 @@ $('#rail').addEventListener('change',e=>{ if(!e.target.closest('#openings')) run
 function snapshot(){
   formToWall();
   const o={v:3,walls:JSON.parse(JSON.stringify(walls)),active,manual:manualMoves,
-           cornerLinks:JSON.parse(JSON.stringify(cornerLinks)),
+           cornerLinks:JSON.parse(JSON.stringify(cornerLinks)),cornerType,
            ledCircuits:JSON.parse(JSON.stringify(ledCircuits)),fields:{}};
   document.querySelectorAll('#rail input,#rail select').forEach(el=>{
     if(!el.id||WALL_FIELDS.includes(el.id)) return;
@@ -3829,6 +3849,11 @@ $('#file-load').addEventListener('change',e=>{
           // старые проекты не знали kind/angle/radius/distance — донормализуем как обычный прямой угол
           .map(c=>Object.assign({kind:'sharp',angle:90,radius:300,distance:0},c));
         cornerSeq=Math.max(0,...cornerLinks.map(c=>c.id||0));
+        // тип углов — один на весь проект (см. декларацию cornerType); старые файлы могли хранить
+        // его вразнобой по связям — берём тип первой связи как унифицированный, иначе 'out'
+        cornerType=(o.cornerType==='in'||o.cornerType==='out')?o.cornerType
+          :((cornerLinks[0]&&cornerLinks[0].type==='in')?'in':'out');
+        cornerLinks.forEach(c=>{ c.type=cornerType; });
         // контуры без стены (после удаления) отбрасываем целиком, а не «вне проекта» — привязка
         // LED-отрезка к конкретной стене осмысленна только пока эта стена существует
         ledCircuits=(Array.isArray(o.ledCircuits)?o.ledCircuits:[])
