@@ -523,6 +523,12 @@ $('#btn-del-wall').addEventListener('click',()=>{
   // угол, ссылавшийся на удалённую стену одним концом, теряет смысл целиком — не превращаем в «вне проекта» молча
   cornerLinks=cornerLinks.filter(c=>c.aw!=deadId&&c.bw!=deadId);
   ledCircuits=ledCircuits.map(c=>Object.assign({},c,{legs:c.legs.filter(l=>l.wall!=deadId)})).filter(c=>c.legs.length);
+  // ручные перестановки на карте раскроя (manualMoves) ключуются строкой вида "w:С2·П1#1" —
+  // «С2» тут номер ПОЗИЦИИ стены (см. tag(i) в computeProject), а после удаления стены позиции
+  // всех следующих сдвигаются. Старая ручная правка может случайно совпасть по этому ключу с
+  // деталью СОВСЕМ ДРУГОЙ уцелевшей стены и молча передвинуть (или закинуть на верстак) её вместо
+  // задуманной — сбрасываем все ручные правки раскроя, а не рискуем таким чужим смещением
+  manualMoves={};
   renumberWalls();
   wallToForm(); renderOpenings(); renderWallCompass(); run();
 });
