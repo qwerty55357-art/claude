@@ -351,8 +351,9 @@ tbody tr:hover td{background:var(--surface)}
     <div class="stage-h"><h2>3D — макет комнаты</h2><span class="meta" id="scene3d-meta"></span><span class="rule"></span></div>
     <p class="hint" style="margin:0 0 8px">Простая 3D-расстановка стен по углам, заданным в компасе (раздел «Объект»):
       прямые и радиусные углы соединяют стены встык под заданным углом. Стены без единой связи
-      показаны отдельно, не наложением. На раскрой и смету никак не влияет — только вид.
-      Перетаскивание — вращение камеры, колесо мыши — масштаб.</p>
+      показаны отдельно, не наложением. Проёмы с откосом показаны с реальной глубиной (по значению
+      «Глубина откоса»), с цветом стороны, если для неё назначен свой материал. На раскрой и смету
+      никак не влияет — только вид. Перетаскивание — вращение камеры, колесо мыши — масштаб.</p>
     <div id="scene3d" style="width:100%;height:520px;border-radius:var(--r);overflow:hidden"></div>
   </div>
   <div class="block">
@@ -3588,13 +3589,20 @@ function ensureScene3D(){
 function renderScene3D(G,R){
   const block=$('#scene3d-block'); if(!block) return;
   const st=ensureScene3D(); if(!st) return;
+  // рекурсивно — деталь откоса (см. ниже) добавляется ДОЧЕРНИМ объектом к мешу стены, а не
+  // напрямую в group; без рекурсии её geometry/material при каждом run() копились бы в памяти
+  const disposeObj3D=o=>{
+    if(o.geometry) o.geometry.dispose();
+    if(o.material){ if(o.material.map) o.material.map.dispose(); o.material.dispose(); }
+    (o.children||[]).slice().forEach(disposeObj3D);
+  };
   while(st.group.children.length){
     const ch=st.group.children.pop();
     st.group.remove(ch);
-    if(ch.geometry) ch.geometry.dispose();
-    if(ch.material){ if(ch.material.map) ch.material.map.dispose(); ch.material.dispose(); }
+    disposeObj3D(ch);
   }
   if(!walls.length){ $('#scene3d-meta').textContent=''; return; }
+  const cssVar3d=name=>(getComputedStyle(document.documentElement).getPropertyValue(name)||'').trim();
   const cornerCuts=R.cornerCuts||new Map();
   const positions=computeWallPlacements3D(walls,cornerLinks);
   let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity,maxH=0;
@@ -3612,6 +3620,41 @@ function renderScene3D(G,R){
     mesh.position.set(p.x+shift*Math.cos(p.angle),0,p.z+shift*Math.sin(p.angle));
     mesh.rotation.y=-p.angle;
     st.group.add(mesh);
+    // объёмный откос: боковые панели проёма, уходящие в глубину (o.depth), + дальняя заглушка —
+    // вместо плоского тёмного выреза в текстуре стены (тот остаётся — он и даёт вид «здесь дыра»,
+    // откосы лишь добавляют перспективу по бокам). Добавляем ДОЧЕРНИМИ к mesh стены — плоскость
+    // стены уже лежит в локальных координатах (x:0..W, y:0..H, z=0), ровно тех же, что и o.x/o.y/
+    // o.w/o.h из wv.ops (та же «урезанная» система, см. wallCanvasTexture3D выше) — трансформация
+    // положения/поворота стены достаётся дочерним мешам автоматически через граф сцены Three.js.
+    (wv.ops||[]).forEach(o=>{
+      if(!o.otkos||!(o.depth>0)) return;
+      const dep=o.depth;
+      const revealSides=[['left',o.x,o.y,o.x,o.y+o.h],['right',o.x+o.w,o.y,o.x+o.w,o.y+o.h],
+        ['top',o.x,o.y+o.h,o.x+o.w,o.y+o.h]];
+      if(o.kind!=='door') revealSides.push(['bottom',o.x,o.y,o.x+o.w,o.y]);
+      revealSides.forEach(([side,x0,y0,x1,y1])=>{
+        const mid=o.otkosMat&&o.otkosMat[side];
+        const colorHex=(mid&&cssVar3d('--mat-'+mid))||cssVar3d('--straw-deep')||'#8a6a3a';
+        const geo=new THREE.BufferGeometry();
+        geo.setAttribute('position',new THREE.Float32BufferAttribute(
+          [x0,y0,0, x0,y0,-dep, x1,y1,0, x1,y1,-dep],3));
+        geo.setAttribute('uv',new THREE.Float32BufferAttribute([0,0, 0,1, 1,0, 1,1],2));
+        geo.setIndex([0,1,2, 2,1,3]);
+        geo.computeVertexNormals();
+        const rm=new THREE.MeshStandardMaterial({color:new THREE.Color(colorHex),side:THREE.DoubleSide,roughness:0.88});
+        mesh.add(new THREE.Mesh(geo,rm));
+      });
+      // дальняя заглушка на глубине проёма — того же тёмного тона, что и вырез в текстуре стены,
+      // иначе сквозь проём было бы видно «в никуда» (фон сцены), а не законченный объём
+      const capGeo=new THREE.BufferGeometry();
+      capGeo.setAttribute('position',new THREE.Float32BufferAttribute(
+        [o.x,o.y,-dep, o.x+o.w,o.y,-dep, o.x,o.y+o.h,-dep, o.x+o.w,o.y+o.h,-dep],3));
+      capGeo.setAttribute('uv',new THREE.Float32BufferAttribute([0,0, 1,0, 0,1, 1,1],2));
+      capGeo.setIndex([0,1,2, 2,1,3]);
+      capGeo.computeVertexNormals();
+      const capMat=new THREE.MeshStandardMaterial({color:new THREE.Color(cssVar3d('--bg')||'#0a0a0a'),side:THREE.DoubleSide,roughness:0.95});
+      mesh.add(new THREE.Mesh(capGeo,capMat));
+    });
     [0,w.W].forEach(lx=>{
       const wx=p.x+lx*Math.cos(p.angle), wz=p.z+lx*Math.sin(p.angle);
       if(wx<minX)minX=wx; if(wx>maxX)maxX=wx; if(wz<minZ)minZ=wz; if(wz>maxZ)maxZ=wz;
