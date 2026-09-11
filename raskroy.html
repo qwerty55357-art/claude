@@ -3861,8 +3861,11 @@ $('#file-load').addEventListener('change',e=>{
       walls=o.walls.map((w,i)=>Object.assign(newWall(),w,{id:w.id||(i+1)}));
       wallSeq=Math.max(walls.length,...walls.map(w=>w.id||0));
       // старые файлы не знали autoName — считаем автономером только то, что похоже на «Стена N»
-      // (не трогаем реально переименованные пользователем стены), и сразу подтягиваем к текущим позициям
-      walls.forEach(w=>{ if(w.autoName===undefined) w.autoName=/^Стена \d+$/.test(w.name); });
+      // (не трогаем реально переименованные пользователем стены), и сразу подтягиваем к текущим
+      // позициям. ВАЖНО: смотрим на СЫРЫЕ данные o.walls[i], а не на уже смёрженную w — после
+      // Object.assign(newWall(),w,...) поле autoName у w всегда true (дефолт из newWall()),
+      // даже если в файле его не было вовсе, и проверка по w никогда бы не сработала
+      walls.forEach((w,i)=>{ if(o.walls[i].autoName===undefined) w.autoName=/^Стена \d+$/.test(w.name); });
       renumberWalls();
       active=Math.min(o.active||0,walls.length-1);
       manualMoves=(o.manual&&typeof o.manual==='object')?o.manual:{};
