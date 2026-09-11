@@ -2288,6 +2288,19 @@ function ledCircuitOf(ledCircuits,leg){
   for(const c of (ledCircuits||[])) if(c.legs.some(l=>ledLegKey(l)===key)) return c;
   return null;
 }
+// проверка «эта ножка контура ПРЯМО СЕЙЧАС реально стоит в режиме LED» — тем же способом, каким
+// её читает сам расчёт (computeProject: edgeMode/jointSegMode/otkosMode). Нужна, чтобы вычистить
+// ledCircuits от ножек, чей край/стык/откос переключили на другой режим (заглушка, изгиб, встык
+// и т.п.) — иначе такая запись бы вечно висела в списке «LED-отрезки» стены с фантомной длиной,
+// хотя в смету и общий метраж она уже не попадает (это и так проверяется по актуальному режиму)
+function legIsLedNow(w,G,leg){
+  if(leg.el==='free') return true;   // свободный отрезок ни к какому режиму не привязан
+  if(leg.el==='edge') return edgeMode(w.edges[leg.side])==='led';
+  if(leg.el==='jointV') return jointSegMode(w,G,'v',leg.pos,leg.segStart)==='led';
+  if(leg.el==='jointH') return jointSegMode(w,G,'h',leg.pos,leg.segStart)==='led';
+  if(leg.el==='otkos'){ const o=w.ops[leg.op]; return !!o&&otkosMode(o,leg.side)==='led'; }
+  return false;
+}
 // ---- Граф «перекрёстков» стены для протяжки LED-отрезков мышкой ----
 // Узлы — точки, где можно ставить точку A/Б (4 угла стены, пересечения вертикальных
 // стыков с горизонтальными швами/краями, пересечения горизонтальных швов с боковыми
@@ -3806,6 +3819,17 @@ function run(){
   {
     const validShelfUids=new Set([...(R.shelf||[]).map(s=>s.uid), ...R.fills.flatMap(f=>(f.shelf||[]).map(s=>s.uid))]);
     manualMoves.shelf=(manualMoves.shelf||[]).filter(s=>validShelfUids.has(s.uid));
+  }
+  // чистим ledCircuits от ножек, чей край/стык/откос переключили на другой режим (заглушка,
+  // изгиб, встык и т.п.) — например, откос был LED, потом его сменили на «Изгиб панели»: в общий
+  // метраж/смету такая ножка и так не попадает (расчёт сверяет актуальный режим), но запись в
+  // ledCircuits[].legs осталась бы висеть вечно и вводила бы в заблуждение в списке «LED-отрезки»
+  // этой стены — показывала бы длину и профиль, которых на самом деле уже нигде нет
+  {
+    const byId=new Map(walls.map(w=>[w.id,w]));
+    ledCircuits=ledCircuits.map(c=>Object.assign({},c,{legs:c.legs.filter(l=>{
+      const w=byId.get(+l.wall); return w&&legIsLedNow(w,G,l);
+    })})).filter(c=>c.legs.length);
   }
   renderNotes(G,R); renderCards(G,R); renderScheme(G,R); renderCutmap(G,R); renderShelf(R); renderScene3D(G,R);
   renderCuts(G,R); renderSpec(G,R); renderEstimate(G,R); renderJointsV(R); renderLedSummary(R);
