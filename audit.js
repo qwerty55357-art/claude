@@ -334,6 +334,38 @@ for(let t=0;t<N;t++){
     chk('L140s',Math.abs(ledstartLed-2400)<0.5,
       `${id}: радиус — LED на конце стыка не дал ожидаемую длину ledstart=H (${ledstartLed} вместо 2400)`);
 
+    // L140t-x (нов): плоские зоны (flatA/flatB) — необязательное расширение детали угла ЗА
+    // пределы самой дуги, в сторону каждой из смежных стен (см. обсуждение перед реализацией).
+    // Стена в этом месте отдаёт свою ширину детали угла: срез с каждой стороны увеличивается
+    // с t до t+flat, сама деталь — с arcW до arcW+flatA+flatB, но остаётся плоским прямоугольником
+    // (дуга описывает только гнутую часть внутри общей ширины, границы дуги не сдвигаются).
+    const flatA=120, flatB=80;
+    const linkFlat=[{id:1,kind:'radius',type:'out',angle,radius,flatA,flatB,aw:1,as:'right',bw:2,bs:'left'}];
+    const Rflat=C.computeProject(Gt2,[wR1,wR2],{},linkFlat,[]);
+    const arcFlat=Rflat.sheets.flatMap(sh=>sh.list).find(p=>p.isCorner);
+    chk('L140t',!!arcFlat,`${id}: радиус с плоскими зонами — деталь угла не попала в раскрой`);
+    if(arcFlat) chk('L140u',Math.abs(arcFlat.w-(arcW+flatA+flatB))<0.5,
+      `${id}: радиус с плоскими зонами — ширина детали угла ${arcFlat.w} != arcW+flatA+flatB=${arcW+flatA+flatB}`);
+    const w1flat=stripsW(Rflat.layouts[0]), w2flat=stripsW(Rflat.layouts[1]);
+    chk('L140v',Math.abs((w1sharp-w1flat)-(t+flatA))<0.5,
+      `${id}: радиус с плоскими зонами — ширина панелей стены 1 урезана не на t+flatA (${w1sharp}->${w1flat}, t+flatA=${t+flatA})`);
+    chk('L140w',Math.abs((w2sharp-w2flat)-(t+flatB))<0.5,
+      `${id}: радиус с плоскими зонами — ширина панелей стены 2 урезана не на t+flatB (${w2sharp}->${w2flat}, t+flatB=${t+flatB})`);
+    // без второй стены (bw='') плоская зона B бессмысленна — должна игнорироваться целиком,
+    // даже если в данных зачем-то оказалось ненулевое значение
+    const linkFlatNoB=[{id:1,kind:'radius',type:'out',angle,radius,flatA,flatB:500,aw:1,as:'right',bw:'',bs:''}];
+    const RflatNoB=C.computeProject(Gt2,[wR1,wR2],{},linkFlatNoB,[]);
+    const arcFlatNoB=RflatNoB.sheets.flatMap(sh=>sh.list).find(p=>p.isCorner);
+    chk('L140x',!!arcFlatNoB&&Math.abs(arcFlatNoB.w-(arcW+flatA))<0.5,
+      `${id}: радиус без второй стены — flatB не должна учитываться (ширина ${arcFlatNoB?arcFlatNoB.w:'нет детали'}, ожидали ${arcW+flatA})`);
+    // деталь угла с плоскими зонами всё ещё шире листа - должна корректно провалиться (сумма!),
+    // а не пройти проверку по одной только дуге
+    const linkFlatWide=[{id:1,kind:'radius',type:'out',angle,radius,flatA:1000,flatB:1000,aw:1,as:'right',bw:2,bs:'left'}];
+    const RflatWide=C.computeProject(Gt2,[wR1,wR2],{},linkFlatWide,[]);
+    const arcFlatWide=RflatWide.sheets.flatMap(sh=>sh.list).find(p=>p.isCorner);
+    chk('L140y',!arcFlatWide&&(RflatWide.cornerIssues||[]).length===1,
+      `${id}: радиус — слишком широкие плоские зоны (сумма > листа) должны провалиться, а не пройти`);
+
     // fallback: разная высота стен
     const wR2b=Object.assign({},wR2,{H:2000});
     const RbadH=C.computeProject(Gt2,[wR1,wR2b],{},linkRadius,[]);

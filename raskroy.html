@@ -315,6 +315,14 @@ tbody tr:hover td{background:var(--surface)}
       <span><svg width="14" height="12"><rect x="1" y="1" width="12" height="10" fill="var(--straw)" fill-opacity=".3" stroke="var(--straw)" stroke-dasharray="3 2"/></svg>откос выступающий (накладка на стену)</span>
     </div>
   </div>
+  <div class="block" id="corner-scheme-block" hidden>
+    <div class="stage-h"><h2>Развёртка радиусного угла</h2><span class="meta" id="corner-scheme-meta"></span><span class="rule"></span></div>
+    <p class="hint" style="margin:0 0 8px">Деталь угла — плоский прямоугольник: посередине зона изгиба
+      (несдвигаемая, красный пунктир — её граница), по краям — плоские зоны, которые можно расширять
+      (правятся в том же меню, что радиус/угол). Плоская зона отдаёт себе ширину соответствующей
+      соседней стены.</p>
+    <div class="svg-wrap" id="corner-scheme"></div>
+  </div>
   <div class="block" id="led-draw-block">
     <div class="stage-h"><h2>LED — рисование отрезков</h2><span class="meta" id="led-draw-meta"></span><span class="rule"></span></div>
     <label class="sub-l">Режим соединения</label>
@@ -474,6 +482,9 @@ let LAST=null;        // последний расчёт — нужен drag'у 
 // какой профиль/раскрой не влияет, только позиционирование в 3D. kind отсутствует у старых
 // сохранённых проектов — читается как 'sharp' (см. миграцию при загрузке файла).
 let cornerLinks=[], cornerSeq=0;
+// id связи-угла, чья развёртка сейчас показана в отдельном блоке под компасом (см.
+// renderCornerScheme) — UI-состояние, не сохраняется в проект и не входит в расчёт
+let selectedCorner=null;
 // тип углов — ОДИН на весь проект (у комнаты не бывает вперемешку внешних и внутренних углов):
 // 'out' — отделка снаружи короба (углы выпуклые наружу), 'in' — отделка изнутри (как в обычной
 // комнате, углы вогнутые). Переключается общим тумблером в компасе, применяется сразу ко всем
@@ -1317,10 +1328,10 @@ function compassAdd(kind){
       aw:wa.id,as:sideA,bw:wb.id,bs:sideB});
   } else if(wa){
     cornerLinks.push({id:cornerSeq,kind:'radius',type:cornerType,angle:90,radius:300,distance:0,
-      aw:wa.id,as:sideA,bw:'',bs:''});
+      flatA:0,flatB:0,aw:wa.id,as:sideA,bw:'',bs:''});
   } else {
     cornerLinks.push({id:cornerSeq,kind:'radius',type:cornerType,angle:90,radius:300,distance:0,
-      aw:wb.id,as:sideB,bw:'',bs:''});
+      flatA:0,flatB:0,aw:wb.id,as:sideB,bw:'',bs:''});
   }
   renderWallCompass(); run();
 }
@@ -1341,16 +1352,27 @@ function compassEdit(ev,cornerId){
   const c=cornerLinks.find(x=>x.id===cornerId); if(!c) return;
   const kind=c.kind||'sharp';
   const del=menu=>{ menuDivider(menu,''); menuBtn(menu,'Удалить связь',false,()=>{
-    cornerLinks=cornerLinks.filter(x=>x.id!==cornerId); closeMatMenu(); renderWallCompass(); run();
+    cornerLinks=cornerLinks.filter(x=>x.id!==cornerId);
+    if(selectedCorner===cornerId) selectedCorner=null;
+    closeMatMenu(); renderWallCompass(); renderCornerScheme(); run();
   },true); };
   const menu=menuShell(ev,(c.bw===''||c.bw==null)?'Радиус без стены':'Угол');
   if(c.bw!==''&&c.bw!=null){
-    menuBtn(menu,'Прямой угол',kind==='sharp',()=>{ c.kind='sharp'; closeMatMenu(); renderWallCompass(); run(); });
-    menuBtn(menu,'Радиусный угол',kind==='radius',()=>{ c.kind='radius'; if(!c.radius) c.radius=300; closeMatMenu(); renderWallCompass(); run(); });
+    menuBtn(menu,'Прямой угол',kind==='sharp',()=>{ c.kind='sharp'; closeMatMenu(); renderWallCompass(); renderCornerScheme(); run(); });
+    menuBtn(menu,'Радиусный угол',kind==='radius',()=>{
+      c.kind='radius'; if(!c.radius) c.radius=300; if(!c.flatA) c.flatA=0; if(!c.flatB) c.flatB=0;
+      closeMatMenu(); renderWallCompass(); renderCornerScheme(); run();
+    });
     menuDivider(menu,'Параметры');
-    numRowMenu(menu,'Угол комнаты, °',c.angle||90,v=>{ c.angle=v; run(); });
+    numRowMenu(menu,'Угол комнаты, °',c.angle||90,v=>{ c.angle=v; run(); renderCornerScheme(); });
   }
-  if(kind==='radius') numRowMenu(menu,'Радиус, мм',c.radius||300,v=>{ c.radius=v; run(); });
+  if(kind==='radius'){
+    numRowMenu(menu,'Радиус, мм',c.radius||300,v=>{ c.radius=v; run(); renderCornerScheme(); });
+    menuDivider(menu,'Плоские зоны по краям детали угла');
+    const hasB=c.bw!==''&&c.bw!=null;
+    numRowMenu(menu,hasB?'Плоская зона у стены A, мм':'Плоская зона, мм',c.flatA||0,v=>{ c.flatA=Math.max(0,v); run(); renderCornerScheme(); });
+    if(hasB) numRowMenu(menu,'Плоская зона у стены B, мм',c.flatB||0,v=>{ c.flatB=Math.max(0,v); run(); renderCornerScheme(); });
+  }
   del(menu);
 }
 $('#wall-compass').addEventListener('click',e=>{
@@ -1359,7 +1381,7 @@ $('#wall-compass').addEventListener('click',e=>{
   const addKind=e.target.dataset.cpadd;
   if(addKind){ compassAdd(addKind); return; }
   const editId=e.target.dataset.cpedit;
-  if(editId){ compassEdit(e,+editId); return; }
+  if(editId){ selectedCorner=+editId; renderCornerScheme(); compassEdit(e,+editId); return; }
   const jumpId=e.target.dataset.cpjump;
   if(jumpId){
     const idx=walls.findIndex(w=>w.id===+jumpId); if(idx<0) return;
@@ -2423,11 +2445,16 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
     if(!(angle>0&&angle<180)){ cornerIssues.push({id:c.id,msg:'угол комнаты должен быть от 0° до 180° — угол посчитан как обычный прямой стык'}); return; }
     if(b&&Math.abs(a.H-b.H)>1){ cornerIssues.push({id:c.id,msg:`разная высота стен (${fmt(a.H)} и ${fmt(b.H)} мм) — радиусная деталь требует одной высоты, угол посчитан как обычный прямой стык`}); return; }
     const angleRad=angle*Math.PI/180;
-    radiusOk.push({c,a,b,t:radius/Math.tan(angleRad/2),arcW:radius*(Math.PI-angleRad)});
+    // плоские зоны (flatA/flatB, мм) — необязательное расширение детали угла ЗА пределы самой
+    // дуги, в сторону каждой из смежных стен: стена в этом месте отдаёт свою ширину детали угла,
+    // а не наоборот (см. обсуждение перед реализацией). flatB осмысленна только когда есть вторая
+    // стена (b) — для радиуса «без стены» это поле не показывается в UI и всегда 0.
+    const flatA=Math.max(0,+c.flatA||0), flatB=b?Math.max(0,+c.flatB||0):0;
+    radiusOk.push({c,a,b,t:radius/Math.tan(angleRad/2),arcW:radius*(Math.PI-angleRad),flatA,flatB});
   });
   // суммарный «откус» ширины с одной стороны не может забрать больше самой стены
   const rawCuts=new Map();
-  radiusOk.forEach(({c,t})=>{ bumpCut(rawCuts,+c.aw,c.as,t); if(c.bw!==''&&c.bw!=null) bumpCut(rawCuts,+c.bw,c.bs,t); });
+  radiusOk.forEach(({c,t,flatA,flatB})=>{ bumpCut(rawCuts,+c.aw,c.as,t+flatA); if(c.bw!==''&&c.bw!=null) bumpCut(rawCuts,+c.bw,c.bs,t+flatB); });
   const badWalls=new Set();
   rawCuts.forEach((cuts,wallId)=>{
     const w=wallById0.get(wallId);
@@ -2436,15 +2463,18 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
   const cornerCuts=new Map();
   const arcPieces=[];
   const radiusSuccessIds=new Set();
-  radiusOk.forEach(({c,a,b,t,arcW})=>{
+  radiusOk.forEach(({c,a,b,t,arcW,flatA,flatB})=>{
     if(badWalls.has(+c.aw)||(c.bw!==''&&c.bw!=null&&badWalls.has(+c.bw))){
-      cornerIssues.push({id:c.id,msg:'радиус слишком большой для ширины смежной стены — угол посчитан как обычный прямой стык'});
+      cornerIssues.push({id:c.id,msg:'радиус (с плоскими зонами) слишком большой для ширины смежной стены — угол посчитан как обычный прямой стык'});
       return;
     }
-    bumpCut(cornerCuts,+c.aw,c.as,t);
-    if(b) bumpCut(cornerCuts,+c.bw,c.bs,t);
-    if(!(arcW<=G.pw+0.5&&a.H<=G.pl+0.5)){
-      cornerIssues.push({id:c.id,msg:`деталь угла ${fmt(arcW)}×${fmt(a.H)} мм не помещается в лист ${fmt(G.pw)}×${fmt(G.pl)} — нужен материал крупнее либо меньший радиус/угол`});
+    bumpCut(cornerCuts,+c.aw,c.as,t+flatA);
+    if(b) bumpCut(cornerCuts,+c.bw,c.bs,t+flatB);
+    // деталь угла остаётся плоским прямоугольником — гнутая зона (arcW) посередине, плоские зоны
+    // (flatA/flatB) пристроены по краям тем же материалом, без стыка внутри самой детали
+    const arcWTotal=arcW+flatA+flatB;
+    if(!(arcWTotal<=G.pw+0.5&&a.H<=G.pl+0.5)){
+      cornerIssues.push({id:c.id,msg:`деталь угла ${fmt(arcWTotal)}×${fmt(a.H)} мм не помещается в лист ${fmt(G.pw)}×${fmt(G.pl)} — нужен материал крупнее либо меньший радиус/угол/плоские зоны`});
       return;
     }
     // подпись детали дуги — вместе с номерами стен (как «Угол A-B» в компасе): без них два разных
@@ -2453,7 +2483,9 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
     const aTag=tag(walls.indexOf(a));
     const cornerLabel=b?`Угол R${fmt(+c.radius)} (${aTag}-${tag(walls.indexOf(b))})`
       :`Угол R${fmt(+c.radius)} (${aTag}·${c.as==='right'?'справа':'слева'})`;
-    arcPieces.push({len:a.H,w:arcW,cuts:[],label:cornerLabel,pk:'corner-'+c.id,isCorner:true});
+    // arcW/flatA/flatB сохраняем на самой детали — нужны развёртке угла в UI (см. cornerSchemeFor),
+    // чтобы нарисовать границу дуги красным пунктиром внутри уже посчитанной общей ширины w
+    arcPieces.push({len:a.H,w:arcWTotal,cuts:[],label:cornerLabel,pk:'corner-'+c.id,isCorner:true,arcW,flatA,flatB});
     radiusSuccessIds.add(c.id);
   });
 
@@ -3219,6 +3251,55 @@ function schemeFor(G,R,wi){
     svg:`<svg viewBox="${vb}" style="width:100%;max-height:76vh" role="img" aria-label="Схема раскладки панелей — ${esc(wall.name)}">${g}</svg>`,
     meta:`${esc(wall.name)} · ${G.presetName} · ${L.vert?'вертикально':'горизонтально'} · полос ${L.strips.length}`
   };
+}
+/* ===================== РАЗВЁРТКА РАДИУСНОГО УГЛА ===================== */
+// показывает деталь угла (см. computeProject: arcPieces) как отдельный «прямоугольник» — та же
+// логика чертежа, что и schemeFor у обычной стены (dimH/dimV/txt), только вместо полос материала
+// тут одна цельная деталь: несдвигаемая зона изгиба посередине (arcW, красный пунктир — её
+// граница) и настраиваемые плоские зоны по краям (flatA/flatB, см. compassEdit)
+function renderCornerScheme(){
+  const block=$('#corner-scheme-block'); if(!block) return;
+  const c=selectedCorner!=null?cornerLinks.find(x=>x.id===selectedCorner):null;
+  if(!c||(c.kind||'sharp')!=='radius'){ block.hidden=true; return; }
+  const a=walls.find(w=>w.id===+c.aw);
+  if(!a){ block.hidden=true; return; }
+  const b=(c.bw!==''&&c.bw!=null)?walls.find(w=>w.id===+c.bw):null;
+  block.hidden=false;
+  const aTag='С'+(walls.indexOf(a)+1);
+  const label=b?`Угол R${fmt(+c.radius)} (${aTag}-С${walls.indexOf(b)+1})`:`Угол R${fmt(+c.radius)} (${aTag}·${c.as==='right'?'справа':'слева'})`;
+  $('#corner-scheme-meta').textContent=label;
+  const R=LAST&&LAST.R;
+  const box=$('#corner-scheme');
+  if(!R){ box.innerHTML=''; return; }
+  const issue=(R.cornerIssues||[]).find(x=>x.id===c.id);
+  if(issue){
+    box.innerHTML=`<p class="hint" style="color:var(--err)">${esc(issue.msg)}</p>`;
+    return;
+  }
+  const arc=R.sheets.flatMap(sh=>sh.list).find(p=>p.pk==='corner-'+c.id);
+  if(!arc){ box.innerHTML=`<p class="hint">Деталь угла ещё не рассчитана.</p>`; return; }
+  const total=arc.w, H=arc.len, arcW=arc.arcW, flatA=arc.flatA||0, flatB=arc.flatB||0;
+  const fs=Math.max(total,H)/48;
+  const padL=fs*5.2, padR=fs*2.4, padT=fs*3.2, padB=fs*7.0;
+  let g=`<rect x="0" y="0" width="${total}" height="${H}" fill="var(--straw-face)" fill-opacity=".92" stroke="var(--straw-deep)" stroke-width="${fs*0.07}"/>`;
+  // зона изгиба — лёгкая заливка поверх, отличает её от плоских продолжений по краям
+  g+=`<rect x="${flatA}" y="0" width="${arcW}" height="${H}" fill="var(--warn)" fill-opacity=".16"/>`;
+  // красный пунктир — граница зоны изгиба; она не сдвигается плоскими зонами (arcW зависит
+  // только от радиуса/угла комнаты), поэтому это фиксированный минимум ширины детали
+  [flatA,flatA+arcW].forEach(bx=>{
+    if(bx<0.5||bx>total-0.5) return;   // на самом краю детали (flat=0 с этой стороны) — рисовать нечего
+    g+=`<line x1="${bx}" y1="0" x2="${bx}" y2="${H}" stroke="var(--err)" stroke-width="${fs*0.09}" stroke-dasharray="${fs*0.32} ${fs*0.22}"/>`;
+  });
+  // размеры снизу: разбивка по зонам -> общая ширина
+  const rowA=H+fs*2.0, rowB=H+fs*4.6;
+  if(flatA>0.5) g+=dimH(0,flatA,rowA,fs,'var(--muted)',false,'плоская '+fmt(flatA));
+  g+=dimH(flatA,flatA+arcW,rowA,fs,'var(--err)',false,'дуга '+fmt(arcW));
+  if(flatB>0.5) g+=dimH(flatA+arcW,total,rowA,fs,'var(--muted)',false,'плоская '+fmt(flatB));
+  g+=dimH(0,total,rowB,fs,'var(--paper)',true);
+  // высота слева — габарит, совпадает с высотой смежных стен
+  g+=dimV(0,H,-fs*3.4,fs,'var(--paper)',true);
+  const vb=`${-padL} ${-padT} ${total+padL+padR} ${H+padT+padB}`;
+  box.innerHTML=`<svg viewBox="${vb}" style="width:100%;max-height:60vh" role="img" aria-label="Развёртка радиусного угла">${g}</svg>`;
 }
 function renderScheme(G,R){
   const parts=walls.map((w,wi)=>({w,wi,sc:schemeFor(G,R,wi)}));
@@ -3997,6 +4078,7 @@ function run(){
     })})).filter(c=>c.legs.length);
   }
   renderNotes(G,R); renderCards(G,R); renderScheme(G,R); renderCutmap(G,R); renderShelf(R); renderScene3D(G,R);
+  renderCornerScheme();
   renderCuts(G,R); renderSpec(G,R); renderEstimate(G,R); renderJointsV(R); renderLedSummary(R);
   renderLedDraw(G,R);
 }
@@ -4067,8 +4149,9 @@ $('#file-load').addEventListener('change',e=>{
         const ids=new Set(walls.map(w=>w.id));
         cornerLinks=(Array.isArray(o.cornerLinks)?o.cornerLinks:[])
           .filter(c=>ids.has(+c.aw)&&(c.bw===''||c.bw==null||ids.has(+c.bw)))
-          // старые проекты не знали kind/angle/radius/distance — донормализуем как обычный прямой угол
-          .map(c=>Object.assign({kind:'sharp',angle:90,radius:300,distance:0},c));
+          // старые проекты не знали kind/angle/radius/distance/flatA/flatB — донормализуем как
+          // обычный прямой угол без плоских зон
+          .map(c=>Object.assign({kind:'sharp',angle:90,radius:300,distance:0,flatA:0,flatB:0},c));
         cornerSeq=Math.max(0,...cornerLinks.map(c=>c.id||0));
         // тип углов — один на весь проект (см. декларацию cornerType); старые файлы могли хранить
         // его вразнобой по связям — берём тип первой связи как унифицированный, иначе 'out'
