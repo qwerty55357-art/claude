@@ -70,6 +70,8 @@ button,input,select,textarea{font:inherit;color:inherit}
 .wall-tab{background:transparent;border:1px solid var(--line-2);border-radius:var(--r);padding:5px 11px;cursor:pointer;font-family:var(--mono);font-size:11px;color:var(--muted)}
 .wall-tab:hover{border-color:var(--straw);color:var(--straw)}
 .wall-tab.on{background:var(--straw);color:var(--void);border-color:var(--straw);font-weight:600}
+.compass-slot{display:flex;gap:4px;flex-wrap:wrap}
+.compass-slot .wall-tab{font-size:10px;padding:4px 8px}
 .wall-scheme{display:none}
 .wall-scheme.on{display:block}
 .wall-scheme-h{display:none;font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:10px 0 6px}
@@ -180,6 +182,11 @@ tbody tr:hover td{background:var(--surface)}
     <div class="sect-b">
       <div class="row row-1"><div class="f"><label>Клиент / объект</label><input type="text" id="i-client" placeholder="Иванов, гостиная"></div></div>
       <div class="wall-tabs" id="wall-tabs"></div>
+      <label class="sub-l">Связи активной стены (вид сверху)</label>
+      <div id="wall-compass"></div>
+      <p class="hint" style="margin:0 0 8px">Слева/справа — конец активной стены: «+ стена» продолжает в ряд, «+ угол» соединяет
+        углом (всегда 90°, тип и радиус можно сменить кликом по уже созданной связи). Внизу — стена напротив, на расстоянии.
+        Занятый слот показывает имя связанной стены — клик открывает её настройки.</p>
       <div class="row row-1"><div class="f"><label>Название стены</label><input type="text" id="i-wname"></div></div>
       <div class="row">
         <div class="f"><label>Ширина области</label><input type="number" id="i-w" value="4000"><span class="unit">мм</span></div>
@@ -258,10 +265,6 @@ tbody tr:hover td{background:var(--surface)}
         соединитель. Горизонтальные и дополнительные вертикальные стыки — в разделе «Объект».</p>
       <label class="sub-l">Профили на контуре проёмов (Г-образные)</label>
       <label class="chk"><input type="checkbox" id="i-edgeops" checked><span>Окантовка торцов у проёмов без откосов</span></label>
-      <label class="sub-l">Углы между стенами (по проекту, не по активной стене)</label>
-      <div id="corners-list"></div>
-      <button class="btn btn-mini" id="btn-add-corner">+ Добавить угол</button>
-      <p class="hint">Один угол = один физический стык краёв двух стен (или край стены и внешней конструкции) — считается один раз, а не по разу с каждой стороны.</p>
     </div>
   </section>
   <section class="sect" data-sect>
@@ -512,7 +515,7 @@ $('#wall-tabs').addEventListener('click',e=>{
   const v=e.target.dataset.wall; if(v===undefined) return;
   if(v==='add'){ walls.push(newWall()); active=walls.length-1; }
   else active=+v;
-  renderWallTabs(); wallToForm(); renderOpenings(); renderCornerLinks(); run();
+  renderWallTabs(); wallToForm(); renderOpenings(); renderWallCompass(); run();
 });
 $('#btn-del-wall').addEventListener('click',()=>{
   if(walls.length<=1) return;
@@ -521,7 +524,7 @@ $('#btn-del-wall').addEventListener('click',()=>{
   // угол, ссылавшийся на удалённую стену одним концом, теряет смысл целиком — не превращаем в «вне проекта» молча
   cornerLinks=cornerLinks.filter(c=>c.aw!=deadId&&c.bw!=deadId);
   ledCircuits=ledCircuits.map(c=>Object.assign({},c,{legs:c.legs.filter(l=>l.wall!=deadId)})).filter(c=>c.legs.length);
-  renderWallTabs(); wallToForm(); renderOpenings(); renderCornerLinks(); run();
+  renderWallTabs(); wallToForm(); renderOpenings(); renderWallCompass(); run();
 });
 
 // поля стены <-> форма
@@ -1213,82 +1216,122 @@ document.addEventListener('click',e=>{
   if(e.target&&e.target.id==='btn-mreset'){ manualMoves={}; run(); }
 });
 
-/* ---- углы между стенами: список связей вместо ручных счётчиков на стену ---- */
+/* ---- связи активной стены («компас», вид сверху) — заменяет прежний плоский список «Углы
+   между стенами»: тот же cornerLinks, но UI ближе к тому, как реально думают о планировке —
+   левый/правый конец активной стены (в ряд / угол / радиус без соседней стены) и низ (напротив).
+   Занятый слот показывает имя связанной стены/радиус, клик открывает мини-меню редактирования. ---- */
 // [ОТРИСОВКА]
-function renderCornerLinks(){
-  const box=$('#corners-list'); if(!box) return;
-  const wallOpt=cur=>walls.map(w=>`<option value="${w.id}"${+cur===w.id?' selected':''}>${esc(w.name)}</option>`).join('');
-  const sideOpt=cur=>`<option value="left"${cur==='left'?' selected':''}>Слева</option><option value="right"${cur==='right'?' selected':''}>Справа</option>`;
-  const kindOpt=cur=>`<option value="sharp"${cur==='sharp'?' selected':''}>Прямой угол</option>`+
-    `<option value="radius"${cur==='radius'?' selected':''}>Радиусный угол</option>`+
-    `<option value="across"${cur==='across'?' selected':''}>Стены напротив</option>`;
-  box.innerHTML=(cornerLinks.length?cornerLinks.map((c,i)=>{
-    const kind=c.kind||'sharp', across=kind==='across';
-    return `
-    <div class="opening" data-cornerrow="${c.id}">
-      <div class="opening-h"><span class="tag">Угол ${i+1}</span><button class="btn btn-del btn-mini" data-cornerdel="${c.id}">удалить</button></div>
-      <div class="row row-1">
-        <div class="f"><label>Тип связи</label><select data-cf="kind">${kindOpt(kind)}</select></div>
-      </div>
-      <div class="row">
-        <div class="f"><label>Стена А</label><select data-cf="aw">${wallOpt(c.aw)}</select></div>
-        ${across?'':`<div class="f"><label>Край А</label><select data-cf="as">${sideOpt(c.as)}</select></div>`}
-      </div>
-      <div class="row">
-        <div class="f"><label>Стена Б</label><select data-cf="bw">${across?'':`<option value=""${!c.bw?' selected':''}>— вне проекта</option>`}${wallOpt(c.bw)}</select></div>
-        ${across?'':`<div class="f"><label>Край Б</label><select data-cf="bs"${c.bw?'':' disabled'}>${sideOpt(c.bs)}</select></div>`}
-      </div>
-      ${across?`
-      <div class="row row-1">
-        <div class="f"><label>Расстояние между стенами</label><input type="number" data-cf="distance" value="${c.distance||0}" step="10"><span class="unit">мм</span></div>
-      </div>`:`
-      <div class="row">
-        <div class="f"><label>Угол комнаты здесь</label><input type="number" data-cf="angle" value="${c.angle||90}" step="1"><span class="unit">°</span></div>
-        <div class="f"><label>Тип угла</label><select data-cf="type"><option value="out"${c.type==='out'?' selected':''}>Внешний</option><option value="in"${c.type==='in'?' selected':''}>Внутренний</option></select></div>
-      </div>
-      ${kind==='radius'?`
-      <div class="row row-1">
-        <div class="f"><label>Радиус (по центральной линии панели)</label><input type="number" data-cf="radius" value="${c.radius||300}" step="10"><span class="unit">мм</span></div>
-      </div>`:''}`}
-    </div>`;
-  }).join('') : '<p class="hint" style="margin:4px 0">Углов пока нет.</p>');
+function cornerAt(wallId,side){
+  return cornerLinks.find(c=>(c.kind||'sharp')!=='across'&&
+    ((+c.aw===wallId&&c.as===side)||(c.bw!==''&&c.bw!=null&&+c.bw===wallId&&c.bs===side)));
 }
-$('#corners-list').addEventListener('input',e=>{
-  const row=e.target.closest('[data-cornerrow]'); if(!row) return;
-  const c=cornerLinks.find(x=>x.id==row.dataset.cornerrow); if(!c) return;
-  const k=e.target.dataset.cf; if(!k) return;
-  const v=e.target.type==='number'?(parseFloat(e.target.value)||0):e.target.value;
-  c[k]=v;
-  if(k==='kind'){
-    // смена типа связи — сбрасываем поля, неактуальные для нового типа, чтобы не тащить
-    // призрачные старые значения (например, «край» у уже переключённой на «напротив» связи)
-    if(v==='across'){
-      c.as=''; c.bs=''; if(!c.distance) c.distance=0;
-      // «напротив» без второй стены (или сам с собой) бессмысленно — подставляем любую другую,
-      // если она есть в проекте; пользователь всё равно может сменить вручную
-      if(!c.bw||+c.bw===+c.aw){ const other=walls.find(w=>w.id!==+c.aw); if(other) c.bw=other.id; }
-    }
-    else { if(!c.as) c.as='left'; if(c.bw&&!c.bs) c.bs='left'; if(!c.angle) c.angle=90; }
-    renderCornerLinks(); run(); return;
+function acrossFor(wallId){
+  return cornerLinks.find(c=>(c.kind||'sharp')==='across'&&(+c.aw===wallId||+c.bw===wallId));
+}
+function otherWallOf(c,wallId){
+  const otherId=+c.aw===wallId?c.bw:c.aw;
+  return (otherId!==''&&otherId!=null)?walls.find(w=>w.id===+otherId):null;
+}
+function renderWallCompass(){
+  const box=$('#wall-compass'); if(!box) return;
+  const w=AW();
+  const slot=side=>{
+    const c=cornerAt(w.id,side);
+    if(!c) return `<div class="compass-slot">
+        <button class="btn wall-tab" data-cpadd="straight" data-side="${side}">+ стена</button>
+        <button class="btn wall-tab" data-cpadd="corner" data-side="${side}">+ угол</button>
+        <button class="btn wall-tab" data-cpadd="radiuscap" data-side="${side}" title="Радиусный угол без смежной стены">+ радиус</button>
+      </div>`;
+    const kind=c.kind||'sharp', isCap=(c.bw===''||c.bw==null), other=isCap?null:otherWallOf(c,w.id);
+    const label=isCap?`⌒ радиус R${fmt(c.radius||0)}`
+      :(kind==='radius'?'⌒ ':'')+(other?esc(other.name):'?')+((+c.angle||90)===180?' (в ряд)':'');
+    return `<div class="compass-slot"><button class="btn wall-tab on" data-cpedit="${c.id}">${label}</button></div>`;
+  };
+  const ac=acrossFor(w.id), acOther=ac?otherWallOf(ac,w.id):null;
+  const acrossHtml=ac
+    ? `<button class="btn wall-tab on" data-cpedit="${ac.id}">${esc(acOther?acOther.name:'?')} · ${fmt(ac.distance||0)} мм</button>`
+    : `<button class="btn wall-tab" data-cpadd="across">+ стена напротив</button>`;
+  box.innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
+      ${slot('left')}<span class="tag" style="flex:none">${esc(w.name)}</span>${slot('right')}
+    </div>
+    <div style="display:flex;justify-content:center">${acrossHtml}</div>`;
+}
+// быстрое создание связи: «в ряд»/«угол» сразу создают новую стену (соединение по умолчанию
+// прямое, 90° для угла) — тип/угол/радиус меняются потом кликом по уже созданному слоту;
+// «радиус без стены» — сразу радиусный угол-заглушка на конце, второй стены не будет вовсе
+function compassAdd(kind,side){
+  const w=AW();
+  if(kind==='radiuscap'){
+    cornerSeq++;
+    cornerLinks.push({id:cornerSeq,kind:'radius',type:'out',angle:90,radius:300,distance:0,
+      aw:w.id,as:side,bw:'',bs:''});
+    renderWallCompass(); run();
+    return;
   }
-  if(k==='bw'){
-    if(!c.bw) c.bs='';
-    else if(!c.bs&&(c.kind||'sharp')!=='across') c.bs='left';
-    renderCornerLinks();
+  if(kind==='across'){
+    const other=walls.find(x=>x.id!==w.id);
+    const bw=other?other.id:(()=>{ const nw=newWall(); walls.push(nw); active=walls.length-1; return nw.id; })();
+    cornerSeq++;
+    cornerLinks.push({id:cornerSeq,kind:'across',type:'out',angle:90,radius:300,distance:1000,
+      aw:w.id,as:'',bw,bs:''});
+    if(!other){ renderWallTabs(); wallToForm(); renderOpenings(); }
+    renderWallCompass(); run();
+    return;
   }
-  run();
-});
-$('#corners-list').addEventListener('click',e=>{
-  const id=e.target.dataset.cornerdel; if(!id) return;
-  cornerLinks=cornerLinks.filter(c=>c.id!=id);
-  renderCornerLinks(); run();
-});
-$('#btn-add-corner').addEventListener('click',()=>{
+  const nw=newWall(); walls.push(nw);
   cornerSeq++;
-  const w=AW(), other=walls.find(x=>x.id!==w.id);
-  cornerLinks.push({id:cornerSeq, kind:'sharp', type:'out', angle:90, radius:300, distance:0,
-    aw:w.id, as:'left', bw:other?other.id:'', bs:other?'right':''});
-  renderCornerLinks(); run();
+  const forward=side==='right';
+  cornerLinks.push({id:cornerSeq,kind:'sharp',type:'out',
+    angle:kind==='straight'?180:90,radius:300,distance:0,
+    aw:w.id,as:side,bw:nw.id,bs:forward?'left':'right'});
+  active=walls.length-1;
+  renderWallTabs(); wallToForm(); renderOpenings(); renderWallCompass(); run();
+}
+function numRowMenu(menu,label,val,onChange){
+  const row=document.createElement('div');
+  row.style.cssText='padding:5px 8px';
+  row.innerHTML=`<label style="display:block;font-size:10px;color:var(--muted);margin-bottom:3px">${esc(label)}</label>`+
+    `<input type="number" value="${val}" step="1" style="width:100%;background:var(--void);border:1px solid var(--line-2);border-radius:6px;color:var(--paper);padding:5px 8px;font-family:var(--mono)">`;
+  row.querySelector('input').addEventListener('input',e=>onChange(parseFloat(e.target.value)||0));
+  menu.appendChild(row);
+}
+function compassEdit(ev,cornerId){
+  const c=cornerLinks.find(x=>x.id===cornerId); if(!c) return;
+  const kind=c.kind||'sharp';
+  const del=menu=>{ menuDivider(menu,''); menuBtn(menu,'Удалить связь',false,()=>{
+    cornerLinks=cornerLinks.filter(x=>x.id!==cornerId); closeMatMenu(); renderWallCompass(); run();
+  },true); };
+  if(kind==='across'){
+    const menu=menuShell(ev,'Стена напротив');
+    const w=AW();
+    const wallOpt=walls.filter(x=>x.id!==w.id)
+      .map(x=>`<option value="${x.id}"${+c.bw===x.id?' selected':''}>${esc(x.name)}</option>`).join('');
+    const row=document.createElement('div'); row.style.cssText='padding:5px 8px';
+    row.innerHTML=`<label style="display:block;font-size:10px;color:var(--muted);margin-bottom:3px">Какая стена</label>`+
+      `<select style="width:100%;background:var(--void);border:1px solid var(--line-2);border-radius:6px;color:var(--paper);padding:5px 8px;font-family:var(--mono)">${wallOpt}</select>`;
+    row.querySelector('select').addEventListener('change',e=>{ c.bw=+e.target.value; run(); renderWallCompass(); });
+    menu.appendChild(row);
+    numRowMenu(menu,'Расстояние, мм',c.distance||0,v=>{ c.distance=v; run(); });
+    del(menu);
+    return;
+  }
+  const menu=menuShell(ev,(c.bw===''||c.bw==null)?'Радиус без стены':'Угол');
+  if(c.bw!==''&&c.bw!=null){
+    menuBtn(menu,'Прямой угол',kind==='sharp',()=>{ c.kind='sharp'; closeMatMenu(); renderWallCompass(); run(); });
+    menuBtn(menu,'Радиусный угол',kind==='radius',()=>{ c.kind='radius'; if(!c.radius) c.radius=300; closeMatMenu(); renderWallCompass(); run(); });
+    menuDivider(menu,'Параметры');
+    numRowMenu(menu,'Угол комнаты, °',c.angle||90,v=>{ c.angle=v; run(); });
+    menuBtn(menu,c.type==='in'?'Внутренний угол ✓':'Внешний угол ✓',false,()=>{ c.type=c.type==='in'?'out':'in'; closeMatMenu(); renderWallCompass(); run(); });
+  }
+  if(kind==='radius') numRowMenu(menu,'Радиус, мм',c.radius||300,v=>{ c.radius=v; run(); });
+  del(menu);
+}
+$('#wall-compass').addEventListener('click',e=>{
+  const addKind=e.target.dataset.cpadd;
+  if(addKind){ compassAdd(addKind,e.target.dataset.side); return; }
+  const editId=e.target.dataset.cpedit;
+  if(editId){ compassEdit(e,+editId); }
 });
 
 /* =====================================================================
@@ -3460,21 +3503,6 @@ function ensureScene3D(){
   scene3d=Object.assign(st,{updateCam,resize});
   return scene3d;
 }
-// центр и опорные точки касания дуги радиусного угла — та же геометрия (t, поворот), что и в
-// computeProject, просто спроецированная в мировые XZ-координаты уже расставленных стен
-function radiusCornerArc3D(pa,a,pb,b,c){
-  const angleRad=(+c.angle||90)*Math.PI/180, radius=+c.radius||0;
-  const t=radius/Math.tan(angleRad/2);
-  const dirA=[Math.cos(pa.angle),Math.sin(pa.angle)];
-  const signA=c.as==='right'?1:-1;   // right — касание у дальнего конца стены, идём НАЗАД от него
-  const cornerA=c.as==='right'?[pa.x+a.W*dirA[0],pa.z+a.W*dirA[1]]:[pa.x,pa.z];
-  const tanA=[cornerA[0]-signA*t*dirA[0],cornerA[1]-signA*t*dirA[1]];
-  const dirB=[Math.cos(pb.angle),Math.sin(pb.angle)];
-  const signB=c.bs==='right'?1:-1;
-  const cornerB=c.bs==='right'?[pb.x+b.W*dirB[0],pb.z+b.W*dirB[1]]:[pb.x,pb.z];
-  const tanB=[cornerB[0]-signB*t*dirB[0],cornerB[1]-signB*t*dirB[1]];
-  return {tanA,tanB,radius,turn:Math.PI-angleRad,type:c.type};
-}
 function renderScene3D(G,R){
   const block=$('#scene3d-block'); if(!block) return;
   const st=ensureScene3D(); if(!st) return;
@@ -3508,28 +3536,45 @@ function renderScene3D(G,R){
     });
     if(w.H>maxH) maxH=w.H;
   });
-  // дуги радиусных углов — только там, где связь реально стала гнутой деталью (нет в cornerIssues)
+  // дуги радиусных углов — только там, где связь реально стала гнутой деталью (нет в cornerIssues).
+  // bw='' («радиус без смежной стены», см. компас) — та же дуга, но конечная точка не привязана
+  // ни к какой второй стене, разворачиваем её просто на угол поворота turn от точки касания A.
   const byId=new Map(walls.map(w=>[w.id,w]));
   const issueIds=new Set((R.cornerIssues||[]).map(x=>x.id));
   (cornerLinks||[]).forEach(c=>{
     if((c.kind||'sharp')!=='radius'||issueIds.has(c.id)) return;
-    const a=byId.get(+c.aw), b=(c.bw!==''&&c.bw!=null)?byId.get(+c.bw):null;
-    const pa=positions.get(+c.aw), pb=b?positions.get(+c.bw):null;
-    if(!a||!b||!pa||!pb) return;
-    const {tanA,tanB,radius,turn}=radiusCornerArc3D(pa,a,pb,b,c);
-    const segs=16;
-    // центр дуги — на биссектрисе, на расстоянии radius по перпендикуляру от точки касания A
-    // (перпендикуляр стены A, знак — по типу угла, тот же, что использован для поворота в BFS)
+    const hasB=c.bw!==''&&c.bw!=null;
+    const a=byId.get(+c.aw); const pa=positions.get(+c.aw);
+    if(!a||!pa) return;
+    const b=hasB?byId.get(+c.bw):null, pb=hasB?positions.get(+c.bw):null;
+    if(hasB&&(!b||!pb)) return;
+    const angleRad=(+c.angle||90)*Math.PI/180, radius=+c.radius||0, turn=Math.PI-angleRad;
+    const t=radius/Math.tan(angleRad/2);
     const dirA=[Math.cos(pa.angle),Math.sin(pa.angle)];
+    const signA=c.as==='right'?1:-1;
+    const cornerA=c.as==='right'?[pa.x+a.W*dirA[0],pa.z+a.W*dirA[1]]:[pa.x,pa.z];
+    const tanA=[cornerA[0]-signA*t*dirA[0],cornerA[1]-signA*t*dirA[1]];
     const sign=c.type==='in'?1:-1;
     const perp=[-dirA[1]*sign,dirA[0]*sign];
     const center=[tanA[0]+radius*perp[0],tanA[1]+radius*perp[1]];
     const a0=Math.atan2(tanA[1]-center[1],tanA[0]-center[0]);
-    const a1Raw=Math.atan2(tanB[1]-center[1],tanB[0]-center[0]);
-    let d=a1Raw-a0; while(d<=-Math.PI)d+=2*Math.PI; while(d>Math.PI)d-=2*Math.PI;
+    let d;
+    if(hasB){
+      const dirB=[Math.cos(pb.angle),Math.sin(pb.angle)];
+      const signB=c.bs==='right'?1:-1;
+      const cornerB=c.bs==='right'?[pb.x+b.W*dirB[0],pb.z+b.W*dirB[1]]:[pb.x,pb.z];
+      const tanB=[cornerB[0]-signB*t*dirB[0],cornerB[1]-signB*t*dirB[1]];
+      const a1Raw=Math.atan2(tanB[1]-center[1],tanB[0]-center[0]);
+      d=a1Raw-a0; while(d<=-Math.PI)d+=2*Math.PI; while(d>Math.PI)d-=2*Math.PI;
+    } else {
+      // без второй стены — просто отмеряем turn в направлении, куда «уходит» дуга от края A
+      // (в сторону, обратную тому концу, которым A касается угла)
+      d=(c.as==='right'?-1:1)*sign*turn;
+    }
+    const H=a.H;
+    const segs=16;
     const pts=[];
     for(let i=0;i<=segs;i++){ const a2=a0+d*(i/segs); pts.push([center[0]+radius*Math.cos(a2),center[1]+radius*Math.sin(a2)]); }
-    const H=Math.min(a.H,b.H);
     const posArr=[], idxArr=[]; const uvArr=[];
     pts.forEach((pt,i)=>{
       posArr.push(pt[0],0,pt[1], pt[0],H,pt[1]);
@@ -3804,7 +3849,7 @@ $('#file-load').addEventListener('change',e=>{
         ledCircuitSeq=Math.max(0,...ledCircuits.map(c=>c.id||0));
         freeLegSeq=Math.max(0,...ledCircuits.flatMap(c=>c.legs).filter(l=>l.el==='free').map(l=>l.id||0));
       }
-      renderWallTabs(); wallToForm(); renderOpenings(); renderCornerLinks(); run();
+      renderWallTabs(); wallToForm(); renderOpenings(); renderWallCompass(); run();
     }catch(err){
       $('#notes').innerHTML=`<div class="note err"><b>Файл</b><span>Не удалось прочитать проект: файл повреждён или это не проект раскроя.</span></div>`;
     }
@@ -4329,7 +4374,7 @@ $('#btn-print').addEventListener('click',()=>window.print());
 walls=[newWall()];
 renderWallTabs(); wallToForm();
 addOpening();
-renderCornerLinks();
+renderWallCompass();
 run();
 </script>
 </body>
