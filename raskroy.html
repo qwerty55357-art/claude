@@ -1246,9 +1246,15 @@ function renderWallCompass(){
     const {sA,sideA,sB,sideB}=CORNER_DEF[diag];
     const wa=wallInSlot(sA), wb=wallInSlot(sB);
     let corner=null;
-    if(wa&&wb) corner=cornerAt(wa.id,sideA);
-    else if(wa) corner=cornerAt(wa.id,sideA);
-    else if(wb) corner=cornerAt(wb.id,sideB);
+    if(wa) corner=cornerAt(wa.id,sideA);
+    if(!corner&&wb) corner=cornerAt(wb.id,sideB);
+    if(corner&&wa&&wb&&(corner.bw===''||corner.bw==null)){
+      // угол был создан радиусной заглушкой, пока второй стены ещё не было — теперь она
+      // появилась: дотягиваем связь до полноценной и возвращаем её к обычной прямой (радиус
+      // был вынужденным вариантом для одиночной стены, а не осознанным выбором пользователя)
+      if(+corner.aw===wa.id){ corner.bw=wb.id; corner.bs=sideB; } else { corner.bw=wa.id; corner.bs=sideA; }
+      corner.kind='sharp';
+    }
     if(corner) return `<button class="btn wall-tab on" data-cpedit="${corner.id}">${cornerBadgeLabel(corner,wa,wb)}</button>`;
     if(!wa&&!wb) return `<span class="wall-tab" style="opacity:.3">·</span>`;
     return `<button class="btn wall-tab" data-cpadd="${diag}">+ угол</button>`;
