@@ -3774,20 +3774,26 @@ function renderScene3D(G,R){
     if(hasB&&(!b||!pb)) return;
     const angleRad=(+c.angle||90)*Math.PI/180, radius=+c.radius||0, turn=Math.PI-angleRad;
     const t=radius/Math.tan(angleRad/2);
+    const flatA=Math.max(0,+c.flatA||0), flatB=hasB?Math.max(0,+c.flatB||0):0;
     const dirA=[Math.cos(pa.angle),Math.sin(pa.angle)];
     const signA=c.as==='right'?1:-1;
     const cornerA=c.as==='right'?[pa.x+a.W*dirA[0],pa.z+a.W*dirA[1]]:[pa.x,pa.z];
     const tanA=[cornerA[0]-signA*t*dirA[0],cornerA[1]-signA*t*dirA[1]];
+    // конец плоской зоны A — там же, где теперь реально обрывается панель стены A (cornerCuts
+    // урезает её на t+flatA, см. computeProject); без этой добавки между урезанной стеной и
+    // самой дугой (которая всё ещё стоит ровно на тангенсе t) была бы пустая щель шириной flatA
+    const wallEdgeA=[tanA[0]-signA*flatA*dirA[0],tanA[1]-signA*flatA*dirA[1]];
     const sign=c.type==='in'?-1:1;
     const perp=[-dirA[1]*sign,dirA[0]*sign];
     const center=[tanA[0]+radius*perp[0],tanA[1]+radius*perp[1]];
     const a0=Math.atan2(tanA[1]-center[1],tanA[0]-center[0]);
-    let d;
+    let d, wallEdgeB=null;
     if(hasB){
       const dirB=[Math.cos(pb.angle),Math.sin(pb.angle)];
       const signB=c.bs==='right'?1:-1;
       const cornerB=c.bs==='right'?[pb.x+b.W*dirB[0],pb.z+b.W*dirB[1]]:[pb.x,pb.z];
       const tanB=[cornerB[0]-signB*t*dirB[0],cornerB[1]-signB*t*dirB[1]];
+      wallEdgeB=[tanB[0]-signB*flatB*dirB[0],tanB[1]-signB*flatB*dirB[1]];
       const a1Raw=Math.atan2(tanB[1]-center[1],tanB[0]-center[0]);
       d=a1Raw-a0; while(d<=-Math.PI)d+=2*Math.PI; while(d>Math.PI)d-=2*Math.PI;
     } else {
@@ -3816,6 +3822,22 @@ function renderScene3D(G,R){
     const mat=new THREE.MeshStandardMaterial({color:new THREE.Color(defaultColorHex),
       side:THREE.DoubleSide,roughness:0.85});
     st.group.add(new THREE.Mesh(geo,mat));
+    // плоские зоны (flatA/flatB) — прямые продолжения детали угла по краям дуги, тем же
+    // материалом (см. cornerSchemeFor/computeProject: они не гнутые, границы дуги не сдвигают).
+    // Без них тут была бы пустая щель между реально урезанной стеной (см. wallCutView выше,
+    // cornerCuts уже учитывает t+flat) и дугой, которая стоит ровно на «голом» тангенсе t.
+    const addFlatWing=(p0,p1)=>{
+      const g2=new THREE.BufferGeometry();
+      g2.setAttribute('position',new THREE.Float32BufferAttribute(
+        [p0[0],0,p0[1], p0[0],H,p0[1], p1[0],0,p1[1], p1[0],H,p1[1]],3));
+      g2.setAttribute('uv',new THREE.Float32BufferAttribute([0,0, 0,1, 1,0, 1,1],2));
+      g2.setIndex([0,1,2, 2,1,3]);
+      g2.computeVertexNormals();
+      const m2=new THREE.MeshStandardMaterial({color:new THREE.Color(defaultColorHex),side:THREE.DoubleSide,roughness:0.85});
+      st.group.add(new THREE.Mesh(g2,m2));
+    };
+    if(flatA>0.5) addFlatWing(wallEdgeA,tanA);
+    if(hasB&&flatB>0.5) addFlatWing(pts[pts.length-1],wallEdgeB);
   });
   if(minX<=maxX){
     st.target.set((minX+maxX)/2,Math.min(maxH,2500)/2,(minZ+maxZ)/2);
