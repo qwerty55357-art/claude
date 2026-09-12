@@ -129,12 +129,21 @@ tbody tr:hover td{background:var(--surface)}
 /* список LED-отрезков стены — печатная замена раздела «LED» (см. renderScheme): на экране скрыт,
    там и так есть интерактивный раздел «LED — рисование отрезков» с тем же списком */
 .led-print-list{display:none}
+/* развёртки ВСЕХ радиусных углов — печатная замена интерактивного «Развёртка радиусного угла»
+   (см. renderScheme/cornerSchemeSvg): на экране показывается только последний выбранный угол
+   (клик по значку в компасе), но печать/PDF не должна зависеть от того, что было выбрано на
+   экране в момент печати — документ обязан быть полным */
+.corner-print-block{display:none}
 @media print{
   .wall-scheme{display:block !important;break-inside:avoid;page-break-inside:avoid}
   .wall-scheme-h{display:block !important}
   [data-resize],[data-cmrot]{display:none !important}
   #led-draw-block{display:none !important}
   .led-print-list{display:block}
+  .corner-print-block{display:block;break-inside:avoid;page-break-inside:avoid}
+  /* 3D — WebGL-канвас не переживает печать (пустой/битый кадр вместо содержимого), см. проверку
+     «углы в PDF/печати»: скриншот показал чёрный прямоугольник вместо макета комнаты */
+  #scene3d-block{display:none !important}
   *{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important }
   .svg-wrap{overflow:visible}
   svg{max-height:none !important}
@@ -3257,27 +3266,18 @@ function schemeFor(G,R,wi){
 // логика чертежа, что и schemeFor у обычной стены (dimH/dimV/txt), только вместо полос материала
 // тут одна цельная деталь: несдвигаемая зона изгиба посередине (arcW, красный пунктир — её
 // граница) и настраиваемые плоские зоны по краям (flatA/flatB, см. compassEdit)
-function renderCornerScheme(){
-  const block=$('#corner-scheme-block'); if(!block) return;
-  const c=selectedCorner!=null?cornerLinks.find(x=>x.id===selectedCorner):null;
-  if(!c||(c.kind||'sharp')!=='radius'){ block.hidden=true; return; }
-  const a=walls.find(w=>w.id===+c.aw);
-  if(!a){ block.hidden=true; return; }
-  const b=(c.bw!==''&&c.bw!=null)?walls.find(w=>w.id===+c.bw):null;
-  block.hidden=false;
+// строит развёртку ОДНОГО радиусного угла (SVG + подпись) — общая логика для интерактивного
+// блока под компасом (см. renderCornerScheme, показывает только выбранный угол) и печатной
+// копии (см. renderScheme, .corner-print-block: печать не должна зависеть от того, что было
+// выбрано на экране, и обязана показать ВСЕ радиусные углы разом). Возвращает {meta,svg} либо
+// {meta,errMsg}, если угол не прошёл геометрическую проверку (см. cornerIssues).
+function cornerSchemeSvg(c,a,b,R){
   const aTag='С'+(walls.indexOf(a)+1);
-  const label=b?`Угол R${fmt(+c.radius)} (${aTag}-С${walls.indexOf(b)+1})`:`Угол R${fmt(+c.radius)} (${aTag}·${c.as==='right'?'справа':'слева'})`;
-  $('#corner-scheme-meta').textContent=label;
-  const R=LAST&&LAST.R;
-  const box=$('#corner-scheme');
-  if(!R){ box.innerHTML=''; return; }
+  const meta=b?`Угол R${fmt(+c.radius)} (${aTag}-С${walls.indexOf(b)+1})`:`Угол R${fmt(+c.radius)} (${aTag}·${c.as==='right'?'справа':'слева'})`;
   const issue=(R.cornerIssues||[]).find(x=>x.id===c.id);
-  if(issue){
-    box.innerHTML=`<p class="hint" style="color:var(--err)">${esc(issue.msg)}</p>`;
-    return;
-  }
+  if(issue) return {meta,errMsg:issue.msg};
   const arc=R.sheets.flatMap(sh=>sh.list).find(p=>p.pk==='corner-'+c.id);
-  if(!arc){ box.innerHTML=`<p class="hint">Деталь угла ещё не рассчитана.</p>`; return; }
+  if(!arc) return {meta,errMsg:'Деталь угла ещё не рассчитана.'};
   const total=arc.w, H=arc.len, arcW=arc.arcW, flatA=arc.flatA||0, flatB=arc.flatB||0;
   const fs=Math.max(total,H)/48;
   const padL=fs*5.2, padR=fs*2.4, padT=fs*3.2, padB=fs*7.0;
@@ -3299,11 +3299,26 @@ function renderCornerScheme(){
   // высота слева — габарит, совпадает с высотой смежных стен
   g+=dimV(0,H,-fs*3.4,fs,'var(--paper)',true);
   const vb=`${-padL} ${-padT} ${total+padL+padR} ${H+padT+padB}`;
-  box.innerHTML=`<svg viewBox="${vb}" style="width:100%;max-height:60vh" role="img" aria-label="Развёртка радиусного угла">${g}</svg>`;
+  return {meta,svg:`<svg viewBox="${vb}" style="width:100%;max-height:60vh" role="img" aria-label="Развёртка радиусного угла">${g}</svg>`};
+}
+function renderCornerScheme(){
+  const block=$('#corner-scheme-block'); if(!block) return;
+  const c=selectedCorner!=null?cornerLinks.find(x=>x.id===selectedCorner):null;
+  if(!c||(c.kind||'sharp')!=='radius'){ block.hidden=true; return; }
+  const a=walls.find(w=>w.id===+c.aw);
+  if(!a){ block.hidden=true; return; }
+  const b=(c.bw!==''&&c.bw!=null)?walls.find(w=>w.id===+c.bw):null;
+  block.hidden=false;
+  const R=LAST&&LAST.R;
+  const box=$('#corner-scheme');
+  if(!R){ $('#corner-scheme-meta').textContent=''; box.innerHTML=''; return; }
+  const res=cornerSchemeSvg(c,a,b,R);
+  $('#corner-scheme-meta').textContent=res.meta;
+  box.innerHTML=res.errMsg?`<p class="hint" style="color:var(--err)">${esc(res.errMsg)}</p>`:res.svg;
 }
 function renderScheme(G,R){
   const parts=walls.map((w,wi)=>({w,wi,sc:schemeFor(G,R,wi)}));
-  $('#scheme').innerHTML=parts.map(({w,wi,sc})=>{
+  const wallsHtml=parts.map(({w,wi,sc})=>{
     // список LED-отрезков этой стены — на экране скрыт (он и так есть в разделе «LED» ниже
     // схемы раскладки), но нужен при печати/PDF, где раздел «LED» целиком не выводится
     const ledHtml=ledCircuitsListHtml(w,G,R.cornerCuts&&R.cornerCuts.get(w.id));
@@ -3311,6 +3326,17 @@ function renderScheme(G,R){
     return `<div class="wall-scheme${wi===active?' on':''}" data-wallscheme="${wi}">`+
       `<div class="wall-scheme-h">${esc(w.name)}</div>${sc.svg}${ledBlock}</div>`;
   }).join('');
+  // развёртки ВСЕХ радиусных углов — на экране интерактивный блок под компасом показывает
+  // только последний выбранный (см. renderCornerScheme), но печать/PDF не должна зависеть от
+  // того, что было выбрано на экране в момент печати (см. .corner-print-block)
+  const cornersHtml=cornerLinks.filter(c=>(c.kind||'sharp')==='radius').map(c=>{
+    const a=walls.find(w=>w.id===+c.aw); if(!a) return '';
+    const b=(c.bw!==''&&c.bw!=null)?walls.find(w=>w.id===+c.bw):null;
+    const res=cornerSchemeSvg(c,a,b,R);
+    const body=res.errMsg?`<p class="hint" style="color:var(--err)">${esc(res.errMsg)}</p>`:res.svg;
+    return `<div class="corner-print-block"><div class="wall-scheme-h">Развёртка — ${esc(res.meta)}</div>${body}</div>`;
+  }).join('');
+  $('#scheme').innerHTML=wallsHtml+cornersHtml;
   $('#scheme-meta').textContent=parts[active].sc.meta;
 }
 
