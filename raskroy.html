@@ -145,7 +145,12 @@ tbody tr:hover td{background:var(--surface)}
   [data-resize],[data-cmrot]{display:none !important}
   #led-draw-block{display:none !important}
   .led-print-list{display:block}
-  .corner-print-block{display:block;break-inside:avoid;page-break-inside:avoid}
+  /* своя страница на каждый угол — так же, как у каждой стены (см. .wall-scheme): та просто
+     оказывается достаточно высокой при width:100%, чтобы не делить страницу со следующей; деталь
+     угла обычно УЖЕ стены, поэтому явно форсируем разрыв перед ней, а не полагаемся на случайное
+     совпадение высоты */
+  .corner-print-block{display:block;break-inside:avoid;page-break-inside:avoid;
+    break-before:page;page-break-before:always}
   /* интерактивный блок «Развёртка радиусного угла» под компасом виден на экране всегда, когда
      выбран угол (block.hidden никак не привязан к печати) — печатная копия для КАЖДОГО угла и так
      есть отдельно (.corner-print-block выше); без скрытия этот блок печатался бы ещё и сам, тем же
@@ -156,15 +161,10 @@ tbody tr:hover td{background:var(--surface)}
   *{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important }
   .svg-wrap{overflow:visible}
   svg{max-height:none !important}
-  /* развёртка радиусного угла обычно ВЫШЕ, чем шире (арка+плоские зоны << высоты стены) — без
-     отдельного предела по высоте общий свг{max-height:none} выше даёт огромную (на много страниц)
-     печатную страницу вместо одной аккуратной схемы, см. проверку «углы в PDF/печати» повторно.
-     Явные width/height детали угла (см. cornerSchemeSvg) уже дают ей собственный intrinsic-размер,
-     так что этот предел здесь просто заменяет экранный 60vh на печатный физический эквивалент.
-     12cm (не 23) — иначе узкая портретная деталь угла, упираясь в высокий предел, печаталась
-     заметно КРУПНЕЕ, чем ландшафтные схемы стен (те редко достигают такой высоты на всю ширину
-     листа) — сопоставимый со стеной масштаб важнее, чем «использовать всю доступную высоту» */
-  .corner-print-block svg{max-height:12cm !important}
+  /* деталь угла вписана по высоте (cornerSchemeSvg: height:76vh), не по ширине — vh в печати
+     не то же самое, что во вьюпорте экрана (см. проверку «углы в PDF/печати»), поэтому здесь
+     заменяем его на физический размер листа минус запас под подпись/размерные линии сверху-снизу */
+  .corner-print-block svg{height:24cm !important}
   .legend{break-inside:avoid}
   table{break-inside:auto} tr{break-inside:avoid}
   :root{--bg:#fff;--surface:#fff;--surface-2:#fff;--line:#c9c4bb;--line-2:#8d887f;--paper:#111;--muted:#5c574f;--void:#fff;
@@ -3324,13 +3324,15 @@ function cornerSchemeSvg(c,a,b,R){
   // высота слева — габарит, совпадает с высотой смежных стен
   g+=dimV(0,H,-fs*3.4,fs,'var(--paper)',true);
   const vb=`${-padL} ${-padT} ${total+padL+padR} ${H+padT+padB}`;
-  // явные width/height (не только viewBox) — иначе у CSS нет собственного размера детали угла,
-  // только соотношение сторон, и "width:100%" в узком контейнере растягивало бы её по ширине
-  // безоглядно на высоту; деталь угла почти всегда УЖЕ, чем высота стены (портретная пропорция),
-  // так что при печати (где свг{max-height:none}, см. @media print) это раздувало бы схему на
-  // много страниц вместо одной — с явным intrinsic-размером браузер вписывает её и по ширине, и
-  // по высоте одновременно (как img{max-width;max-height;width:auto;height:auto})
-  return {meta,svg:`<svg viewBox="${vb}" width="${total+padL+padR}" height="${H+padT+padB}" style="width:auto;height:auto;max-width:100%;max-height:60vh" role="img" aria-label="Развёртка радиусного угла">${g}</svg>`};
+  // тот же fs (Math.max(своя_ширина,H)/48), тот же шрифт/толщина линий, что и у схемы обычной
+  // стены (schemeFor) — но вписываем по ВЫСОТЕ, а не по ширине: деталь угла всегда УЖЕ высоты
+  // стены (портрет, не альбом), а высота — это ровно то, что у неё ОБЩЕЕ со стеной (та же H).
+  // Пробовал буквально скопировать style стены (width:100%) — на экране выглядит одинаково
+  // (снаружи то же самое max-height:76vh почти всегда и оказывается ограничивающим), но при
+  // печати это опять раздувает деталь на несколько страниц (см. правку выше — свг{max-height:
+  // none} в печати снимает всякий предел по ширине, а узкая деталь становится ОЧЕНЬ высокой).
+  // Фиксированная высота — тот же корешок консистентности (общая H), но без риска расползтись.
+  return {meta,svg:`<svg viewBox="${vb}" style="height:76vh;width:auto;max-width:100%" role="img" aria-label="Развёртка радиусного угла">${g}</svg>`};
 }
 function renderCornerScheme(){
   const block=$('#corner-scheme-block'); if(!block) return;
