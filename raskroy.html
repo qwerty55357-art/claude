@@ -146,6 +146,11 @@ tbody tr:hover td{background:var(--surface)}
   #led-draw-block{display:none !important}
   .led-print-list{display:block}
   .corner-print-block{display:block;break-inside:avoid;page-break-inside:avoid}
+  /* интерактивный блок «Развёртка радиусного угла» под компасом виден на экране всегда, когда
+     выбран угол (block.hidden никак не привязан к печати) — печатная копия для КАЖДОГО угла и так
+     есть отдельно (.corner-print-block выше); без скрытия этот блок печатался бы ещё и сам, тем же
+     чертежом, но без печатного предела высоты — снова раздувался бы на много пустых страниц */
+  #corner-scheme-block{display:none !important}
   #scene3d-block{display:none !important}
   .scene3d-print-block{display:block;break-inside:avoid;page-break-inside:avoid}
   *{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important }
@@ -155,8 +160,11 @@ tbody tr:hover td{background:var(--surface)}
      отдельного предела по высоте общий свг{max-height:none} выше даёт огромную (на много страниц)
      печатную страницу вместо одной аккуратной схемы, см. проверку «углы в PDF/печати» повторно.
      Явные width/height детали угла (см. cornerSchemeSvg) уже дают ей собственный intrinsic-размер,
-     так что этот предел здесь просто заменяет экранный 60vh на печатный физический эквивалент */
-  .corner-print-block svg{max-height:23cm !important}
+     так что этот предел здесь просто заменяет экранный 60vh на печатный физический эквивалент.
+     12cm (не 23) — иначе узкая портретная деталь угла, упираясь в высокий предел, печаталась
+     заметно КРУПНЕЕ, чем ландшафтные схемы стен (те редко достигают такой высоты на всю ширину
+     листа) — сопоставимый со стеной масштаб важнее, чем «использовать всю доступную высоту» */
+  .corner-print-block svg{max-height:12cm !important}
   .legend{break-inside:avoid}
   table{break-inside:auto} tr{break-inside:avoid}
   :root{--bg:#fff;--surface:#fff;--surface-2:#fff;--line:#c9c4bb;--line-2:#8d887f;--paper:#111;--muted:#5c574f;--void:#fff;
@@ -3856,6 +3864,13 @@ function renderScene3D(G,R){
     const segs=16;
     const pts=[];
     for(let i=0;i<=segs;i++){ const a2=a0+d*(i/segs); pts.push([center[0]+radius*Math.cos(a2),center[1]+radius*Math.sin(a2)]); }
+    // дуга (особенно внешняя, type:'out') выгибается ЗА пределы прямой между концами стен — без
+    // учёта этих точек в габарите камера центрировалась бы по «скелету» стен, а сама выпуклость
+    // дуги торчала бы за кадром в сторону, из-за чего печатный снимок выглядел перекошенным
+    [...pts,wallEdgeA,...(wallEdgeB?[wallEdgeB]:[])].forEach(pt=>{
+      if(pt[0]<minX)minX=pt[0]; if(pt[0]>maxX)maxX=pt[0];
+      if(pt[1]<minZ)minZ=pt[1]; if(pt[1]>maxZ)maxZ=pt[1];
+    });
     const posArr=[], idxArr=[]; const uvArr=[];
     pts.forEach((pt,i)=>{
       posArr.push(pt[0],0,pt[1], pt[0],H,pt[1]);
@@ -3919,9 +3934,17 @@ function renderScene3DSnapshot(scene,minX,maxX,minZ,maxZ,maxH){
     scene3dSnapshotRenderer.setClearColor(0x000000,0);
   }
   const renderer=scene3dSnapshotRenderer;
-  const camera=new THREE.PerspectiveCamera(40,w/h,10,100000);
   const target=new THREE.Vector3((minX+maxX)/2,Math.min(maxH,2500)/2,(minZ+maxZ)/2);
   const span=Math.max(maxX-minX,maxZ-minZ,maxH,2000);
+  // ортографическая (истинно изометрическая) камера, а не перспективная — у перспективы даже при
+  // точном lookAt(target) в центр кадра целятся лучи, а не объём: несимметричная относительно
+  // target геометрия (типичный случай — комната из 2-3 стен, а не замкнутый прямоугольник)
+  // проецируется несимметрично из-за перспективных искажений по глубине, и снимок «съезжает»
+  // в сторону той части макета, что ближе к камере. У параллельной проекции такого смещения
+  // нет в принципе — величина искажения по глубине отсутствует, симметричный относительно
+  // target объём остаётся симметричным и на экране, вне зависимости от формы комнаты
+  const aspect=w/h, viewH=span*1.7, viewW=viewH*aspect;
+  const camera=new THREE.OrthographicCamera(-viewW/2,viewW/2,viewH/2,-viewH/2,10,100000);
   const radius=span*2.1;
   const theta=Math.PI*0.25, phi=Math.PI*0.34; // классический изометрический ракурс сверху-сбоку
   camera.position.set(target.x+radius*Math.sin(phi)*Math.cos(theta),target.y+radius*Math.cos(phi),
@@ -3930,7 +3953,33 @@ function renderScene3DSnapshot(scene,minX,maxX,minZ,maxZ,maxH){
   const prevBg=scene.background;
   scene.background=null;
   renderer.render(scene,camera);
-  const url=renderer.domElement.toDataURL('image/png');
+  // «target по центру объёма X/Z» НЕ значит «объект по центру КАДРА» для наклонной (изометрической)
+  // проекции: комната обычно НЕ замкнутый симметричный прямоугольник (2-3 стены, разной длины,
+  // проём только на одной), и проекция такой формы на диагональную ось камеры может лежать
+  // заметно правее/левее центра, хотя её мировой X/Z-габарит формально центрирован. Вместо того
+  // чтобы аналитически считать проекцию (пришлось бы учитывать вообще все точки сцены — дугу,
+  // плоские зоны, откосы), проще и надёжнее один раз измерить, где реально оказалась картинка
+  // (бокс непрозрачных пикселей), и просто сдвинуть готовый кадр на разницу — это верно для
+  // любой формы комнаты, а не только для тех случаев, что подсмотрены в тестах.
+  const w2=document.createElement('canvas'); w2.width=w; w2.height=h;
+  const wctx=w2.getContext('2d');
+  wctx.drawImage(renderer.domElement,0,0);
+  const px=wctx.getImageData(0,0,w,h).data;
+  let minPX=w,maxPX=-1,minPY=h,maxPY=-1;
+  for(let y=0;y<h;y++){
+    for(let x=0;x<w;x++){
+      if(px[(y*w+x)*4+3]>10){ if(x<minPX)minPX=x; if(x>maxPX)maxPX=x; if(y<minPY)minPY=y; if(y>maxPY)maxPY=y; }
+    }
+  }
+  let url;
+  if(maxPX>=minPX){
+    const shiftX=w/2-(minPX+maxPX)/2, shiftY=h/2-(minPY+maxPY)/2;
+    const out=document.createElement('canvas'); out.width=w; out.height=h;
+    out.getContext('2d').drawImage(w2,shiftX,shiftY);
+    url=out.toDataURL('image/png');
+  } else {
+    url=renderer.domElement.toDataURL('image/png');
+  }
   scene.background=prevBg;
   box.innerHTML=`<img src="${url}" alt="Изометрия 3D-макета" style="display:block;width:100%;height:auto">`;
 }
