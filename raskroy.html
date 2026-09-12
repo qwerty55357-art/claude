@@ -3294,7 +3294,7 @@ function cornerSchemeSvg(c,a,b,R){
   if(!arc) return {meta,errMsg:'Деталь угла ещё не рассчитана.'};
   const total=arc.w, H=arc.len, arcW=arc.arcW, flatA=arc.flatA||0, flatB=arc.flatB||0;
   const fs=Math.max(total,H)/48;
-  const padL=fs*5.2, padR=fs*2.4, padT=fs*3.2, padB=fs*7.0;
+  const padL=fs*5.2, padR=fs*2.4, padT=fs*3.2, padB=fs*8.2;
   let g=`<rect x="0" y="0" width="${total}" height="${H}" fill="var(--straw-face)" fill-opacity=".92" stroke="var(--straw-deep)" stroke-width="${fs*0.07}"/>`;
   // зона изгиба — лёгкая заливка поверх, отличает её от плоских продолжений по краям
   g+=`<rect x="${flatA}" y="0" width="${arcW}" height="${H}" fill="var(--warn)" fill-opacity=".16"/>`;
@@ -3304,11 +3304,14 @@ function cornerSchemeSvg(c,a,b,R){
     if(bx<0.5||bx>total-0.5) return;   // на самом краю детали (flat=0 с этой стороны) — рисовать нечего
     g+=`<line x1="${bx}" y1="0" x2="${bx}" y2="${H}" stroke="var(--err)" stroke-width="${fs*0.09}" stroke-dasharray="${fs*0.32} ${fs*0.22}"/>`;
   });
-  // размеры снизу: разбивка по зонам -> общая ширина
-  const rowA=H+fs*2.0, rowB=H+fs*4.6;
-  if(flatA>0.5) g+=dimH(0,flatA,rowA,fs,'var(--muted)',false,'плоская '+fmt(flatA));
-  g+=dimH(flatA,flatA+arcW,rowA,fs,'var(--err)',false,'дуга '+fmt(arcW));
-  if(flatB>0.5) g+=dimH(flatA+arcW,total,rowA,fs,'var(--muted)',false,'плоская '+fmt(flatB));
+  // размеры снизу: разбивка по зонам -> общая ширина. Зона изгиба — на своей строке (rowArc),
+  // плоские зоны — на СВОЕЙ (rowFlat), а не той же: при узкой плоской зоне (100-150 мм) подпись
+  // "плоская NNN" шире собственного отрезка и наезжала бы на соседнюю подпись "дуга NNN" в одну
+  // строку — сдвиг по вертикали разводит их независимо от того, насколько узка зона
+  const rowArc=H+fs*2.0, rowFlat=H+fs*3.5, rowB=H+fs*5.9;
+  if(flatA>0.5) g+=dimH(0,flatA,rowFlat,fs,'var(--muted)',false,'плоская '+fmt(flatA));
+  g+=dimH(flatA,flatA+arcW,rowArc,fs,'var(--err)',false,'дуга '+fmt(arcW));
+  if(flatB>0.5) g+=dimH(flatA+arcW,total,rowFlat,fs,'var(--muted)',false,'плоская '+fmt(flatB));
   g+=dimH(0,total,rowB,fs,'var(--paper)',true);
   // высота слева — габарит, совпадает с высотой смежных стен
   g+=dimV(0,H,-fs*3.4,fs,'var(--paper)',true);
