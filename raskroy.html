@@ -134,6 +134,11 @@ tbody tr:hover td{background:var(--surface)}
    (клик по значку в компасе), но печать/PDF не должна зависеть от того, что было выбрано на
    экране в момент печати — документ обязан быть полным */
 .corner-print-block{display:none}
+/* печатная замена живого 3D-канваса — статичный PNG-снимок с собственным (изометрическим) ракурсом
+   камеры, отрисованный отдельно от интерактивного вида (см. renderScene3DSnapshot): WebGL-канвас
+   не переживает печать, а слепок «как на экране» зависел бы от того, куда пользователь довернул
+   мышью интерактивную камеру */
+.scene3d-print-block{display:none}
 @media print{
   .wall-scheme{display:block !important;break-inside:avoid;page-break-inside:avoid}
   .wall-scheme-h{display:block !important}
@@ -141,12 +146,17 @@ tbody tr:hover td{background:var(--surface)}
   #led-draw-block{display:none !important}
   .led-print-list{display:block}
   .corner-print-block{display:block;break-inside:avoid;page-break-inside:avoid}
-  /* 3D — WebGL-канвас не переживает печать (пустой/битый кадр вместо содержимого), см. проверку
-     «углы в PDF/печати»: скриншот показал чёрный прямоугольник вместо макета комнаты */
   #scene3d-block{display:none !important}
+  .scene3d-print-block{display:block;break-inside:avoid;page-break-inside:avoid}
   *{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important }
   .svg-wrap{overflow:visible}
   svg{max-height:none !important}
+  /* развёртка радиусного угла обычно ВЫШЕ, чем шире (арка+плоские зоны << высоты стены) — без
+     отдельного предела по высоте общий свг{max-height:none} выше даёт огромную (на много страниц)
+     печатную страницу вместо одной аккуратной схемы, см. проверку «углы в PDF/печати» повторно.
+     Явные width/height детали угла (см. cornerSchemeSvg) уже дают ей собственный intrinsic-размер,
+     так что этот предел здесь просто заменяет экранный 60vh на печатный физический эквивалент */
+  .corner-print-block svg{max-height:23cm !important}
   .legend{break-inside:avoid}
   table{break-inside:auto} tr{break-inside:avoid}
   :root{--bg:#fff;--surface:#fff;--surface-2:#fff;--line:#c9c4bb;--line-2:#8d887f;--paper:#111;--muted:#5c574f;--void:#fff;
@@ -372,6 +382,10 @@ tbody tr:hover td{background:var(--surface)}
       «Глубина откоса»), с цветом стороны, если для неё назначен свой материал. На раскрой и смету
       никак не влияет — только вид. Перетаскивание — вращение камеры, колесо мыши — масштаб.</p>
     <div id="scene3d" style="width:100%;height:520px;border-radius:var(--r);overflow:hidden"></div>
+  </div>
+  <div class="block scene3d-print-block" id="scene3d-print-block">
+    <div class="wall-scheme-h">3D — изометрия макета</div>
+    <div id="scene3d-print"></div>
   </div>
   <div class="block">
     <div class="stage-h"><h2>Карта раскроя</h2><span class="meta" id="cut-meta"></span><span class="rule"></span></div>
@@ -3299,7 +3313,13 @@ function cornerSchemeSvg(c,a,b,R){
   // высота слева — габарит, совпадает с высотой смежных стен
   g+=dimV(0,H,-fs*3.4,fs,'var(--paper)',true);
   const vb=`${-padL} ${-padT} ${total+padL+padR} ${H+padT+padB}`;
-  return {meta,svg:`<svg viewBox="${vb}" style="width:100%;max-height:60vh" role="img" aria-label="Развёртка радиусного угла">${g}</svg>`};
+  // явные width/height (не только viewBox) — иначе у CSS нет собственного размера детали угла,
+  // только соотношение сторон, и "width:100%" в узком контейнере растягивало бы её по ширине
+  // безоглядно на высоту; деталь угла почти всегда УЖЕ, чем высота стены (портретная пропорция),
+  // так что при печати (где свг{max-height:none}, см. @media print) это раздувало бы схему на
+  // много страниц вместо одной — с явным intrinsic-размером браузер вписывает её и по ширине, и
+  // по высоте одновременно (как img{max-width;max-height;width:auto;height:auto})
+  return {meta,svg:`<svg viewBox="${vb}" width="${total+padL+padR}" height="${H+padT+padB}" style="width:auto;height:auto;max-width:100%;max-height:60vh" role="img" aria-label="Развёртка радиусного угла">${g}</svg>`};
 }
 function renderCornerScheme(){
   const block=$('#corner-scheme-block'); if(!block) return;
@@ -3769,15 +3789,17 @@ function renderScene3D(G,R){
         const rm=new THREE.MeshStandardMaterial({color:new THREE.Color(colorHex),side:THREE.DoubleSide,roughness:0.88});
         mesh.add(new THREE.Mesh(geo,rm));
       });
-      // дальняя заглушка на глубине проёма — того же тёмного тона, что и вырез в текстуре стены,
-      // иначе сквозь проём было бы видно «в никуда» (фон сцены), а не законченный объём
+      // дальняя заглушка на глубине проёма — фиксированный тёмно-серый тон (НЕ --bg темы: тот в
+      // печатном изометрическом снимке прозрачный/белый, а не тёмный, и заглушка на белом листе
+      // читалась бы отдельным чёрным треугольником, а не «тенью в проёме»), иначе сквозь проём
+      // было бы видно «в никуда» (фон сцены), а не законченный объём
       const capGeo=new THREE.BufferGeometry();
       capGeo.setAttribute('position',new THREE.Float32BufferAttribute(
         [o.x,o.y,-dep, o.x+o.w,o.y,-dep, o.x,o.y+o.h,-dep, o.x+o.w,o.y+o.h,-dep],3));
       capGeo.setAttribute('uv',new THREE.Float32BufferAttribute([0,0, 1,0, 0,1, 1,1],2));
       capGeo.setIndex([0,1,2, 2,1,3]);
       capGeo.computeVertexNormals();
-      const capMat=new THREE.MeshStandardMaterial({color:new THREE.Color(cssVar3d('--bg')||'#0a0a0a'),side:THREE.DoubleSide,roughness:0.95});
+      const capMat=new THREE.MeshStandardMaterial({color:new THREE.Color('#2a2a2a'),side:THREE.DoubleSide,roughness:0.95});
       mesh.add(new THREE.Mesh(capGeo,capMat));
     });
     [0,w.W].forEach(lx=>{
@@ -3870,8 +3892,44 @@ function renderScene3D(G,R){
     const span=Math.max(maxX-minX,maxZ-minZ,maxH,2000);
     st.radius=Math.max(st.radius,span*1.4);
     st.updateCam();
+    renderScene3DSnapshot(st.scene,minX,maxX,minZ,maxZ,maxH);
+  } else {
+    const box=$('#scene3d-print'); if(box) box.innerHTML='';
   }
   $('#scene3d-meta').textContent=`стен: ${walls.length}`;
+}
+// печатный слепок 3D — отдельная разовая отрисовка (не сам живой канвас, см. @media print у
+// #scene3d-block): собственная камера с фиксированным изометрическим ракурсом (НЕ те theta/phi,
+// что мышью крутит пользователь на экране — печать не должна зависеть от того, куда он довернул
+// вид), и прозрачный фон вместо тёмного экранного (--void), чтобы не заливать печатную страницу
+// чёрным прямоугольником вокруг макета
+// свой WebGL-контекст, отдельный от интерактивного (ensureScene3D) — переиспользуется между
+// вызовами run(), а не создаётся/уничтожается заново на каждый чих (тот дёшево пересоздать нельзя,
+// у браузеров жёсткий лимит одновременных WebGL-контекстов на страницу)
+let scene3dSnapshotRenderer=null;
+function renderScene3DSnapshot(scene,minX,maxX,minZ,maxZ,maxH){
+  const box=$('#scene3d-print'); if(!box||typeof THREE==='undefined') return;
+  const w=1200,h=800;
+  if(!scene3dSnapshotRenderer){
+    scene3dSnapshotRenderer=new THREE.WebGLRenderer({antialias:true,alpha:true,preserveDrawingBuffer:true});
+    scene3dSnapshotRenderer.setSize(w,h);
+    scene3dSnapshotRenderer.setClearColor(0x000000,0);
+  }
+  const renderer=scene3dSnapshotRenderer;
+  const camera=new THREE.PerspectiveCamera(40,w/h,10,100000);
+  const target=new THREE.Vector3((minX+maxX)/2,Math.min(maxH,2500)/2,(minZ+maxZ)/2);
+  const span=Math.max(maxX-minX,maxZ-minZ,maxH,2000);
+  const radius=span*2.1;
+  const theta=Math.PI*0.25, phi=Math.PI*0.34; // классический изометрический ракурс сверху-сбоку
+  camera.position.set(target.x+radius*Math.sin(phi)*Math.cos(theta),target.y+radius*Math.cos(phi),
+    target.z+radius*Math.sin(phi)*Math.sin(theta));
+  camera.lookAt(target);
+  const prevBg=scene.background;
+  scene.background=null;
+  renderer.render(scene,camera);
+  const url=renderer.domElement.toDataURL('image/png');
+  scene.background=prevBg;
+  box.innerHTML=`<img src="${url}" alt="Изометрия 3D-макета" style="display:block;width:100%;height:auto">`;
 }
 
 /* ===================== ТАБЛИЦЫ ===================== */
