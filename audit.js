@@ -346,6 +346,11 @@ for(let t=0;t<N;t++){
     chk('L140t',!!arcFlat,`${id}: радиус с плоскими зонами — деталь угла не попала в раскрой`);
     if(arcFlat) chk('L140u',Math.abs(arcFlat.w-(arcW+flatA+flatB))<0.5,
       `${id}: радиус с плоскими зонами — ширина детали угла ${arcFlat.w} != arcW+flatA+flatB=${arcW+flatA+flatB}`);
+    // успешный радиусный угол с плоскими зонами всё ещё заменяет собой обычный угловой профиль
+    // целиком (cout/cin), а не добавляется к нему — та же гарантия, что и L140g, но теперь с
+    // плоскими зонами, которые трогают именно cornerCuts/arcWTotal, а не сам этот блок кода
+    const coutFlat=(Rflat.prof.find(p=>p.key==='cout')||{total:0}).total;
+    chk('L140z1',coutFlat<0.5,`${id}: радиус с плоскими зонами — успешный угол всё равно начислил обычный профиль cout=${coutFlat}`);
     const w1flat=stripsW(Rflat.layouts[0]), w2flat=stripsW(Rflat.layouts[1]);
     chk('L140v',Math.abs((w1sharp-w1flat)-(t+flatA))<0.5,
       `${id}: радиус с плоскими зонами — ширина панелей стены 1 урезана не на t+flatA (${w1sharp}->${w1flat}, t+flatA=${t+flatA})`);
@@ -365,6 +370,12 @@ for(let t=0;t<N;t++){
     const arcFlatWide=RflatWide.sheets.flatMap(sh=>sh.list).find(p=>p.isCorner);
     chk('L140y',!arcFlatWide&&(RflatWide.cornerIssues||[]).length===1,
       `${id}: радиус — слишком широкие плоские зоны (сумма > листа) должны провалиться, а не пройти`);
+    // провалившийся из-за плоских зон угол откатывается на обычный прямой стык — тот же принцип,
+    // что и при провале по одной дуге (L140m) или по разной высоте (L140j): стоимость стыка не
+    // должна молча теряться только потому, что деталь угла в итоге не сложилась
+    const coutFlatWide=(RflatWide.prof.find(p=>p.key==='cout')||{total:0}).total;
+    chk('L140z2',coutFlatWide>0.5,
+      `${id}: радиус — провал по плоским зонам должен откатиться на обычный угловой профиль (cout=0)`);
 
     // fallback: разная высота стен
     const wR2b=Object.assign({},wR2,{H:2000});
