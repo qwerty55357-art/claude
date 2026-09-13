@@ -3802,7 +3802,7 @@ function computeWallPlacements3D(walls,cornerLinks){
 // реальный цвет ТЕКУЩЕГО материала проекта (см. вызов ниже) — раньше тут был жёстко зашит цвет
 // акцента интерфейса (--straw), который лишь случайно совпадает с бамбуком (материал по
 // умолчанию), а для любого другого материала (мрамор, рейка, скала) 3D-стена красилась неверно.
-function wallCanvasTexture3D(wv,L,baseColorHex){
+function wallCanvasTexture3D(wv,L,baseColorHex,cuts){
   const effWidth=Math.max(wv.W,1), H=Math.max(wv.H,1);
   const scale=Math.min(1024/effWidth,1024/H,1.5);
   const cw=Math.max(2,Math.round(effWidth*scale)), ch=Math.max(2,Math.round(H*scale));
@@ -3838,6 +3838,20 @@ function wallCanvasTexture3D(wv,L,baseColorHex){
     const prev=L.strips[k-1], cur=L.strips[k];
     if(cur.region!==prev.region) continue;
     const x=cur.start*scale;
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,ch); ctx.stroke();
+  }
+  // край стены, урезанный под радиусный угол (cuts.left/right, см. cornerCuts в computeProject) —
+  // на этой стороне у стены ЕСТЬ настоящая соседняя деталь (гнутая деталь угла), просто она не
+  // часть раскладки ЭТОЙ стены (L.strips её не знает) — тот же физический стык, что и между
+  // обычными полосами материала, просто на самом краю текстуры, а не между строками. Половина
+  // толщины линии от края канвы иначе обрезалась бы — отступаем на lineWidth/2, чтобы стык был
+  // виден целиком, а не тонкой недорисованной полоской.
+  if(cuts&&cuts.left>0){
+    const x=ctx.lineWidth/2;
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,ch); ctx.stroke();
+  }
+  if(cuts&&cuts.right>0){
+    const x=cw-ctx.lineWidth/2;
     ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,ch); ctx.stroke();
   }
   // проём — НАСТОЯЩАЯ дыра в текстуре (альфа=0), а не закрашенный тёмный прямоугольник: если
@@ -3935,7 +3949,7 @@ function renderScene3D(G,R){
     const cuts=cornerCuts.get(w.id);
     const wv=wallCutView(w,cuts);
     const L=R.layouts[wi];
-    const tex=wallCanvasTexture3D(wv,L,defaultColorHex);
+    const tex=wallCanvasTexture3D(wv,L,defaultColorHex,cuts);
     // transparent — обязателен: без него альфа=0 у выреза проёма (см. wallCanvasTexture3D) не
     // даёт настоящей прозрачности, Three.js всё равно рисует пиксель непрозрачным
     const mat=new THREE.MeshStandardMaterial({map:tex,side:THREE.DoubleSide,roughness:0.9,metalness:0.05,transparent:true});
