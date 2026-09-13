@@ -129,11 +129,13 @@ tbody tr:hover td{background:var(--surface)}
 /* список LED-отрезков стены — печатная замена раздела «LED» (см. renderScheme): на экране скрыт,
    там и так есть интерактивный раздел «LED — рисование отрезков» с тем же списком */
 .led-print-list{display:none}
-/* развёртки ВСЕХ радиусных углов — печатная замена интерактивного «Развёртка радиусного угла»
-   (см. renderScheme/cornerSchemeSvg): на экране показывается только последний выбранный угол
-   (клик по значку в компасе), но печать/PDF не должна зависеть от того, что было выбрано на
-   экране в момент печати — документ обязан быть полным */
-.corner-print-block{display:none}
+/* один элемент списка «Развёртки радиусных углов» (см. renderCornerScheme) — тот же вид рамки/
+   отступов, что у .svg-wrap, но своя карточка на КАЖДЫЙ угол (список общий и на экране, и в печати,
+   без разбивки по отдельным разделам/страницам — см. cornerSchemeSvg: сама SVG вписывается в
+   max-height:76vh точно так же, как у обычной стены) */
+.corner-scheme-item{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:16px;margin-bottom:16px;overflow:auto}
+.corner-scheme-item:last-child{margin-bottom:0}
+.corner-scheme-item-h{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
 /* печатная замена живого 3D-канваса — статичный PNG-снимок с собственным (изометрическим) ракурсом
    камеры, отрисованный отдельно от интерактивного вида (см. renderScene3DSnapshot): WebGL-канвас
    не переживает печать, а слепок «как на экране» зависел бы от того, куда пользователь довернул
@@ -145,18 +147,16 @@ tbody tr:hover td{background:var(--surface)}
   [data-resize],[data-cmrot]{display:none !important}
   #led-draw-block{display:none !important}
   .led-print-list{display:block}
-  /* своя страница на каждый угол — так же, как у каждой стены (см. .wall-scheme): та просто
-     оказывается достаточно высокой при width:100%, чтобы не делить страницу со следующей; деталь
-     угла обычно УЖЕ стены, поэтому явно форсируем разрыв перед ней, а не полагаемся на случайное
-     совпадение высоты. container-type — чтобы cqw в высоте самой SVG (см. cornerSchemeSvg) считался
-     от реальной ширины ЭТОГО блока (= ширина листа минус поля, та же, что и у стены), а не от vh */
-  .corner-print-block{display:block;break-inside:avoid;page-break-inside:avoid;
-    break-before:page;page-break-before:always;container-type:inline-size}
-  /* интерактивный блок «Развёртка радиусного угла» под компасом виден на экране всегда, когда
-     выбран угол (block.hidden никак не привязан к печати) — печатная копия для КАЖДОГО угла и так
-     есть отдельно (.corner-print-block выше); без скрытия этот блок печатался бы ещё и сам, тем же
-     чертежом, но без печатного предела высоты — снова раздувался бы на много пустых страниц */
-  #corner-scheme-block{display:none !important}
+  /* карточки углов не должны рваться по середине, но, в отличие от прежней версии, НЕ каждая на
+     своей странице — пользователь явно попросил не разносить углы по отдельным разделам/страницам,
+     несколько компактных углов вполне могут ужиться на одном листе. Деталь угла — узкая и высокая
+     (портретные пропорции, в отличие от широкой альбомной стены), поэтому общее правило ниже
+     (svg{max-height:none!important}), рассчитанное на стену (та при width:100% и без предела высоты
+     сама укладывается в лист), для угла не годится — при том же width:100% высота ушла бы далеко за
+     пределы листа. Возвращаем предел высоты именно для угла, чтобы каждая карточка гарантированно
+     помещалась на лист (см. break-inside:avoid выше) */
+  .corner-scheme-item{break-inside:avoid;page-break-inside:avoid;overflow:visible}
+  .corner-scheme-item svg{max-height:20cm !important;width:auto !important}
   #scene3d-block{display:none !important}
   .scene3d-print-block{display:block;break-inside:avoid;page-break-inside:avoid}
   *{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important }
@@ -340,12 +340,12 @@ tbody tr:hover td{background:var(--surface)}
     </div>
   </div>
   <div class="block" id="corner-scheme-block" hidden>
-    <div class="stage-h"><h2>Развёртка радиусного угла</h2><span class="meta" id="corner-scheme-meta"></span><span class="rule"></span></div>
+    <div class="stage-h"><h2>Развёртки радиусных углов</h2><span class="meta" id="corner-scheme-meta"></span><span class="rule"></span></div>
     <p class="hint" style="margin:0 0 8px">Деталь угла — плоский прямоугольник: посередине зона изгиба
       (несдвигаемая, красный пунктир — её граница), по краям — плоские зоны, которые можно расширять
       (правятся в том же меню, что радиус/угол). Плоская зона отдаёт себе ширину соответствующей
       соседней стены.</p>
-    <div class="svg-wrap" id="corner-scheme"></div>
+    <div id="corner-scheme"></div>
   </div>
   <div class="block" id="led-draw-block">
     <div class="stage-h"><h2>LED — рисование отрезков</h2><span class="meta" id="led-draw-meta"></span><span class="rule"></span></div>
@@ -510,9 +510,6 @@ let LAST=null;        // последний расчёт — нужен drag'у 
 // какой профиль/раскрой не влияет, только позиционирование в 3D. kind отсутствует у старых
 // сохранённых проектов — читается как 'sharp' (см. миграцию при загрузке файла).
 let cornerLinks=[], cornerSeq=0;
-// id связи-угла, чья развёртка сейчас показана в отдельном блоке под компасом (см.
-// renderCornerScheme) — UI-состояние, не сохраняется в проект и не входит в расчёт
-let selectedCorner=null;
 // тип углов — ОДИН на весь проект (у комнаты не бывает вперемешку внешних и внутренних углов):
 // 'out' — отделка снаружи короба (углы выпуклые наружу), 'in' — отделка изнутри (как в обычной
 // комнате, углы вогнутые). Переключается общим тумблером в компасе, применяется сразу ко всем
@@ -1381,7 +1378,6 @@ function compassEdit(ev,cornerId){
   const kind=c.kind||'sharp';
   const del=menu=>{ menuDivider(menu,''); menuBtn(menu,'Удалить связь',false,()=>{
     cornerLinks=cornerLinks.filter(x=>x.id!==cornerId);
-    if(selectedCorner===cornerId) selectedCorner=null;
     closeMatMenu(); renderWallCompass(); renderCornerScheme(); run();
   },true); };
   const menu=menuShell(ev,(c.bw===''||c.bw==null)?'Радиус без стены':'Угол');
@@ -1409,7 +1405,7 @@ $('#wall-compass').addEventListener('click',e=>{
   const addKind=e.target.dataset.cpadd;
   if(addKind){ compassAdd(addKind); return; }
   const editId=e.target.dataset.cpedit;
-  if(editId){ selectedCorner=+editId; renderCornerScheme(); compassEdit(e,+editId); return; }
+  if(editId){ compassEdit(e,+editId); return; }
   const jumpId=e.target.dataset.cpjump;
   if(jumpId){
     const idx=walls.findIndex(w=>w.id===+jumpId); if(idx<0) return;
@@ -3285,11 +3281,9 @@ function schemeFor(G,R,wi){
 // логика чертежа, что и schemeFor у обычной стены (dimH/dimV/txt), только вместо полос материала
 // тут одна цельная деталь: несдвигаемая зона изгиба посередине (arcW, красный пунктир — её
 // граница) и настраиваемые плоские зоны по краям (flatA/flatB, см. compassEdit)
-// строит развёртку ОДНОГО радиусного угла (SVG + подпись) — общая логика для интерактивного
-// блока под компасом (см. renderCornerScheme, показывает только выбранный угол) и печатной
-// копии (см. renderScheme, .corner-print-block: печать не должна зависеть от того, что было
-// выбрано на экране, и обязана показать ВСЕ радиусные углы разом). Возвращает {meta,svg} либо
-// {meta,errMsg}, если угол не прошёл геометрическую проверку (см. cornerIssues).
+// строит развёртку ОДНОГО радиусного угла (SVG + подпись) — вызывается для каждого угла из общего
+// списка в renderCornerScheme (один раздел «Развёртки радиусных углов» и на экране, и в печати).
+// Возвращает {meta,svg} либо {meta,errMsg}, если угол не прошёл геометрическую проверку (см. cornerIssues).
 function cornerSchemeSvg(c,a,b,R){
   const aTag='С'+(walls.indexOf(a)+1);
   const meta=b?`Угол R${fmt(+c.radius)} (${aTag}-С${walls.indexOf(b)+1})`:`Угол R${fmt(+c.radius)} (${aTag}·${c.as==='right'?'справа':'слева'})`;
@@ -3321,37 +3315,37 @@ function cornerSchemeSvg(c,a,b,R){
   // высота слева — габарит, совпадает с высотой смежных стен
   g+=dimV(0,H,-fs*3.4,fs,'var(--paper)',true);
   const vb=`${-padL} ${-padT} ${total+padL+padR} ${H+padT+padB}`;
-  // тот же fs (Math.max(своя_ширина,H)/48), тот же шрифт/толщина линий, что и у схемы обычной
-  // стены (schemeFor) — но вписываем по ВЫСОТЕ, а не по ширине: деталь угла всегда УЖЕ высоты
-  // стены (портрет, не альбом), а высота — это ровно то, что у неё ОБЩЕЕ со стеной (та же H).
-  // Раньше здесь стоял height:76vh — привязка к высоте ЭКРАНА, а не к ширине контейнера схемы,
-  // из-за чего фактический масштаб (мм детали на пиксель/см) не совпадал со стеной ни на экране,
-  // ни тем более в печати (там взят произвольный см вместо реального пересчёта) — отсюда и жалоба
-  // «шрифты мельче»/«развёртка угла огромная». Величина 103.125cqw — не круглое число, а точный
-  // коэффициент: у стены (schemeFor) отступы дают ширину вьюбокса W*1.2, у детали угла — высоту
-  // вьюбокса H*1.2375; при общем шрифте fs=размер/48 эффективный масштаб (шрифт в пикселях) у
-  // стены равен containerW/57.6, у детали угла — targetHeight/59.4. Приравняв, получаем именно
-  // 59.4/57.6=1.03125 — единственное значение, при котором подписи детали угла и подписи стены
-  // выходят РОВНО одного размера в пикселях, а не «примерно похожего». cqw — процент от ширины
-  // ближайшего предка с container-type:inline-size (.svg-wrap/.corner-print-block, см. CSS) —
-  // той же самой ширины, в которую по width:100% вписывается сама стена что на экране, что в PDF,
-  // так что формула остаётся точной в обоих контекстах без отдельного печатного коэффициента.
-  return {meta,svg:`<svg viewBox="${vb}" style="height:103.125cqw;width:auto;max-width:100%" role="img" aria-label="Развёртка радиусного угла">${g}</svg>`};
+  // тот же приём, что у схемы стены (schemeFor: width:100%;max-height:76vh) — раньше тут стоял
+  // точный cqw-подбор под совпадение шрифта в пикселях (height:103.125cqw), но для узкой/высокой
+  // детали угла (портретные пропорции) это раздувало итоговую высоту блока далеко за пределы
+  // экрана («не вмещается»). Общий max-height даёт то же гарантированное «влезает на экран», что
+  // и у стены, ценой того, что масштаб (мм на пиксель) у детали угла может немного отличаться —
+  // это то, о чём просили: те же пропорции/шрифты/поведение, что у раздела со стеной, а не
+  // побитовое совпадение размера шрифта.
+  return {meta,svg:`<svg viewBox="${vb}" style="width:100%;max-height:76vh" role="img" aria-label="Развёртка радиусного угла — ${esc(meta)}">${g}</svg>`};
 }
+// показывает СРАЗУ ВСЕ радиусные углы проекта одним списком в одном разделе (а не по одному
+// выбранному на экране + отдельная печатная копия на каждый угол своей страницей, как было раньше)
+// — пользователь явно попросил не разносить углы по отдельным разделам/страницам. Общий для экрана
+// и печати источник разметки: раньше .corner-print-block строился отдельно внутри renderScheme,
+// теперь единственный список — прямо здесь.
 function renderCornerScheme(){
   const block=$('#corner-scheme-block'); if(!block) return;
-  const c=selectedCorner!=null?cornerLinks.find(x=>x.id===selectedCorner):null;
-  if(!c||(c.kind||'sharp')!=='radius'){ block.hidden=true; return; }
-  const a=walls.find(w=>w.id===+c.aw);
-  if(!a){ block.hidden=true; return; }
-  const b=(c.bw!==''&&c.bw!=null)?walls.find(w=>w.id===+c.bw):null;
+  const list=cornerLinks.filter(c=>(c.kind||'sharp')==='radius');
+  if(!list.length){ block.hidden=true; return; }
   block.hidden=false;
   const R=LAST&&LAST.R;
   const box=$('#corner-scheme');
   if(!R){ $('#corner-scheme-meta').textContent=''; box.innerHTML=''; return; }
-  const res=cornerSchemeSvg(c,a,b,R);
-  $('#corner-scheme-meta').textContent=res.meta;
-  box.innerHTML=res.errMsg?`<p class="hint" style="color:var(--err)">${esc(res.errMsg)}</p>`:res.svg;
+  const items=list.map(c=>{
+    const a=walls.find(w=>w.id===+c.aw); if(!a) return '';
+    const b=(c.bw!==''&&c.bw!=null)?walls.find(w=>w.id===+c.bw):null;
+    const res=cornerSchemeSvg(c,a,b,R);
+    const body=res.errMsg?`<p class="hint" style="color:var(--err)">${esc(res.errMsg)}</p>`:res.svg;
+    return `<div class="corner-scheme-item"><div class="corner-scheme-item-h">${esc(res.meta)}</div>${body}</div>`;
+  }).join('');
+  $('#corner-scheme-meta').textContent=`углов: ${list.length}`;
+  box.innerHTML=items;
 }
 function renderScheme(G,R){
   const parts=walls.map((w,wi)=>({w,wi,sc:schemeFor(G,R,wi)}));
@@ -3363,18 +3357,9 @@ function renderScheme(G,R){
     return `<div class="wall-scheme${wi===active?' on':''}" data-wallscheme="${wi}">`+
       `<div class="wall-scheme-h">${esc(w.name)}</div>${sc.svg}${ledBlock}</div>`;
   }).join('');
-  // развёртки ВСЕХ радиусных углов — на экране интерактивный блок под компасом показывает
-  // только последний выбранный (см. renderCornerScheme), но печать/PDF не должна зависеть от
-  // того, что было выбрано на экране в момент печати (см. .corner-print-block)
-  const cornersHtml=cornerLinks.filter(c=>(c.kind||'sharp')==='radius').map(c=>{
-    const a=walls.find(w=>w.id===+c.aw); if(!a) return '';
-    const b=(c.bw!==''&&c.bw!=null)?walls.find(w=>w.id===+c.bw):null;
-    const res=cornerSchemeSvg(c,a,b,R);
-    const body=res.errMsg?`<p class="hint" style="color:var(--err)">${esc(res.errMsg)}</p>`:res.svg;
-    return `<div class="corner-print-block"><div class="wall-scheme-h">Развёртка — ${esc(res.meta)}</div>${body}</div>`;
-  }).join('');
-  $('#scheme').innerHTML=wallsHtml+cornersHtml;
+  $('#scheme').innerHTML=wallsHtml;
   $('#scheme-meta').textContent=parts[active].sc.meta;
+  renderCornerScheme();
 }
 
 /* ===================== КАРТА РАСКРОЯ ===================== */
@@ -4296,7 +4281,6 @@ function run(){
     })})).filter(c=>c.legs.length);
   }
   renderNotes(G,R); renderCards(G,R); renderScheme(G,R); renderCutmap(G,R); renderShelf(R); renderScene3D(G,R);
-  renderCornerScheme();
   renderCuts(G,R); renderSpec(G,R); renderEstimate(G,R); renderJointsV(R); renderLedSummary(R);
   renderLedDraw(G,R);
 }
