@@ -3823,12 +3823,23 @@ function wallCanvasTexture3D(wv,L,baseColorHex){
     ctx.fillStyle=cssVar('--mat-'+p.matOverride)||baseColorHex;
     ctx.fillRect(Math.max(0,x),Math.max(0,y),w,h);
   });
+  // линия стыка между СОСЕДНИМИ полосами материала — только между полосами одного региона
+  // (st.region, см. buildLayout: полный проём на всю высоту делит стену на независимые регионы).
+  // Раньше линия рисовалась у КАЖДОЙ полосы, включая первую в регионе — там она приходится не на
+  // внутренний стык, а на истинный край стены (например, срез под радиусный угол, см. cornerCuts):
+  // на стороне, куда после урезания сдвигается ноль координат (wallCutView: shift), этот «край»
+  // всегда оказывается ровно в x=0 и получал полосу стыка, которой физически нет (соседней детали
+  // с этой стороны в этой же стене просто не существует) — отсюда видимая асимметрия у радиусного
+  // угла: на одном конце стыка стены «стык» рисовался (совпадал с левым краем после урезания),
+  // на другом — нет (правый край стены стыков не подсвечивает вовсе, там их и не было).
   ctx.strokeStyle=cssVar('--void')||'#141414';
   ctx.lineWidth=Math.max(1,scale*3);
-  (L.strips||[]).forEach(st=>{
-    const x=st.start*scale;
+  for(let k=1;k<(L.strips||[]).length;k++){
+    const prev=L.strips[k-1], cur=L.strips[k];
+    if(cur.region!==prev.region) continue;
+    const x=cur.start*scale;
     ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,ch); ctx.stroke();
-  });
+  }
   ctx.fillStyle=cssVar('--bg')||'#0a0a0a';
   (wv.ops||[]).forEach(o=>{
     const x=o.x*scale, y=ch-(o.y+o.h)*scale, w=o.w*scale, h=o.h*scale;
@@ -3966,6 +3977,19 @@ function renderScene3D(G,R){
       capGeo.computeVertexNormals();
       const capMat=new THREE.MeshStandardMaterial({color:new THREE.Color('#2a2a2a'),side:THREE.DoubleSide,roughness:0.95});
       mesh.add(new THREE.Mesh(capGeo,capMat));
+    });
+    // остеклённый проём (kind:'window') — полупрозрачная тонированная плоскость поверх тёмного
+    // выреза в текстуре стены (см. wallCanvasTexture3D: там он просто залит --bg). Без неё окно
+    // визуально неотличимо от «тут ничего нет» — сплошной чёрный провал, а не остекление. Ставим
+    // у переднего края (z чуть больше 0, впереди самой стены) независимо от глубины отkоса — рама
+    // по смыслу там же, где и лицевая поверхность стены, а не в глубине проёма.
+    (wv.ops||[]).forEach(o=>{
+      if(o.kind!=='window') return;
+      const glassGeo=new THREE.PlaneGeometry(Math.max(o.w,1),Math.max(o.h,1));
+      glassGeo.translate(o.x+o.w/2,o.y+o.h/2,1);
+      const glassMat=new THREE.MeshPhysicalMaterial({color:new THREE.Color('#9fc6d6'),
+        transparent:true,opacity:0.25,roughness:0.05,metalness:0,side:THREE.DoubleSide});
+      mesh.add(new THREE.Mesh(glassGeo,glassMat));
     });
     // LED-лента — тонкая светящаяся полоска вдоль контура (см. wallLedGraph/ledCircuitOf, та же
     // логика, что и у 2D-значков в ledCircuitBadgesSvg): рёбра графа стены, реально попавшие в
