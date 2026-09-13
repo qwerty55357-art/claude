@@ -4112,6 +4112,56 @@ function renderScene3D(G,R){
     };
     if(flatA>0.5) addFlatWing(wallEdgeA,tanA);
     if(hasB&&flatB>0.5) addFlatWing(pts[pts.length-1],wallEdgeB);
+    // LED-лента по низу/верху/поперечному стыку детали угла (c.edges/c.jointModes, см.
+    // computeProject) — тот же принцип, что и у ленты на плоской стене выше (тонкая тёплая
+    // полоска чуть впереди поверхности, не физический ledW), но путь идёт вдоль развёрнутой
+    // ширины детали: плоская зона A -> дуга -> плоская зона B, а не по прямой между стенами.
+    // Вынос от поверхности (off) — только против z-fighting (та же роль, что z=2 у ленты на
+    // стене), вдоль локальной нормали в каждой точке: на дуге это просто чуть больший радиус,
+    // на плоских зонах — постоянная нормаль в точке касания (прямой участок её не меняет).
+    {
+      const bot=edgeMode(c.edges&&c.edges.bot), top=edgeMode(c.edges&&c.edges.top);
+      const cPieces=(R.sheets?R.sheets.flatMap(sh=>sh.list):[]).filter(p=>p.isCorner&&p.cornerId===c.id).sort((x,y)=>x.y0-y.y0);
+      const wantY=[];
+      if(bot==='led') wantY.push(0);
+      if(top==='led') wantY.push(H);
+      for(let k=0;k<cPieces.length-1;k++){
+        const pos=Math.round((cPieces[k].y1+cPieces[k+1].y0)/2);
+        const mode=(c.jointModes||{})[jointSegKey('h',pos,0)]||(G.jointH?'cap':'butt');
+        if(mode==='led') wantY.push(pos);
+      }
+      if(wantY.length){
+        const off=3;
+        const outA=[-perp[0],-perp[1]];
+        const path=[];
+        if(flatA>0.5) path.push(
+          [wallEdgeA[0]+outA[0]*off,wallEdgeA[1]+outA[1]*off],
+          [tanA[0]+outA[0]*off,tanA[1]+outA[1]*off]);
+        pts.forEach((pt,i)=>{
+          const a2=a0+d*(i/segs);
+          path.push([center[0]+(radius+off)*Math.cos(a2),center[1]+(radius+off)*Math.sin(a2)]);
+        });
+        if(hasB&&flatB>0.5){
+          const last=pts[pts.length-1];
+          const outB=[(last[0]-center[0])/radius,(last[1]-center[1])/radius];
+          path.push([wallEdgeB[0]+outB[0]*off,wallEdgeB[1]+outB[1]*off]);
+        }
+        const halfWv=30;
+        const ledMat=new THREE.MeshBasicMaterial({color:new THREE.Color('#fff1c2'),side:THREE.DoubleSide});
+        wantY.forEach(y=>{
+          for(let i=0;i<path.length-1;i++){
+            const [ax,az]=path[i], [bx,bz]=path[i+1];
+            if(Math.hypot(bx-ax,bz-az)<1) continue;
+            const geo=new THREE.BufferGeometry();
+            geo.setAttribute('position',new THREE.Float32BufferAttribute(
+              [ax,y-halfWv,az, ax,y+halfWv,az, bx,y-halfWv,bz, bx,y+halfWv,bz],3));
+            geo.setIndex([0,1,2, 2,1,3]);
+            geo.computeVertexNormals();
+            st.group.add(new THREE.Mesh(geo,ledMat));
+          }
+        });
+      }
+    }
   });
   if(minX<=maxX){
     st.target.set((minX+maxX)/2,Math.min(maxH,2500)/2,(minZ+maxZ)/2);
