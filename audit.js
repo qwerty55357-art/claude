@@ -115,13 +115,16 @@ for(let t=0;t<N;t++){
   const nPieces=R.layouts.reduce((a,L)=>a+L.pieces.filter(p=>!p.matOverride).length,0);
   chk('L3',nPieces===R.sheets.reduce((a,sh)=>a+sh.list.length,0),`${id}: потеряны детали`);
   const nOverridePieces=R.layouts.reduce((a,L)=>a+L.pieces.filter(p=>p.matOverride).length,0);
-  // L4: площадь кусков = площадь сегментов + добавка от изгиба-«соседа» (у изгиба-«недорезом»
-  // сама деталь не растёт — растёт только запас внутри выреза, площадь детали не меняется).
+  // L4: площадь кусков = площадь сегментов + добавка от изгиба. У изгиба-«соседа» деталь растёт
+  // всегда (b.extra — вся добавка). У изгиба-«недорезом» деталь растёт, только если готового
+  // запаса внутри выреза не хватило на глубину отгиба — тогда добор идёт за счёт листа (см.
+  // buildLayout: stillOpen.forEach, growExtra) и тоже попадает в b.extra; если запаса хватило
+  // сразу, extra=0 и деталь остаётся номинального размера, как и раньше.
   R.layouts.forEach((L,wi)=>{
     const pa=L.pieces.reduce((a,p)=>a+p.w*p.len,0);
     let ea=0; L.strips.forEach(st=>{ea+=st.w*st.segs.reduce((x,sg)=>x+(sg[1]-sg[0]),0);});
     let widenArea=0;
-    L.pieces.forEach(p=>(p.bend||[]).forEach(b=>{ if(!b.inner) widenArea+=b.extra||0; }));
+    L.pieces.forEach(p=>(p.bend||[]).forEach(b=>{ widenArea+=b.extra||0; }));
     ea+=widenArea*1e6;
     // LED физически шире обычного стыка (LED_GAP=10мм) — деталь теряет insetStart+insetEnd по
     // всей длине полосы. mkWall в основном цикле больше не расставляет 'led' на стыках/швах
@@ -136,6 +139,12 @@ for(let t=0;t<N;t++){
     ea-=ledLoss;
     chk('L4',Math.abs(pa-ea)<1,`${id} стена ${wi}: площадь деталей ${pa} != ${ea}`);
     L.pieces.forEach(p=>chk('L4b',p.len<=G.pl+0.5,`${id} стена ${wi}: кусок ${p.label} len=${p.len} > pl=${G.pl}`));
+    // L4c (нов): p.to-p.from должно совпадать с p.len всегда — оба поля читаются НАПРЯМУЮ (не
+    // как from+len) в schemeFor/wallCanvasTexture3D для координаты Y детали; при добавлении
+    // изгиба-добором (см. buildLayout: bendLenSides/stillOpen) достаточно вырастить len, забыв
+    // синхронно сдвинуть from/to — деталь получит верный размер, но неверную позицию на схеме.
+    L.pieces.forEach(p=>chk('L4c',Math.abs((p.to-p.from)-p.len)<0.5,
+      `${id} стена ${wi}: кусок ${p.label} to-from=${p.to-p.from} != len=${p.len}`));
     // L120 (нов): ручные вертикальные стыки (userVSeams) режут полосу на части, но не теряют и
     // не прибавляют ширину — сумма ширин полос внутри каждого участка (region) равна его ширине.
     {

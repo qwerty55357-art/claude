@@ -1693,6 +1693,13 @@ function buildLayout(S){
     if(!ok){ bendRejected.push({op:bl.op,side:bl.side}); return; }
     targets.forEach(target=>{
       target.len+=bl.depth;
+      // растим деталь именно СВОБОДНЫМ концом — «меньшая» сторона (bottom/left) уже кончается
+      // ровно на границе проёма (target.to нашли по этому совпадению выше), туда расти нельзя,
+      // расти можно только «от себя» (from вниз); у «большей» стороны (top/right) наоборот —
+      // from уже стоит на границе проёма, растим to. Раньше здесь трогали только len, а from/to
+      // оставались как есть — искажало последующую отрисовку (schemeFor использует p.to
+      // напрямую для координаты Y, а не from+len)
+      if(isSmallerSide) target.from-=bl.depth; else target.to+=bl.depth;
       target.bend=(target.bend||[]).concat([{side:bl.side,op:bl.op,depth:bl.depth,extra:m2(target.w,bl.depth)}]);
       bendExtraArea+=m2(target.w,bl.depth);
     });
@@ -1729,35 +1736,105 @@ function buildLayout(S){
   stillOpen.forEach(({op:oi,side})=>{
     const o=S.ops[oi];
     const cross=(side==='left'||side==='right')===crossIsLR;
+    const smaller=side==='left'||side==='bottom';
     const withCut=pieces.filter(p=>p.cuts.some(c=>c.op===oi));
+    // готового запаса «вдоль полосы» (top/bottom при верт. раскладке — см. along/across выше)
+    // в пределах НОМИНАЛЬНОЙ длины детали может не хватать, но за её краем часто остаётся ещё
+    // материал того же листа, который иначе просто ушёл бы в обрезок (см. карту раскроя) —
+    // добираем нехватку, увеличивая p.len, тем же приёмом, что и «через всю ширину полосы» выше
+    // (target.len+=depth): там уже доказанно безопасно расти за счёт листа, а не соседней детали.
+    // Сосед бывает РЕАЛЬНОЙ соседней деталью, только если стена выше листа и делится тут
+    // поперечным стыком — тогда расти нельзя, это чужой материал, а не запас (hasLenNeighbor).
+    // Только «вдоль» (!cross): p.len — единственный из двух размеров детали, который отрисовка
+    // читает НАПРЯМУЮ (см. schemeFor: w/h берутся из p.len и st.w, а не из p.w) — рост «поперёк»
+    // (p.w) на схему не попал бы вовсе, деталь визуально осталась бы прежней ширины при том, что
+    // по факту в раскрое вырезана шире; это разошлось бы со схемой молча, поэтому там — как и
+    // раньше, только готовый запас без добора.
+    const hasLenNeighbor=p=>pieces.some(pp=>pp!==p&&pp.strip===p.strip&&
+      Math.abs(smaller?(pp.to-p.from):(pp.from-p.to))<2);
     const eligible=withCut.filter(p=>{
       const c=p.cuts.find(cc=>cc.op===oi);
       // запаса вокруг выреза должно хватать на глубину отгиба, И у самого выреза в этом
       // направлении должно быть достаточно размера — иначе загиб «съедает» больше, чем
       // есть в вырезе, и он уходит в отрицательные размеры (деталь физически не existует).
       const selfSize=cross?c.aw:c.bh;
-      return marginOf(p,c,side)>=o.depth-0.5 && selfSize>=o.depth-0.5;
+      if(selfSize<o.depth-0.5) return false;
+      const have=marginOf(p,c,side);
+      if(have>=o.depth-0.5) return true;
+      if(cross||hasLenNeighbor(p)) return false;
+      return p.len+(o.depth-have)<=S.pl+0.5;
     });
     // «через полосу» (лево/право при верт. раскладке): сторона касается ровно ОДНОЙ детали —
     // той, что владеет настоящим краем проёма; остальные задетые проёмом детали тут ни при чём.
     // «вдоль полосы» (верх/низ): край тянется через ВСЕ полосы, что проём затрагивает по ширине —
     // запас должен найтись у КАЖДОЙ. Если проём перекрывает какую-то полосу НА ВСЮ её ширину —
-    // там образуется не вырез, а сквозной разрыв (материала нет вообще, откосу неоткуда взяться) —
-    // сплошной загиб через такую полосу физически невозможен, вся сторона отклоняется.
+    // выреза там нет вовсе (см. subRanges выше — это уже не вырез, а разрыв сегмента), но
+    // СОСЕДНЯЯ деталь той же полосы (та, что начинается/кончается ровно на границе проёма — та
+    // же, что нашёл бы основной механизм bendLenSides, просто он отклоняет ВСЮ сторону, если
+    // хоть одна из задетых полос не была урезана на всю ширину) может послужить тем же запасом:
+    // ей просто нужно не подрезание выреза, а прямой добор длины, раз она и так уже начинается
+    // ровно у края проёма. Совсем без такой детали (полоса КОНЧАЕТСЯ до границы проёма — проём
+    // «съел» её целиком без остатка) — вот это уже настоящий, неисправимый разрыв.
     let gapInMiddle=false;
+    const gapTargets=[];   // {piece,flapLen}
     if(!cross){
       const [ac0,acL]=crossIsLR?[o.x,o.w]:[o.y,o.h];
+      const [al0,alL]=crossIsLR?[o.y,o.h]:[o.x,o.w];
       const touchedStrips=strips.filter(st=>Math.min(st.end,ac0+acL)-Math.max(st.start,ac0)>1);
-      gapInMiddle=touchedStrips.some(st=>!pieces.some(p=>p.strip===st.i&&p.cuts.some(c=>c.op===oi)));
+      touchedStrips.forEach(st=>{
+        if(pieces.some(p=>p.strip===st.i&&p.cuts.some(c=>c.op===oi))) return;   // обычный вырез — уже в withCut
+        const target=smaller
+          ? pieces.find(pp=>pp.strip===st.i&&Math.abs(pp.to-al0)<2)
+          : pieces.find(pp=>pp.strip===st.i&&Math.abs(pp.from-(al0+alL))<2);
+        if(!target){ gapInMiddle=true; return; }
+        const flapLen=Math.min(st.end,ac0+acL)-Math.max(st.start,ac0);
+        gapTargets.push({piece:target,flapLen});
+      });
     }
-    if(!eligible.length || gapInMiddle || (!cross && eligible.length<withCut.length)){ bendRejected.push({op:oi,side}); return; }
+    const gapEligible=gapTargets.filter(({piece:p})=>
+      p.len>=o.depth-0.5 || (!hasLenNeighbor(p) && o.depth<=S.pl+0.5));
+    if(gapInMiddle || (withCut.length+gapTargets.length)===0
+       || eligible.length<withCut.length || gapEligible.length<gapTargets.length){
+      bendRejected.push({op:oi,side}); return;
+    }
     eligible.forEach(p=>{
       const c=p.cuts.find(cc=>cc.op===oi);
       const flapLen=cross?c.bh:c.aw;   // соседнее измерение выреза, этим сдвигом не затронуто
+      const short=o.depth-marginOf(p,c,side);
+      // growExtra — площадь, на которую РЕАЛЬНО выросла сама деталь (сверх номинальных
+      // размеров стены/полосы) сверх уже имевшегося запаса; нужна отдельно от bendExtraArea
+      // ниже (та площадь всей отогнутой части откоса целиком, независимо от того, чем она
+      // набрана — готовым запасом или добором) — growExtra идёт в p.bend[].extra для карты
+      // раскроя/учёта площади деталей (см. рядом с bendWiden/bendLenSides выше: там extra —
+      // тот же самый смысл, «на сколько эта деталь физически больше нома»).
+      let growExtra=0;
+      if(short>0.5){
+        // добор нехватки за счёт листа (см. комментарий выше eligible, только «вдоль», cross
+        // сюда не попадает — eligible уже отсеял) — растим деталь именно с ТОЙ стороны, где не
+        // хватает: с «меньшей» координаты сдвигается и сам вырез, и начало детали (p.from),
+        // иначе он бы «уехал» внутрь уже расширенной детали
+        // «меньшая» сторона (bottom/left) растёт «от себя» (from вниз, to не трогаем — он и
+        // так на границе выреза), «большая» (top/right) — свободным концом to (from не трогаем,
+        // он на границе выреза с другой стороны). Без этого p.to/p.from разошлись бы с len —
+        // schemeFor использует p.to напрямую для координаты Y, а не from+len.
+        growExtra=m2(p.w,short); p.len+=short;
+        if(smaller){ c.by+=short; p.from-=short; } else p.to+=short;
+      }
       if(!c.orig) c.orig={ax:c.ax,aw:c.aw,by:c.by,bh:c.bh};   // для отрисовки клапана на карте раскроя
       shrinkCut(p,c,side,o.depth);
       c.fold=(c.fold||[]).concat([side]);
-      p.bend=(p.bend||[]).concat([{side,op:oi,depth:o.depth,inner:true}]);
+      p.bend=(p.bend||[]).concat([{side,op:oi,depth:o.depth,inner:true,extra:growExtra}]);
+      bendExtraArea+=m2(o.depth,flapLen);
+    });
+    // «чистая» соседняя деталь (полоса разорвана проёмом целиком, см. gapTargets выше) — у нее
+    // нет собственного выреза, который нужно подрезать: вся её длина (в сторону проёма) и так
+    // уже готовый запас, добор — просто наращивание, без shrinkCut и без c.fold/c.orig (нечего
+    // подрезать). Не inner: как и у основного bendLenSides, вся деталь целиком — часть отгиба.
+    gapTargets.forEach(({piece:p,flapLen})=>{
+      const short=o.depth-p.len;
+      const growExtra=short>0.5?m2(p.w,short):0;
+      if(short>0.5){ p.len+=short; if(smaller) p.from-=short; else p.to+=short; }
+      p.bend=(p.bend||[]).concat([{side,op:oi,depth:o.depth,extra:growExtra}]);
       bendExtraArea+=m2(o.depth,flapLen);
     });
   });
