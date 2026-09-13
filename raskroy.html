@@ -344,7 +344,8 @@ tbody tr:hover td{background:var(--surface)}
     <p class="hint" style="margin:0 0 8px">Деталь угла — плоский прямоугольник: посередине зона изгиба
       (несдвигаемая, красный пунктир — её граница), по краям — плоские зоны, которые можно расширять
       (правятся в том же меню, что радиус/угол). Плоская зона отдаёт себе ширину соответствующей
-      соседней стены.</p>
+      соседней стены. Клик по линии низа (у пола), верха (у потолка) или поперечного стыка (если
+      деталь разрезана по высоте) — заглушка / LED / без профиля, та же логика, что и у краёв/стыков стены.</p>
     <div id="corner-scheme"></div>
   </div>
   <div class="block" id="led-draw-block">
@@ -1438,6 +1439,23 @@ function subIn(lo,hi,gaps){
 // физическая ширина LED-профиля/ленты — везде, где он занимает место в раскрое (стыки,
 // края стены, откосы), считаем ровно 10 мм, поровну по 5 мм с каждой стороны на стыке
 const LED_GAP=10;
+// Внутренние границы (0<pos<H), на которые нужно разрезать деталь радиусного угла по высоте:
+// как и у обычной стены (см. splitSeg внутри buildLayout — та же идея, но без rowH/brick, которых
+// у детали угла нет), это объединение «принудительных» резов (кусок длиннее листа) и точек из
+// pts (дизайнерские стыки — см. computeProject: точка попадает сюда, только когда обе смежные
+// стены угла реально имеют свой стык на этой отметке, см. обсуждение с пользователем). Место
+// первой такой границы не обязано совпадать с ближайшим кратным pl — она может быть где угодно;
+// как и в splitSeg, отрезки ДО и ПОСЛЕ нужной точки, если длиннее листа, дорезаются ещё и шагом pl.
+function cornerHeightBounds(H,pl,pts){
+  const uniq=[...new Set(pts.map(v=>Math.round(v)))].filter(v=>v>0.5&&v<H-0.5).sort((a,b)=>a-b);
+  const out=[]; let prev=0;
+  [...uniq,H].forEach(pt=>{
+    while(pt-prev>pl+0.5){ prev+=pl; out.push(prev); }
+    if(pt<H-0.5) out.push(pt);
+    prev=pt;
+  });
+  return out;
+}
 function buildLayout(S){
   const vert=S.orient==='v', across=vert?S.W:S.H, along=vert?S.H:S.W, bandW=S.pw;
   const oA=o=>vert?[o.x,o.w]:[o.y,o.h], oB=o=>vert?[o.y,o.h]:[o.x,o.w];
@@ -2333,10 +2351,15 @@ function jointSegMode(w,G,kind,pos,segStart){
 }
 // ---- LED-контуры: чистая группировка позиций, уже помеченных 'led' выше (см. объявление
 // ledCircuits) — ключ ножки контура совпадает по смыслу с jointSegKey/otkosMode-адресацией ----
-const ledLegKey=l=>l.el==='edge'?'edge|'+l.wall+'|'+l.side
-  :l.el==='otkos'?'otkos|'+l.wall+'|'+l.op+'|'+l.side
-  :l.el==='free'?'free|'+l.wall+'|'+l.id
-  :l.el+'|'+l.wall+'|'+Math.round(l.pos)+'|'+Math.round(l.segStart);
+// ownerKey — ножка либо принадлежит стене (l.wall), либо детали радиусного угла (l.corner,
+// см. computeProject: край/поперечный стык самой детали угла, адресованный на связи-угле, а не
+// на объекте стены); префикс 'w'/'c' нужен, чтобы, например, «низ» стены №3 и «низ» угла №3
+// (независимые последовательности id) не схлопнулись в один и тот же ключ
+const legOwnerKey=l=>l.corner!=null?'c'+l.corner:'w'+l.wall;
+const ledLegKey=l=>l.el==='edge'?'edge|'+legOwnerKey(l)+'|'+l.side
+  :l.el==='otkos'?'otkos|'+legOwnerKey(l)+'|'+l.op+'|'+l.side
+  :l.el==='free'?'free|'+legOwnerKey(l)+'|'+l.id
+  :l.el+'|'+legOwnerKey(l)+'|'+Math.round(l.pos)+'|'+Math.round(l.segStart);
 function ledCircuitOf(ledCircuits,leg){
   const key=ledLegKey(leg);
   for(const c of (ledCircuits||[])) if(c.legs.some(l=>ledLegKey(l)===key)) return c;
@@ -2497,8 +2520,10 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
     // деталь угла остаётся плоским прямоугольником — гнутая зона (arcW) посередине, плоские зоны
     // (flatA/flatB) пристроены по краям тем же материалом, без стыка внутри самой детали
     const arcWTotal=arcW+flatA+flatB;
-    if(!(arcWTotal<=G.pw+0.5&&a.H<=G.pl+0.5)){
-      cornerIssues.push({id:c.id,msg:`деталь угла ${fmt(arcWTotal)}×${fmt(a.H)} мм не помещается в лист ${fmt(G.pw)}×${fmt(G.pl)} — нужен материал крупнее либо меньший радиус/угол/плоские зоны`});
+    // ширину детали (arcWTotal) разрезать нельзя — зона изгиба физически цельная поперёк; высоту,
+    // в отличие от ширины, можно (см. cornerHeightBounds ниже — тот же приём, что у стыков стены)
+    if(!(arcWTotal<=G.pw+0.5)){
+      cornerIssues.push({id:c.id,msg:`ширина детали угла ${fmt(arcWTotal)} мм не помещается в лист шириной ${fmt(G.pw)} мм — нужен материал шире либо меньший радиус/угол/плоские зоны`});
       return;
     }
     // подпись детали дуги — вместе с номерами стен (как «Угол A-B» в компасе): без них два разных
@@ -2507,9 +2532,42 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
     const aTag=tag(walls.indexOf(a));
     const cornerLabel=b?`Угол R${fmt(+c.radius)} (${aTag}-${tag(walls.indexOf(b))})`
       :`Угол R${fmt(+c.radius)} (${aTag}·${c.as==='right'?'справа':'слева'})`;
-    // arcW/flatA/flatB сохраняем на самой детали — нужны развёртке угла в UI (см. cornerSchemeFor),
-    // чтобы нарисовать границу дуги красным пунктиром внутри уже посчитанной общей ширины w
-    arcPieces.push({len:a.H,w:arcWTotal,cuts:[],label:cornerLabel,pk:'corner-'+c.id,isCorner:true,arcW,flatA,flatB});
+    // поперечный (горизонтальный) стык детали угла — ТОЛЬКО там, где дизайнерский стык стоит
+    // одновременно у ОБЕИХ смежных стен на одной и той же отметке (для одиночного радиуса без
+    // стены b — просто свои стыки стены a): иначе стык на детали угла обрывался бы «в никуда»,
+    // не продолжаясь ни в одну из стен, и LED вдоль него не имел бы физического смысла — линия
+    // должна быть общей для стены A, угла и стены B, а не выдумкой одной лишь детали угла
+    const aSeamPts=(a.seamsU||[]).map(s=>s.pos);
+    const seamPts=b
+      ? aSeamPts.filter(p=>(b.seamsU||[]).some(s=>Math.abs(s.pos-p)<2))
+      : aSeamPts;
+    const bounds=cornerHeightBounds(a.H,G.pl,seamPts);
+    const em=v=>edgeMode(v);
+    const jm=pos=>{
+      const key=jointSegKey('h',pos,0);
+      const explicit=(c.jointModes||{})[key];
+      return explicit||(G.jointH?'cap':'butt');
+    };
+    const yBounds=[0,...bounds,a.H];
+    // arcW/flatA/flatB сохраняем на каждом куске — нужны развёртке угла в UI (см. cornerSchemeSvg),
+    // чтобы нарисовать границу дуги красным пунктиром внутри уже посчитанной общей ширины w.
+    // cornerId — устойчивая ссылка на связь-угол независимо от того, разрезана деталь или нет
+    // (при разрезании pk у каждого куска свой, суффикс .0/.1/...; см. использование ниже по коду)
+    const multiPiece=yBounds.length>2;
+    for(let k=0;k<yBounds.length-1;k++){
+      let y0=yBounds[k], y1=yBounds[k+1];
+      // LED на самом стыке/крае детали угла — тот же принцип, что и у горизontального стыка стены
+      // (см. buildLayout): физически шире обычного, кусок отступает от него на половину зазора
+      // с каждой стороны; на крайних (пол/потолок стены) — целиком, отступать больше не от кого
+      if(k===0 && em(c.edges&&c.edges.bot)==='led') y0+=LED_GAP;
+      else if(k>0 && jm(y0)==='led') y0+=LED_GAP/2;
+      if(k===yBounds.length-2 && em(c.edges&&c.edges.top)==='led') y1-=LED_GAP;
+      else if(k<yBounds.length-2 && jm(y1)==='led') y1-=LED_GAP/2;
+      const len=y1-y0;
+      if(len<=0.5) continue;
+      arcPieces.push({len,w:arcWTotal,cuts:[],label:cornerLabel+(multiPiece?'.'+(k+1):''),
+        pk:'corner-'+c.id+(multiPiece?'.'+k:''),isCorner:true,cornerId:c.id,arcW,flatA,flatB,y0,y1});
+    }
     radiusSuccessIds.add(c.id);
   });
 
@@ -2786,6 +2844,34 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
       if(edgeMode(a.edges[c.as])==='led'||(b&&edgeMode(b.edges[c.bs])==='led')) return;
       const len=b?Math.max(a.H,b.H):a.H;
       (c.type==='in'?cornerRuns.cin:cornerRuns.cout).push(len);
+    });
+  }
+
+  // край/поперечный стык детали радиусного угла (низ — у пола, верх — у потолка, и внутренний
+  // поперечный стык между кусками, см. cornerHeightBounds/radiusOk.forEach выше) — та же система
+  // «нет/заглушка/LED», что и у обычного края/стыка стены (sides.forEach/L.seams.forEach выше),
+  // просто адресована на самой связи-угле (c.edges/c.jointModes): у детали угла нет объекта wall,
+  // а её ширина — это развёрнутая ширина arcWTotal (arcPieces[].w), а не W какой-либо стены.
+  {
+    cornerLinks.forEach(c=>{
+      if((c.kind||'sharp')!=='radius'||!radiusSuccessIds.has(c.id)) return;
+      const pieces=arcPieces.filter(p=>p.cornerId===c.id);
+      if(!pieces.length) return;
+      const total=pieces[0].w;
+      const bot=edgeMode(c.edges&&c.edges.bot), top=edgeMode(c.edges&&c.edges.top);
+      if(bot==='led') pushLed({corner:c.id,el:'edge',side:'bot'},'start',total);
+      else if(bot==='cap') capRuns.push(total);
+      if(top==='led') pushLed({corner:c.id,el:'edge',side:'top'},'start',total);
+      else if(top==='cap') capRuns.push(total);
+      for(let k=0;k<pieces.length-1;k++){
+        // отметка границы — середина видимого зазора между соседними кусками (без LED это ровно
+        // сама граница; с LED — те же +-LED_GAP/2, что и отступ кусков от неё, см. выше), тот же
+        // jointSegKey('h',pos,0), которым эта отметка адресована в c.jointModes
+        const pos=Math.round((pieces[k].y1+pieces[k+1].y0)/2);
+        const mode=(c.jointModes||{})[jointSegKey('h',pos,0)]||(G.jointH?'cap':'butt');
+        if(mode==='led') pushLed({corner:c.id,el:'jointH',pos,segStart:0},'joint',total);
+        else if(mode==='cap') jhRuns.push(total);
+      }
     });
   }
 
@@ -3284,17 +3370,25 @@ function schemeFor(G,R,wi){
 // строит развёртку ОДНОГО радиусного угла (SVG + подпись) — вызывается для каждого угла из общего
 // списка в renderCornerScheme (один раздел «Развёртки радиусных углов» и на экране, и в печати).
 // Возвращает {meta,svg} либо {meta,errMsg}, если угол не прошёл геометрическую проверку (см. cornerIssues).
-function cornerSchemeSvg(c,a,b,R){
+function cornerSchemeSvg(c,a,b,R,G){
   const aTag='С'+(walls.indexOf(a)+1);
   const meta=b?`Угол R${fmt(+c.radius)} (${aTag}-С${walls.indexOf(b)+1})`:`Угол R${fmt(+c.radius)} (${aTag}·${c.as==='right'?'справа':'слева'})`;
   const issue=(R.cornerIssues||[]).find(x=>x.id===c.id);
   if(issue) return {meta,errMsg:issue.msg};
-  const arc=R.sheets.flatMap(sh=>sh.list).find(p=>p.pk==='corner-'+c.id);
-  if(!arc) return {meta,errMsg:'Деталь угла ещё не рассчитана.'};
-  const total=arc.w, H=arc.len, arcW=arc.arcW, flatA=arc.flatA||0, flatB=arc.flatB||0;
+  // деталь может быть разрезана по высоте поперечным стыком (см. cornerHeightBounds в
+  // computeProject) — кусков может быть несколько, каждый со своим y0/y1 (высота от пола, мм)
+  const pieces=R.sheets.flatMap(sh=>sh.list).filter(p=>p.isCorner&&p.cornerId===c.id).sort((x,y)=>x.y0-y.y0);
+  if(!pieces.length) return {meta,errMsg:'Деталь угла ещё не рассчитана.'};
+  const total=pieces[0].w, H=a.H, arcW=pieces[0].arcW, flatA=pieces[0].flatA||0, flatB=pieces[0].flatB||0;
   const fs=Math.max(total,H)/48;
   const padL=fs*5.2, padR=fs*2.4, padT=fs*3.2, padB=fs*8.2;
-  let g=`<rect x="0" y="0" width="${total}" height="${H}" fill="var(--straw-face)" fill-opacity=".92" stroke="var(--straw-deep)" stroke-width="${fs*0.07}"/>`;
+  // 0 мм — пол, H мм — потолок (те же единицы, что и c.edges/c.jointModes/w.seamsU «от пола»);
+  // в SVG ось Y растёт вниз, поэтому переводим высоту от пола в координату так же, как и везде
+  // в схеме стены (wallLedGraph/schemeFor: cy=H-y) — пол оказывается внизу картинки, потолок вверху
+  let g='';
+  pieces.forEach(p=>{
+    g+=`<rect x="0" y="${H-p.y1}" width="${total}" height="${p.y1-p.y0}" fill="var(--straw-face)" fill-opacity=".92" stroke="var(--straw-deep)" stroke-width="${fs*0.07}"/>`;
+  });
   // зона изгиба — лёгкая заливка поверх, отличает её от плоских продолжений по краям
   g+=`<rect x="${flatA}" y="0" width="${arcW}" height="${H}" fill="var(--warn)" fill-opacity=".16"/>`;
   // красный пунктир — граница зоны изгиба; она не сдвигается плоскими зонами (arcW зависит
@@ -3303,6 +3397,26 @@ function cornerSchemeSvg(c,a,b,R){
     if(bx<0.5||bx>total-0.5) return;   // на самом краю детали (flat=0 с этой стороны) — рисовать нечего
     g+=`<line x1="${bx}" y1="0" x2="${bx}" y2="${H}" stroke="var(--err)" stroke-width="${fs*0.09}" stroke-dasharray="${fs*0.32} ${fs*0.22}"/>`;
   });
+  // низ (пол) / верх (потолок) детали угла — тот же принцип «нет/заглушка/LED», что и у края
+  // обычной стены (см. schemeFor: edgeLine/em); клик по линии — то же меню, что у стены (showCornerEdgeMenu)
+  const edgeModeOf=side=>edgeMode(c.edges&&c.edges[side]);
+  const eBot=edgeModeOf('bot'), eTop=edgeModeOf('top'), ew=fs*0.22;
+  if(eBot!=='none') g+=`<line x1="0" y1="${H}" x2="${total}" y2="${H}" stroke="${eBot==='led'?'var(--warn)':'var(--alu)'}" stroke-width="${eBot==='led'?ew*1.6:ew}"/>`;
+  if(eTop!=='none') g+=`<line x1="0" y1="0" x2="${total}" y2="0" stroke="${eTop==='led'?'var(--warn)':'var(--alu)'}" stroke-width="${eTop==='led'?ew*1.6:ew}"/>`;
+  const eh=fs*0.9;
+  g+=`<rect x="0" y="${H-eh/2}" width="${total}" height="${eh}" fill="transparent" data-corneredge="${c.id}:bot" style="cursor:pointer"/>`;
+  g+=`<rect x="0" y="${-eh/2}" width="${total}" height="${eh}" fill="transparent" data-corneredge="${c.id}:top" style="cursor:pointer"/>`;
+  // поперечный стык между кусками (если деталь разрезана) — тот же принцип, что и у горизонтального
+  // стыка стены (см. schemeFor: L.seams.forEach), клик — showCornerSeamMenu
+  for(let k=0;k<pieces.length-1;k++){
+    const pos=Math.round((pieces[k].y1+pieces[k+1].y0)/2);
+    const mode=(c.jointModes||{})[jointSegKey('h',pos,0)]||(G.jointH?'cap':'butt');
+    const col=mode==='led'?'var(--warn)':mode==='butt'?'var(--muted)':'var(--err)';
+    const wgt=mode==='led'?0.22:mode==='butt'?0.08:0.16;
+    const sy=H-pos;
+    g+=`<line x1="0" y1="${sy}" x2="${total}" y2="${sy}" stroke="${col}" stroke-width="${fs*wgt}"/>`;
+    g+=`<rect x="0" y="${sy-fs*0.55}" width="${total}" height="${fs*1.1}" fill="transparent" data-cornerseam="${c.id}:${pos}" style="cursor:pointer"/>`;
+  }
   // размеры снизу: разбивка по зонам -> общая ширина. Зона изгиба — на своей строке (rowArc),
   // плоские зоны — на СВОЕЙ (rowFlat), а не той же: при узкой плоской зоне (100-150 мм) подпись
   // "плоская NNN" шире собственного отрезка и наезжала бы на соседнюю подпись "дуга NNN" в одну
@@ -3337,16 +3451,65 @@ function renderCornerScheme(){
   const R=LAST&&LAST.R;
   const box=$('#corner-scheme');
   if(!R){ $('#corner-scheme-meta').textContent=''; box.innerHTML=''; return; }
+  const G=collect();
   const items=list.map(c=>{
     const a=walls.find(w=>w.id===+c.aw); if(!a) return '';
     const b=(c.bw!==''&&c.bw!=null)?walls.find(w=>w.id===+c.bw):null;
-    const res=cornerSchemeSvg(c,a,b,R);
+    const res=cornerSchemeSvg(c,a,b,R,G);
     const body=res.errMsg?`<p class="hint" style="color:var(--err)">${esc(res.errMsg)}</p>`:res.svg;
     return `<div class="corner-scheme-item"><div class="corner-scheme-item-h">${esc(res.meta)}</div>${body}</div>`;
   }).join('');
   $('#corner-scheme-meta').textContent=`углов: ${list.length}`;
   box.innerHTML=items;
 }
+// клик по низу/верху детали угла (data-corneredge, см. cornerSchemeSvg) — то же меню «нет/
+// заглушка/LED», что и у края обычной стены (showEdgeMenu), но LED здесь можно выбрать сразу:
+// в отличие от стены, у детали угла всего 2-3 осмысленные линии на весь чертёж (низ/верх/стык),
+// а не произвольный граф перекрёстков — полноценная протяжка мышью (как в разделе «LED») ради
+// такого небогатого набора была бы overkill, обычное меню полностью покрывает сценарий
+function showCornerEdgeMenu(ev,cornerId,side){
+  const c=cornerLinks.find(x=>x.id===cornerId); if(!c) return;
+  const names={bot:'Низ (пол)',top:'Верх (потолок)'};
+  const menu=menuShell(ev,`Край угла · ${names[side]||side}`);
+  c.edges=c.edges||{};
+  const cur=edgeMode(c.edges[side]);
+  [['none','— нет'],['cap','Заглушка'],['led','LED']].forEach(([val,label])=>{
+    menuBtn(menu,label,cur===val,()=>{
+      c.edges[side]=val;
+      closeMatMenu(); run();
+    });
+  });
+}
+// клик по поперечному стыку между кусками детали угла (data-cornerseam) — то же меню, что и у
+// горизонтального стыка стены (showSeamMenu), тем же ключом jointSegKey('h',pos,0), но LED
+// выбирается напрямую (см. showCornerEdgeMenu — те же причины)
+function showCornerSeamMenu(ev,cornerId,pos){
+  const c=cornerLinks.find(x=>x.id===cornerId); if(!c) return;
+  const G=collect();
+  const key=jointSegKey('h',pos,0);
+  c.jointModes=c.jointModes||{};
+  const cur=c.jointModes[key]||(G.jointH?'cap':'butt');
+  const menu=menuShell(ev,`Поперечный стык угла · ${fmt(pos)} мм`);
+  [['cap','Соединитель'],['butt','Встык (без профиля)'],['led','LED']].forEach(([val,label])=>{
+    menuBtn(menu,label,cur===val,()=>{
+      c.jointModes[key]=val;
+      closeMatMenu(); run();
+    });
+  });
+}
+(function(){
+  const box=$('#corner-scheme'); if(!box) return;
+  box.addEventListener('click',ev=>{
+    const ds=ev.target.dataset||{};
+    if(ds.corneredge!==undefined){
+      const [idStr,side]=ds.corneredge.split(':');
+      showCornerEdgeMenu(ev,+idStr,side);
+    } else if(ds.cornerseam!==undefined){
+      const [idStr,posStr]=ds.cornerseam.split(':');
+      showCornerSeamMenu(ev,+idStr,+posStr);
+    }
+  });
+})();
 function renderScheme(G,R){
   const parts=walls.map((w,wi)=>({w,wi,sc:schemeFor(G,R,wi)}));
   const wallsHtml=parts.map(({w,wi,sc})=>{
@@ -4199,9 +4362,9 @@ function renderNotes(G,R){
     // деталь угла могла не появиться не только из-за cornerIssues (геометрия/лист не подошли),
     // но и из-за явного LED на одном из концов стыка (LED заменяет её целиком, см. radiusOk выше) —
     // в обоих случаях предупреждение о материале детали угла беспредметно, её просто нет в раскрое
-    const arcPks=new Set(R.sheets.flatMap(sh=>sh.list).filter(p=>p.isCorner).map(p=>p.pk));
+    const arcCornerIds=new Set(R.sheets.flatMap(sh=>sh.list).filter(p=>p.isCorner).map(p=>p.cornerId));
     cornerLinks.forEach(c=>{
-      if((c.kind||'sharp')!=='radius'||!arcPks.has('corner-'+c.id)) return;
+      if((c.kind||'sharp')!=='radius'||!arcCornerIds.has(c.id)) return;
       const a=walls.find(w=>w.id===+c.aw); if(!a) return;
       const b=(c.bw!==''&&c.bw!=null)?walls.find(w=>w.id===+c.bw):null;
       const sideOverrides=(w,side)=>{

@@ -377,6 +377,96 @@ for(let t=0;t<N;t++){
     chk('L140z2',coutFlatWide>0.5,
       `${id}: радиус — провал по плоским зонам должен откатиться на обычный угловой профиль (cout=0)`);
 
+    // L141 (нов): деталь угла умеет резаться по высоте поперечным (горизонтальным) стыком — та
+    // же механика, что и у обычной стены (buildLayout/splitSeg), но раньше стена ВЫШЕ листа была
+    // просто ошибкой (cornerIssues), а дизайнерский стык вообще не мог появиться на детали угла —
+    // LED вдоль такого стыка был физически невозможен (см. cornerHeightBounds в computeProject).
+    const wTall1=Object.assign({},wR1,{H:2400+G.pl}), wTall2=Object.assign({},wR2,{H:2400+G.pl});
+    const RtallOverflow=C.computeProject(Gt2,[wTall1,wTall2],{},linkRadius,[]);
+    const tallPieces=RtallOverflow.sheets.flatMap(sh=>sh.list).filter(p=>p.isCorner);
+    chk('L141a',(RtallOverflow.cornerIssues||[]).length===0,
+      `${id}: радиус — стена выше листа больше не должна быть ошибкой (${JSON.stringify(RtallOverflow.cornerIssues)})`);
+    chk('L141b',tallPieces.length>=2,
+      `${id}: радиус — стена выше листа должна дать НЕСКОЛЬКО кусков детали угла (получили ${tallPieces.length})`);
+    chk('L141c',tallPieces.every(p=>p.len<=G.pl+0.5),
+      `${id}: радиус — ни один кусок детали угла не должен быть длиннее листа (${JSON.stringify(tallPieces.map(p=>p.len))})`);
+    const sumLen=tallPieces.reduce((s,p)=>s+p.len,0);
+    chk('L141d',Math.abs(sumLen-wTall1.H)<0.5,
+      `${id}: радиус — сумма длин кусков детали угла должна давать полную высоту стены (${sumLen} vs ${wTall1.H})`);
+
+    // общий дизайнерский стык у ОБЕИХ смежных стен на одной отметке — деталь угла режется ровно
+    // там же; стык только у ОДНОЙ из двух стен — резать нечего (иначе стык «повис» бы в никуда,
+    // не продолжаясь ни в одну из стен)
+    const seamPos=1200;
+    const wSeamA=Object.assign({},wR1,{seamsU:[{id:1,pos:seamPos}]});
+    const wSeamB=Object.assign({},wR2,{seamsU:[{id:1,pos:seamPos}]});
+    const RseamBoth=C.computeProject(Gt2,[wSeamA,wSeamB],{},linkRadius,[]);
+    const piecesBoth=RseamBoth.sheets.flatMap(sh=>sh.list).filter(p=>p.isCorner);
+    chk('L141e',piecesBoth.length===2&&Math.abs(piecesBoth[0].y1-seamPos)<0.5,
+      `${id}: радиус — общий стык у обеих стен должен разрезать деталь угла ровно на отметке (${JSON.stringify(piecesBoth.map(p=>[p.y0,p.y1]))})`);
+
+    const RseamOnlyA=C.computeProject(Gt2,[wSeamA,wR2],{},linkRadius,[]);
+    const piecesOnlyA=RseamOnlyA.sheets.flatMap(sh=>sh.list).filter(p=>p.isCorner);
+    chk('L141f',piecesOnlyA.length===1,
+      `${id}: радиус — стык только у ОДНОЙ смежной стены не должен резать деталь угла (получили ${piecesOnlyA.length} кусков)`);
+
+    // одиночный радиус без второй стены (bw='') — использует свои же стыки стены a напрямую
+    const linkRadiusNoB=[{id:1,kind:'radius',type:'out',angle,radius,aw:1,as:'right',bw:'',bs:''}];
+    const RseamNoB=C.computeProject(Gt2,[wSeamA,wR2],{},linkRadiusNoB,[]);
+    const piecesNoB=RseamNoB.sheets.flatMap(sh=>sh.list).filter(p=>p.isCorner);
+    chk('L141g',piecesNoB.length===2&&Math.abs(piecesNoB[0].y1-seamPos)<0.5,
+      `${id}: радиус без стены b — должен резаться по собственному стыку стены a (${JSON.stringify(piecesNoB.map(p=>[p.y0,p.y1]))})`);
+
+    // LED на стыке детали угла — тот же зазор LED_GAP, что и у обычного горизонтального стыка
+    // стены (половина с каждой стороны); LED на нижнем крае — весь зазор целиком (отступать
+    // больше не от кого, край детали и есть край стены/пол)
+    const linkSeamLed=[{id:1,kind:'radius',type:'out',angle,radius,aw:1,as:'right',bw:2,bs:'left',
+      jointModes:{[C.jointSegKey('h',seamPos,0)]:'led'}}];
+    const RseamLed=C.computeProject(Gt2,[wSeamA,wSeamB],{},linkSeamLed,[]);
+    const piecesSeamLed=RseamLed.sheets.flatMap(sh=>sh.list).filter(p=>p.isCorner);
+    chk('L141h',piecesSeamLed.length===2&&Math.abs((piecesSeamLed[1].y0-piecesSeamLed[0].y1)-10)<0.5,
+      `${id}: радиус — LED на стыке детали угла должен дать зазор 10мм между кусками (${JSON.stringify(piecesSeamLed.map(p=>[p.y0,p.y1]))})`);
+
+    const linkEdgeLed=[{id:1,kind:'radius',type:'out',angle,radius,aw:1,as:'right',bw:2,bs:'left',
+      edges:{bot:'led',top:'none'}}];
+    const RedgeLed=C.computeProject(Gt2,[wR1,wR2],{},linkEdgeLed,[]);
+    const pieceEdgeLed=RedgeLed.sheets.flatMap(sh=>sh.list).find(p=>p.isCorner);
+    chk('L141i',!!pieceEdgeLed&&Math.abs(pieceEdgeLed.y0-10)<0.5,
+      `${id}: радиус — LED на нижнем крае детали угла должен дать отступ 10мм снизу (y0=${pieceEdgeLed&&pieceEdgeLed.y0})`);
+
+    // L142 (нов): низ/верх/поперечный стык детали угла (c.edges/c.jointModes) действительно
+    // попадают в смету — заглушка в «Край области», LED в ledstart/ledjoint, тем же путём
+    // (pushLed), что и обычный край/стык стены (см. новый блок в computeProject после cout/cin).
+    const profOf=(R,key)=>{ const p=R.prof.find(x=>x.key===key); return p?p.total:0; };
+    const edgeBase=profOf(Rrad,'edge');
+    const RedgeLedFull=C.computeProject(Gt2,[wR1,wR2],{},
+      [{id:1,kind:'radius',type:'out',angle,radius,aw:1,as:'right',bw:2,bs:'left',edges:{bot:'led'}}],[]);
+    chk('L142a',Math.abs(profOf(RedgeLedFull,'ledstart')-arcW)<0.5,
+      `${id}: радиус — LED на нижнем крае угла не дал длину ledstart=arcW (${profOf(RedgeLedFull,'ledstart')} vs ${arcW})`);
+    const RedgeCap=C.computeProject(Gt2,[wR1,wR2],{},
+      [{id:1,kind:'radius',type:'out',angle,radius,aw:1,as:'right',bw:2,bs:'left',edges:{bot:'cap',top:'cap'}}],[]);
+    chk('L142b',Math.abs((profOf(RedgeCap,'edge')-edgeBase)-arcW*2)<0.5,
+      `${id}: радиус — заглушка на низе+верхе угла не добавила 2×arcW к профилю «край области» (${profOf(RedgeCap,'edge')} vs база ${edgeBase}+${arcW*2})`);
+    const RseamLedFull=C.computeProject(Gt2,[wSeamA,wSeamB],{},
+      [{id:1,kind:'radius',type:'out',angle,radius,aw:1,as:'right',bw:2,bs:'left',
+        jointModes:{[C.jointSegKey('h',seamPos,0)]:'led'}}],[]);
+    chk('L142c',Math.abs(profOf(RseamLedFull,'ledjoint')-arcW)<0.5,
+      `${id}: радиус — LED на поперечном стыке угла не дал длину ledjoint=arcW (${profOf(RseamLedFull,'ledjoint')} vs ${arcW})`);
+    // regression: две РАЗНЫЕ детали угла с LED на низе не должны схлопнуться в один ledRunLens-ключ
+    // (см. legOwnerKey в ledLegKey) — иначе при маленьком ledMaxRun их длины сложились бы ДО
+    // деления на макс. длину луча, и PSU/лучей вышло бы меньше, чем реально нужно
+    const wThird=Object.assign({},wR2,{id:3});
+    const twoCorners=[
+      {id:1,kind:'radius',type:'out',angle,radius,aw:1,as:'right',bw:2,bs:'left',flatA:0,flatB:0,edges:{bot:'led'}},
+      {id:2,kind:'radius',type:'out',angle,radius:200,aw:2,as:'right',bw:3,bs:'left',flatA:0,flatB:0,edges:{bot:'led'}},
+    ];
+    const arcW2=200*(Math.PI-angle*Math.PI/180);
+    const Gsmallrun=Object.assign({},Gt2,{ledMaxRun:400});
+    const Rtwo=C.computeProject(Gsmallrun,[wR1,wR2,wThird],{},twoCorners,[]);
+    const expectRun=Math.ceil(arcW/400-1e-9)+Math.ceil(arcW2/400-1e-9);
+    chk('L142d',!!Rtwo.led&&Rtwo.led.runCount===expectRun,
+      `${id}: радиус — два разных угла с LED на низе схлопнулись в общий ledRunLens-ключ (runCount=${Rtwo.led&&Rtwo.led.runCount}, ожидали ${expectRun})`);
+
     // fallback: разная высота стен
     const wR2b=Object.assign({},wR2,{H:2000});
     const RbadH=C.computeProject(Gt2,[wR1,wR2b],{},linkRadius,[]);
