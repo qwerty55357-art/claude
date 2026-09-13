@@ -3819,6 +3819,53 @@ function renderScene3D(G,R){
       const capMat=new THREE.MeshStandardMaterial({color:new THREE.Color('#2a2a2a'),side:THREE.DoubleSide,roughness:0.95});
       mesh.add(new THREE.Mesh(capGeo,capMat));
     });
+    // LED-лента — тонкая светящаяся полоска вдоль контура (см. wallLedGraph/ledCircuitOf, та же
+    // логика, что и у 2D-значков в ledCircuitBadgesSvg): рёбра графа стены, реально попавшие в
+    // ledCircuits[].legs, плюс свободные отрезки (el:'free', координаты хранятся прямо на ножке).
+    // Локальные координаты (x:0..wv.W, y:0..wv.H) те же, что у откосов выше — дочерний меш стены,
+    // трансформация (позиция/поворот) достаётся автоматически через граф сцены. Небольшой
+    // положительный сдвиг по z — полоска чуть выступает над лицевой стороной стены, а не тонет
+    // в её текстуре (z-fighting), materialBasic — не завязан на освещение сцены, читается как
+    // «светится», а не как обычная затенённая деталь.
+    {
+      const graph=wallLedGraph(w,G,cuts);
+      const byCircuit=new Map();
+      graph.edges.forEach(ed=>{
+        const leg=Object.assign({wall:w.id},ed.leg);
+        const c=ledCircuitOf(ledCircuits,leg); if(!c) return;
+        const na=graph.nodes.find(nd=>nd.key===ed.a), nb=graph.nodes.find(nd=>nd.key===ed.b);
+        if(!na||!nb) return;
+        if(!byCircuit.has(c.id)) byCircuit.set(c.id,{kind:c.kind,segs:[]});
+        byCircuit.get(c.id).segs.push([na.x,na.y,nb.x,nb.y]);
+      });
+      ledCircuits.forEach(c=>{
+        c.legs.forEach(l=>{
+          if(+l.wall!==w.id||l.el!=='free') return;
+          if(!byCircuit.has(c.id)) byCircuit.set(c.id,{kind:c.kind,segs:[]});
+          byCircuit.get(c.id).segs.push([l.ax,l.ay,l.bx,l.by]);
+        });
+      });
+      // ширина полоски в 3D — не физический ledW (10-15мм затерялись бы на стене в несколько
+      // метров, превью нужно, чтобы разглядеть расположение, а не точный масштаб) и не акцентный
+      // цвет темы (--warn у большинства материалов слишком похож на сам тёплый оттенок панели,
+      // полоска терялась бы на стене) — яркий тёплый «свет», отдельный от палитры материалов
+      const halfW=Math.max((+G.ledW||14.4)*2,30)/2;
+      byCircuit.forEach(info=>{
+        const colorHex=info.kind==='none'?'#d7ffe0':'#fff1c2';
+        const ledMat=new THREE.MeshBasicMaterial({color:new THREE.Color(colorHex),side:THREE.DoubleSide});
+        info.segs.forEach(([ax,ay,bx,by])=>{
+          const dx=bx-ax, dy=by-ay, segLen=Math.hypot(dx,dy);
+          if(segLen<1) return;
+          const ux=dx/segLen, uy=dy/segLen, px=-uy*halfW, py=ux*halfW;
+          const geo=new THREE.BufferGeometry();
+          geo.setAttribute('position',new THREE.Float32BufferAttribute(
+            [ax+px,ay+py,2, ax-px,ay-py,2, bx+px,by+py,2, bx-px,by-py,2],3));
+          geo.setIndex([0,1,2, 2,1,3]);
+          geo.computeVertexNormals();
+          mesh.add(new THREE.Mesh(geo,ledMat));
+        });
+      });
+    }
     [0,w.W].forEach(lx=>{
       const wx=p.x+lx*Math.cos(p.angle), wz=p.z+lx*Math.sin(p.angle);
       if(wx<minX)minX=wx; if(wx>maxX)maxX=wx; if(wz<minZ)minZ=wz; if(wz>maxZ)maxZ=wz;
