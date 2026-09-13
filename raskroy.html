@@ -3840,10 +3840,13 @@ function wallCanvasTexture3D(wv,L,baseColorHex){
     const x=cur.start*scale;
     ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,ch); ctx.stroke();
   }
-  ctx.fillStyle=cssVar('--bg')||'#0a0a0a';
+  // проём — НАСТОЯЩАЯ дыра в текстуре (альфа=0), а не закрашенный тёмный прямоугольник: если
+  // заполнение не выбрано (o.fillMat), сквозь проём должны быть видны детали откоса и/или фон
+  // сцены, а не непрозрачная «стена изнутри». Заполнение, если оно есть, рисуется ОТДЕЛЬНОЙ
+  // деталью в глубине проёма (см. renderScene3D — за откосом), а не здесь, на лицевой плоскости.
   (wv.ops||[]).forEach(o=>{
     const x=o.x*scale, y=ch-(o.y+o.h)*scale, w=o.w*scale, h=o.h*scale;
-    ctx.fillRect(Math.max(0,x),Math.max(0,y),w,h);
+    ctx.clearRect(Math.max(0,x),Math.max(0,y),w,h);
   });
   const tex=new THREE.CanvasTexture(canvas);
   tex.needsUpdate=true;
@@ -3933,7 +3936,9 @@ function renderScene3D(G,R){
     const wv=wallCutView(w,cuts);
     const L=R.layouts[wi];
     const tex=wallCanvasTexture3D(wv,L,defaultColorHex);
-    const mat=new THREE.MeshStandardMaterial({map:tex,side:THREE.DoubleSide,roughness:0.9,metalness:0.05});
+    // transparent — обязателен: без него альфа=0 у выреза проёма (см. wallCanvasTexture3D) не
+    // даёт настоящей прозрачности, Three.js всё равно рисует пиксель непрозрачным
+    const mat=new THREE.MeshStandardMaterial({map:tex,side:THREE.DoubleSide,roughness:0.9,metalness:0.05,transparent:true});
     const geo=new THREE.PlaneGeometry(Math.max(wv.W,1),Math.max(wv.H,1));
     geo.translate(wv.W/2,wv.H/2,0);
     const mesh=new THREE.Mesh(geo,mat);
@@ -3941,9 +3946,9 @@ function renderScene3D(G,R){
     mesh.position.set(p.x+shift*Math.cos(p.angle),0,p.z+shift*Math.sin(p.angle));
     mesh.rotation.y=-p.angle;
     st.group.add(mesh);
-    // объёмный откос: боковые панели проёма, уходящие в глубину (o.depth), + дальняя заглушка —
-    // вместо плоского тёмного выреза в текстуре стены (тот остаётся — он и даёт вид «здесь дыра»,
-    // откосы лишь добавляют перспективу по бокам). Добавляем ДОЧЕРНИМИ к mesh стены — плоскость
+    // объёмный откос: боковые панели проёма, уходящие в глубину (o.depth) — вместо плоского
+    // тёмного выреза в текстуре стены теперь настоящая дыра (см. wallCanvasTexture3D: clearRect),
+    // откосы лишь добавляют перспективу по бокам. Добавляем ДОЧЕРНИМИ к mesh стены — плоскость
     // стены уже лежит в локальных координатах (x:0..W, y:0..H, z=0), ровно тех же, что и o.x/o.y/
     // o.w/o.h из wv.ops (та же «урезанная» система, см. wallCanvasTexture3D выше) — трансформация
     // положения/поворота стены достаётся дочерним мешам автоматически через граф сцены Three.js.
@@ -3965,31 +3970,24 @@ function renderScene3D(G,R){
         const rm=new THREE.MeshStandardMaterial({color:new THREE.Color(colorHex),side:THREE.DoubleSide,roughness:0.88});
         mesh.add(new THREE.Mesh(geo,rm));
       });
-      // дальняя заглушка на глубине проёма — фиксированный тёмно-серый тон (НЕ --bg темы: тот в
-      // печатном изометрическом снимке прозрачный/белый, а не тёмный, и заглушка на белом листе
-      // читалась бы отдельным чёрным треугольником, а не «тенью в проёме»), иначе сквозь проём
-      // было бы видно «в никуда» (фон сцены), а не законченный объём
-      const capGeo=new THREE.BufferGeometry();
-      capGeo.setAttribute('position',new THREE.Float32BufferAttribute(
-        [o.x,o.y,-dep, o.x+o.w,o.y,-dep, o.x,o.y+o.h,-dep, o.x+o.w,o.y+o.h,-dep],3));
-      capGeo.setAttribute('uv',new THREE.Float32BufferAttribute([0,0, 1,0, 0,1, 1,1],2));
-      capGeo.setIndex([0,1,2, 2,1,3]);
-      capGeo.computeVertexNormals();
-      const capMat=new THREE.MeshStandardMaterial({color:new THREE.Color('#2a2a2a'),side:THREE.DoubleSide,roughness:0.95});
-      mesh.add(new THREE.Mesh(capGeo,capMat));
     });
-    // остеклённый проём (kind:'window') — полупрозрачная тонированная плоскость поверх тёмного
-    // выреза в текстуре стены (см. wallCanvasTexture3D: там он просто залит --bg). Без неё окно
-    // визуально неотличимо от «тут ничего нет» — сплошной чёрный провал, а не остекление. Ставим
-    // у переднего края (z чуть больше 0, впереди самой стены) независимо от глубины отkоса — рама
-    // по смыслу там же, где и лицевая поверхность стены, а не в глубине проёма.
+    // заполнение проёма (o.fillMat, назначается кликом по проёму на схеме раскладки — та же
+    // логика, что и у «заполнения другими материалами» в смете, см. computeProject: fills) —
+    // отдельная деталь В ГЛУБИНЕ проёма, за откосом (на всю глубину o.depth, если откос есть,
+    // иначе у самой лицевой плоскости): проём БЕЗ заполнения обязан остаться настоящей дырой —
+    // сквозь него должны быть видны детали откоса (и фон сцены дальше), а не какая-либо деталь.
     (wv.ops||[]).forEach(o=>{
-      if(o.kind!=='window') return;
-      const glassGeo=new THREE.PlaneGeometry(Math.max(o.w,1),Math.max(o.h,1));
-      glassGeo.translate(o.x+o.w/2,o.y+o.h/2,1);
-      const glassMat=new THREE.MeshPhysicalMaterial({color:new THREE.Color('#9fc6d6'),
-        transparent:true,opacity:0.25,roughness:0.05,metalness:0,side:THREE.DoubleSide});
-      mesh.add(new THREE.Mesh(glassGeo,glassMat));
+      if(!o.fillMat) return;
+      const colorHex=cssVar3d('--mat-'+o.fillMat)||defaultColorHex;
+      const dep=(o.otkos&&o.depth>0)?o.depth:2;
+      const fillGeo=new THREE.BufferGeometry();
+      fillGeo.setAttribute('position',new THREE.Float32BufferAttribute(
+        [o.x,o.y,-dep, o.x+o.w,o.y,-dep, o.x,o.y+o.h,-dep, o.x+o.w,o.y+o.h,-dep],3));
+      fillGeo.setAttribute('uv',new THREE.Float32BufferAttribute([0,0, 1,0, 0,1, 1,1],2));
+      fillGeo.setIndex([0,1,2, 2,1,3]);
+      fillGeo.computeVertexNormals();
+      const fillMatThree=new THREE.MeshStandardMaterial({color:new THREE.Color(colorHex),side:THREE.DoubleSide,roughness:0.85});
+      mesh.add(new THREE.Mesh(fillGeo,fillMatThree));
     });
     // LED-лента — тонкая светящаяся полоска вдоль контура (см. wallLedGraph/ledCircuitOf, та же
     // логика, что и у 2D-значков в ledCircuitBadgesSvg): рёбра графа стены, реально попавшие в
