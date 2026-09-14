@@ -4149,6 +4149,36 @@ function renderScene3D(G,R){
         const rm=new THREE.MeshStandardMaterial({color:new THREE.Color(colorHex),side:THREE.DoubleSide,roughness:0.88});
         mesh.add(new THREE.Mesh(geo,rm));
       });
+      // «выступающий» откос (protrude) — накладка та же деталь, что и откос (одна L-образная
+      // деталь без шва, см. buildOtkosParts), но лежит ПЛАШМЯ на лицевой стороне стены вокруг
+      // проёма, поверх обычной поверхности — см. schemeFor: flangeRect (та же геометрия, вылет
+      // otkosOverlap, Т-стык у верха/низа за счёт соседних «выступающих» боковых). Раньше в 3D
+      // не рисовалась вовсе — откос выглядел неотличимо от обычного угла.
+      const ov=o.otkosOverlap||0;
+      if(ov>0.5){
+        const extL=otkosMode(o,'left')==='protrude'?ov:0, extR=otkosMode(o,'right')==='protrude'?ov:0;
+        const flangeRects=[];
+        if(otkosMode(o,'left')==='protrude')  flangeRects.push(['left', o.x-ov,o.y, o.x,o.y+o.h]);
+        if(otkosMode(o,'right')==='protrude') flangeRects.push(['right', o.x+o.w,o.y, o.x+o.w+ov,o.y+o.h]);
+        if(otkosMode(o,'top')==='protrude')   flangeRects.push(['top', o.x-extL,o.y+o.h, o.x+o.w+extR,o.y+o.h+ov]);
+        if(o.kind!=='door' && otkosMode(o,'bottom')==='protrude')
+          flangeRects.push(['bottom', o.x-extL,o.y-ov, o.x+o.w+extR,o.y]);
+        // чуть впереди лицевой плоскости стены (та же роль офсета, что у LED-ленты ниже) — иначе
+        // накладка тонет в текстуре стены той же глубины (z-fighting), а не лежит поверх нее
+        const off=dz*1.5;
+        flangeRects.forEach(([side,x0,y0,x1,y1])=>{
+          const mid=o.otkosMat&&o.otkosMat[side];
+          const colorHex=(mid&&cssVar3d('--mat-'+mid))||defaultColorHex;
+          const geo=new THREE.BufferGeometry();
+          geo.setAttribute('position',new THREE.Float32BufferAttribute(
+            [x0,y0,off, x1,y0,off, x0,y1,off, x1,y1,off],3));
+          geo.setAttribute('uv',new THREE.Float32BufferAttribute([0,0, 1,0, 0,1, 1,1],2));
+          geo.setIndex([0,1,2, 2,1,3]);
+          geo.computeVertexNormals();
+          const fm=new THREE.MeshStandardMaterial({color:new THREE.Color(colorHex),side:THREE.DoubleSide,roughness:0.88});
+          mesh.add(new THREE.Mesh(geo,fm));
+        });
+      }
     });
     // заполнение проёма (o.fillMat, назначается кликом по проёму на схеме раскладки — та же
     // логика, что и у «заполнения другими материалами» в смете, см. computeProject: fills) —
