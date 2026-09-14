@@ -4134,10 +4134,17 @@ function renderScene3D(G,R){
       // (+z, к камере), а не в толщу стены (-z, как у обычного проёма/ниши): короб не врезан в
       // стену, а стоит на её сплошной поверхности, обшивка того же материала выступает вперёд.
       const dz=o.mount==='surface'?1:-1;
+      // деталь откоса физически есть только у «Г-образный/встык/изгиб/выступающий» (та же
+      // проверка, что и в buildOtkosParts: has) — «нет/заглушка/LED» это про голый торец САМОЙ
+      // панели без всякого материала откоса вообще (заглушка — тонкий профиль на кромке, LED —
+      // светящаяся лента, уже рисуется отдельно ниже через wallLedGraph/ledCircuitOf). Раньше
+      // реквизит рисовался безусловно на всех сторонах — сплошная панель откоса появлялась и
+      // там, где по факту нет вообще никакого материала (в раскрое для этих сторон нет детали).
+      const hasMat=side=>['corner','butt','bend','protrude'].includes(otkosMode(o,side));
       const revealSides=[['left',o.x,o.y,o.x,o.y+o.h],['right',o.x+o.w,o.y,o.x+o.w,o.y+o.h],
         ['top',o.x,o.y+o.h,o.x+o.w,o.y+o.h]];
       if(o.kind!=='door') revealSides.push(['bottom',o.x,o.y,o.x+o.w,o.y]);
-      revealSides.forEach(([side,x0,y0,x1,y1])=>{
+      revealSides.filter(([side])=>hasMat(side)).forEach(([side,x0,y0,x1,y1])=>{
         const mid=o.otkosMat&&o.otkosMat[side];
         const colorHex=(mid&&cssVar3d('--mat-'+mid))||defaultColorHex;
         const geo=new THREE.BufferGeometry();
