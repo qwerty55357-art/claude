@@ -115,11 +115,11 @@ for(let t=0;t<N;t++){
   const nPieces=R.layouts.reduce((a,L)=>a+L.pieces.filter(p=>!p.matOverride).length,0);
   chk('L3',nPieces===R.sheets.reduce((a,sh)=>a+sh.list.length,0),`${id}: потеряны детали`);
   const nOverridePieces=R.layouts.reduce((a,L)=>a+L.pieces.filter(p=>p.matOverride).length,0);
-  // L4: площадь кусков = площадь сегментов + добавка от изгиба. У изгиба-«соседа» деталь растёт
-  // всегда (b.extra — вся добавка). У изгиба-«недорезом» деталь растёт, только если готового
-  // запаса внутри выреза не хватило на глубину отгиба — тогда добор идёт за счёт листа (см.
-  // buildLayout: stillOpen.forEach, growExtra) и тоже попадает в b.extra; если запаса хватило
-  // сразу, extra=0 и деталь остаётся номинального размера, как и раньше.
+  // L4: площадь кусков = площадь сегментов + добавка от изгиба. У изгиба-«соседа» (bendLenSides/
+  // gapTargets — деталь не соприкасается с проёмом, клапан целиком новый материал) деталь растёт
+  // всегда на всю глубину (b.extra — вся добавка). У изгиба-«недорезом» (eligible — деталь и так
+  // содержит вырез) клапан строится ИЗ САМОГО ВЫРЕЗА (shrinkCut), без всякого добора — extra
+  // всегда 0, деталь остаётся номинального размера.
   R.layouts.forEach((L,wi)=>{
     const pa=L.pieces.reduce((a,p)=>a+p.w*p.len,0);
     let ea=0; L.strips.forEach(st=>{ea+=st.w*st.segs.reduce((x,sg)=>x+(sg[1]-sg[0]),0);});
