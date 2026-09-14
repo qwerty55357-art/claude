@@ -1673,6 +1673,9 @@ function buildLayout(S){
   // её ширину (или для неё не находится подходящая деталь, или та не влезет по длине листа),
   // изгиб отклоняется целиком по этой стороне — иначе часть проёма осталась бы без материала.
   bendLenSides.forEach(bl=>{
+    // клапан физически лежит РОВНО в габаритах проёма (там, где будет откос) — глубже, чем сам
+    // проём в этом направлении, отгибать нечего: клапан вылез бы за проём в соседнюю деталь.
+    if(bl.bL<bl.depth-0.5){ bendRejected.push({op:bl.op,side:bl.side}); return; }
     const touched=strips.filter(st=>Math.min(st.end,bl.a0+bl.aL)-Math.max(st.start,bl.a0)>1);
     let ok=touched.length>0;
     const targets=[];
@@ -1692,14 +1695,19 @@ function buildLayout(S){
     });
     if(!ok){ bendRejected.push({op:bl.op,side:bl.side}); return; }
     targets.forEach(target=>{
+      // у этой детали своего выреза НЕТ (проём поглотил всю ширину полосы целиком, деталь
+      // начинается/кончается ровно на его границе) — значит и «готового запаса» под клапан
+      // внутри неё взять неоткуда, весь клапан add-BUT-новый. Клапан кладём РОВНО в габариты
+      // проёма — там же, где физически откос — продлевая деталь её КРАЕМ, что касается проёма,
+      // ВГЛУБЬ проёма (а не наружу, за пределы стены/потолка — раньше растили именно так,
+      // и при малом родном запасе кусок оказывался нарисован выше потолка/дальше стены).
+      // Родная (номинальная) длина детали при этом остаётся ЦЕЛИКОМ нетронутым обычным
+      // материалом, клапаном становится только добавленный кусок размером ровно depth —
+      // см. foldZones ниже (в отличие от «недорезом» — там c.fold/c.orig на самом вырезе).
       target.len+=bl.depth;
-      // растим деталь именно СВОБОДНЫМ концом — «меньшая» сторона (bottom/left) уже кончается
-      // ровно на границе проёма (target.to нашли по этому совпадению выше), туда расти нельзя,
-      // расти можно только «от себя» (from вниз); у «большей» стороны (top/right) наоборот —
-      // from уже стоит на границе проёма, растим to. Раньше здесь трогали только len, а from/to
-      // оставались как есть — искажало последующую отрисовку (schemeFor использует p.to
-      // напрямую для координаты Y, а не from+len)
-      if(isSmallerSide) target.from-=bl.depth; else target.to+=bl.depth;
+      if(isSmallerSide) target.to+=bl.depth; else target.from-=bl.depth;
+      target.foldZones=(target.foldZones||[]).concat([{side:bl.side,
+        by:isSmallerSide?target.len-bl.depth:0, bh:bl.depth}]);
       target.bend=(target.bend||[]).concat([{side:bl.side,op:bl.op,depth:bl.depth,extra:m2(target.w,bl.depth)}]);
       bendExtraArea+=m2(target.w,bl.depth);
     });
@@ -1776,10 +1784,14 @@ function buildLayout(S){
     // ровно у края проёма. Совсем без такой детали (полоса КОНЧАЕТСЯ до границы проёма — проём
     // «съел» её целиком без остатка) — вот это уже настоящий, неисправимый разрыв.
     let gapInMiddle=false;
+    let gapSelfShort=false;
     const gapTargets=[];   // {piece,flapLen}
     if(!cross){
       const [ac0,acL]=crossIsLR?[o.x,o.w]:[o.y,o.h];
       const [al0,alL]=crossIsLR?[o.y,o.h]:[o.x,o.w];
+      // клапан у «чистого» соседа (см. ниже) кладём РОВНО в габариты проёма, как и в основном
+      // механизме bendLenSides выше — глубже собственного размера проёма тут отгибать нечего.
+      if(alL<o.depth-0.5) gapSelfShort=true;
       const touchedStrips=strips.filter(st=>Math.min(st.end,ac0+acL)-Math.max(st.start,ac0)>1);
       touchedStrips.forEach(st=>{
         if(pieces.some(p=>p.strip===st.i&&p.cuts.some(c=>c.op===oi))) return;   // обычный вырез — уже в withCut
@@ -1791,9 +1803,8 @@ function buildLayout(S){
         gapTargets.push({piece:target,flapLen});
       });
     }
-    const gapEligible=gapTargets.filter(({piece:p})=>
-      p.len>=o.depth-0.5 || (!hasLenNeighbor(p) && o.depth<=S.pl+0.5));
-    if(gapInMiddle || (withCut.length+gapTargets.length)===0
+    const gapEligible=gapTargets.filter(({piece:p})=>p.len+o.depth<=S.pl+0.5);
+    if(gapInMiddle || gapSelfShort || (withCut.length+gapTargets.length)===0
        || eligible.length<withCut.length || gapEligible.length<gapTargets.length){
       bendRejected.push({op:oi,side}); return;
     }
@@ -1826,15 +1837,19 @@ function buildLayout(S){
       p.bend=(p.bend||[]).concat([{side,op:oi,depth:o.depth,inner:true,extra:growExtra}]);
       bendExtraArea+=m2(o.depth,flapLen);
     });
-    // «чистая» соседняя деталь (полоса разорвана проёмом целиком, см. gapTargets выше) — у нее
-    // нет собственного выреза, который нужно подрезать: вся её длина (в сторону проёма) и так
-    // уже готовый запас, добор — просто наращивание, без shrinkCut и без c.fold/c.orig (нечего
-    // подрезать). Не inner: как и у основного bendLenSides, вся деталь целиком — часть отгиба.
+    // «чистая» соседняя деталь (полоса разорвана проёмом целиком, см. gapTargets выше) — у неё
+    // нет собственного выреза, из которого можно вычленить клапан подрезкой (как в eligible
+    // выше): она попросту НЕ соприкасается с проёмом вообще, начинается точно на его границе.
+    // Поэтому клапан тут не «недорез», а прямое продление детали её краем, что касается проёма,
+    // РОВНО В ГАБАРИТЫ ПРОЁМА (там же, где физически будет откос) — точно тот же приём и по тем
+    // же причинам, что и у основного механизма bendLenSides выше (см. его комментарий): родная
+    // длина детали остаётся целиком нетронутым обычным материалом, добавленный кусок размером
+    // ровно depth — и есть клапан (foldZones ниже, не c.fold/c.orig — своего выреза тут нет).
     gapTargets.forEach(({piece:p,flapLen})=>{
-      const short=o.depth-p.len;
-      const growExtra=short>0.5?m2(p.w,short):0;
-      if(short>0.5){ p.len+=short; if(smaller) p.from-=short; else p.to+=short; }
-      p.bend=(p.bend||[]).concat([{side,op:oi,depth:o.depth,extra:growExtra}]);
+      p.len+=o.depth;
+      if(smaller) p.to+=o.depth; else p.from-=o.depth;
+      p.foldZones=(p.foldZones||[]).concat([{side,by:smaller?p.len-o.depth:0,bh:o.depth}]);
+      p.bend=(p.bend||[]).concat([{side,op:oi,depth:o.depth,extra:m2(p.w,o.depth)}]);
       bendExtraArea+=m2(o.depth,flapLen);
     });
   });
@@ -3659,8 +3674,31 @@ function cutmapSvg(sheets,S){
           });
         }
       });
-      // подпись ставим в самую большую полосу детали, свободную от отверстий
-      const gaps=p.cuts.map(c=>[p.len-(c.by+c.bh), p.len-c.by]);
+      // изгиб панели у «чистого» соседа (bendLenSides/gapTargets: полоса разорвана проёмом
+      // целиком, своего выреза для c.fold/c.orig тут нет) — клапан задан отдельно, foldZones,
+      // готовыми границами внутри детали (по всей её ширине, а не части — cross-направление
+      // тут не растёт, см. buildLayout). Рисуем тем же приёмом (штриховка+пунктир+подпись), что
+      // и клапан «недорезом» выше, просто без сравнения с «исходным» вырезом — он и так точный.
+      (p.foldZones||[]).forEach(fz=>{
+        const y=cy+p.y+(p.len-(fz.by+fz.bh));
+        const full=fz.bh>=p.len-0.5;
+        const fid='fold'+Math.random().toString(36).slice(2,8);
+        g+=`<pattern id="${fid}" width="${fs*0.5}" height="${fs*0.5}" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">`+
+           `<rect width="${fs*0.5}" height="${fs*0.5}" fill="var(--warn)" fill-opacity=".16"/>`+
+           `<line x1="0" y1="0" x2="0" y2="${fs*0.5}" stroke="var(--warn)" stroke-width="${fs*0.09}" stroke-opacity=".6"/></pattern>`;
+        g+=`<rect x="${cx+p.x}" y="${y}" width="${p.w}" height="${fz.bh}" fill="url(#${fid})" stroke="var(--warn)" stroke-width="${fs*0.05}"/>`;
+        if(!full){
+          const foldY=fz.by<0.5 ? y : y+fz.bh;
+          g+=`<line x1="${cx+p.x}" y1="${foldY}" x2="${cx+p.x+p.w}" y2="${foldY}" stroke="var(--warn)" stroke-width="${fs*0.1}" stroke-dasharray="${fs*0.22} ${fs*0.16}"/>`;
+        }
+        const lblTxt=`загиб, ${fmt(fz.bh)} мм`;
+        const vert=fz.bh>p.w, along=vert?fz.bh:p.w;
+        if(along>fs*2.2 && tw(lblTxt,fs*0.52)<along*0.9)
+          g+=txt(cx+p.x+p.w/2,y+fz.bh/2,lblTxt,fs*0.52,'var(--warn)','var(--void)',vert?{rot:-90}:{});
+      });
+      // подпись ставим в самую большую полосу детали, свободную от отверстий и клапанов
+      const gaps=p.cuts.map(c=>[p.len-(c.by+c.bh), p.len-c.by])
+        .concat((p.foldZones||[]).map(fz=>[p.len-(fz.by+fz.bh), p.len-fz.by]));
       const bands=subIn(0,p.len,gaps).sort((a,b)=>(b[1]-b[0])-(a[1]-a[0]));
       const band=bands.length?bands[0]:[0,p.len];
       const room=band[1]-band[0];
