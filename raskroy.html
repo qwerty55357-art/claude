@@ -1142,6 +1142,8 @@ function renderOpenings(){
       </select></div></div>
       <label class="chk"><input type="checkbox" data-k="mount"${o.mount==='surface'?' checked':''}><span>Накладной короб (выступает в комнату, не врезан в стену)</span></label>
       <p class="hint" ${o.mount==='surface'?'':'hidden'} style="margin:0 0 6px">Стена под коробом остаётся целой — короб держится на её поверхности. Для обшивки парящих конструкций/коробов материалом, а не настоящих проёмов.</p>
+      <label class="chk" ${o.mount==='surface'?'':'hidden'}><input type="checkbox" data-k="mountCut"${o.mountCut?' checked':''}><span>Убрать материал стены под коробом (экономия — он всё равно скрыт за коробом)</span></label>
+      <p class="hint" ${o.mount==='surface'&&o.mountCut?'':'hidden'} style="margin:0 0 6px">Панель стены под коробом не кроится вообще — как под обычным проёмом. Короб по-прежнему рисуется наружу, в комнату, а не вглубь стены.</p>
       <div class="row">
         <div class="f"><label>Привязка по горизонтали</label><select data-k="anchorH">
           <option value="left"${o.anchorH==='left'?' selected':''}>От левой стены</option>
@@ -1182,10 +1184,11 @@ function renderOpenings(){
     </div>`).join('');
 }
 function otkosSideSelect(o,side,label){
-  // «Изгиб» скрыт для накладного короба (o.mount==='surface') — у короба нет собственной панели
-  // стены, которую можно было бы удлинить/подогнуть (см. otkosMode в core: там это и так тихо
-  // подменяется на «Г-образный угол», но лучше не предлагать выбор, ведущий в ту же сторону
-  // незаметно для пользователя)
+  // «Изгиб» скрыт для накладного короба со сплошной стеной под ним (mountKeepsWall) — у такого
+  // короба нет собственной панели стены, которую можно было бы удлинить/подогнуть (см. otkosMode
+  // в core: там это и так тихо подменяется на «Г-образный угол», но лучше не предлагать выбор,
+  // ведущий в ту же сторону незаметно для пользователя). Если материал под коробом убран
+  // (o.mountCut) — панель режется как под обычным проёмом, и изгиб снова работает штатно.
   const cur=otkosModeJs(o,side);
   const seamable=cur==='corner'||cur==='butt'||cur==='protrude';   // шов возможен там, где реально режется материал
   const seamVal=((o.otkosSeamPos&&o.otkosSeamPos[side])||[]).join(', ');
@@ -1193,7 +1196,7 @@ function otkosSideSelect(o,side,label){
     <optgroup label="С материалом откоса">
       <option value="corner"${cur==='corner'?' selected':''}>Г-образный угол</option>
       <option value="butt"${cur==='butt'?' selected':''}>Встык (без профиля)</option>
-      ${o.mount==='surface'?'':`<option value="bend"${cur==='bend'?' selected':''}>Изгиб панели</option>`}
+      ${mountKeepsWall(o)?'':`<option value="bend"${cur==='bend'?' selected':''}>Изгиб панели</option>`}
       <option value="protrude"${cur==='protrude'?' selected':''}>Выступающий (накладка на стену)</option>
     </optgroup>
     <optgroup label="Без откоса (напр. подоконник)">
@@ -1205,7 +1208,7 @@ function otkosSideSelect(o,side,label){
   ${seamable?`<input type="text" data-k="otkosSeam" data-side="${side}" value="${esc(seamVal)}" placeholder="шов авто (мм от ${side==='left'||side==='right'?'пола':'левого края'})" style="margin-top:4px" title="Позиция шва, если деталь придётся стыковать. Пусто — автоматически.">`:''}
   </div>`;
 }
-function otkosModeJs(o,side){ const m=(o.otkosMode&&o.otkosMode[side])||'corner'; return m==='bend'&&o.mount==='surface'?'corner':m; }
+function otkosModeJs(o,side){ const m=(o.otkosMode&&o.otkosMode[side])||'corner'; return m==='bend'&&mountKeepsWall(o)?'corner':m; }
 // пересчёт x по привязке
 function applyAnchor(o,W,off){
   if(o.anchorH==='right')       o.x=W-off-o.w;
@@ -1226,6 +1229,7 @@ $('#openings').addEventListener('input', e=>{
   else if(k==='yhigh'){ o.h=Math.max(v-o.y,50); }
   else if(k==='fillMat'){ o.fillMat=v||null; }
   else if(k==='mount'){ o.mount=v?'surface':null; renderOpenings(); run(); return; }
+  else if(k==='mountCut'){ o.mountCut=v; renderOpenings(); run(); return; }
   else if(k==='otkosMode'){
     const side=e.target.dataset.side; if(!side) return;
     o.otkosMode=o.otkosMode||{}; o.otkosMode[side]=v;
@@ -1487,11 +1491,11 @@ function buildLayout(S){
   // материал слева и справа от него не связан, сетку надо строить в каждом отдельно.
   const dividers=[];
   opsHole.forEach(o=>{
-    // накладной короб (o.mount==='surface') не режет стеновую панель вообще — стена под ним
-    // остаётся целой (см. ответ пользователю про «обшивку парящих конструкций»), поэтому не
-    // участвует ни в разбиении на регионы, ни в вырезах/стыках ниже — только в раскрое своих
-    // собственных деталей откоса+заполнения (buildOtkosParts, ниже по коду не трогается).
-    if(o.mount==='surface') return;
+    // накладной короб со сплошной стеной под ним (mountKeepsWall — o.mount==='surface' и материал
+    // НЕ убран) не режет стеновую панель вообще — поэтому не участвует ни в разбиении на регионы,
+    // ни в вырезах/стыках ниже — только в раскрое своих деталей откоса+заполнения (buildOtkosParts,
+    // не трогается). Если материал под коробом убран (o.mountCut) — это обычный сквозной проём.
+    if(mountKeepsWall(o)) return;
     const [b0,bL]=oB(o), [a0,aL]=oA(o);
     if(b0<=1 && b0+bL>=along-1) dividers.push([a0,a0+aL]);
   });
@@ -1593,7 +1597,7 @@ function buildLayout(S){
   strips.forEach(st=>{
     const gaps=[];
     opsHole.forEach((o,oi)=>{
-      if(o.mount==='surface') return;   // накладной короб — см. коммент у dividers выше
+      if(mountKeepsWall(o)) return;   // накладной короб со сплошной стеной — см. коммент у dividers выше
       const [a0,aL]=oA(o),[b0,bL]=oB(o);
       if(a0<=st.start+1 && a0+aL>=st.end-1){ gaps.push([b0,b0+bL]); return; }
       const x0=Math.max(st.start,a0), x1=Math.min(st.end,a0+aL);
@@ -1732,7 +1736,7 @@ function buildLayout(S){
     if(!next||next.region!==st.region) return;   // через проём-разделитель стыка нет
     const gaps=[];
     S.ops.forEach(o=>{
-      if(o.mount==='surface') return;   // накладной короб не рвёт стык — стена под ним целая
+      if(mountKeepsWall(o)) return;   // накладной короб со сплошной стеной не рвёт стык
       const [a0,aL]=oA(o),[b0,bL]=oB(o); if(a0<st.end-1&&a0+aL>st.end+1) gaps.push([b0,b0+bL]);
     });
     joints.push({pos:st.end,segs:subRanges(along,gaps)});
@@ -1996,7 +2000,13 @@ function buildOtkosParts(S){
   });
   return parts;
 }
-const otkosMode=(o,side)=>{const m=(o.otkosMode&&o.otkosMode[side])||'corner';return m==='bend'&&o.mount==='surface'?'corner':m;};
+// накладной короб (o.mount==='surface') по умолчанию не режет стеновую панель под собой (короб
+// держится на целой стене) — но материал там можно и убрать (o.mountCut), если он всё равно
+// скрыт за лицевой панелью короба и никогда не виден: тогда для панели это ОБЫЧНЫЙ сквозной
+// проём (та же геометрия/раскрой/изгиб, что у окна или ниши), просто короб всё ещё отрисовывается
+// в 3D наружу (+z), а не вглубь стены — см. renderScene3D/wallCanvasTexture3D.
+const mountKeepsWall=o=>o.mount==='surface'&&!o.mountCut;
+const otkosMode=(o,side)=>{const m=(o.otkosMode&&o.otkosMode[side])||'corner';return m==='bend'&&mountKeepsWall(o)?'corner':m;};
 function packOtkos(parts,sheets,S,opt){
   opt=opt||{};
   const cmps={
@@ -2755,8 +2765,9 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
   let grossArea=0, opsArea=0, otkosArea=0;
   walls.forEach(w=>{
     grossArea+=m2(w.W,w.H);
-    // накладной короб (o.mount==='surface') не отнимает материал стены — панель под ним целая
-    w.ops.forEach(o=>{ if(o.mount!=='surface') opsArea+=m2(o.w,o.h); });
+    // накладной короб со сплошной стеной под ним не отнимает материал стены (mountKeepsWall);
+    // если материал убран (o.mountCut) — площадь вычитается как под обычным проёмом
+    w.ops.forEach(o=>{ if(!mountKeepsWall(o)) opsArea+=m2(o.w,o.h); });
   });
   const lost=new Set(ot.failed);
   parts.forEach(pp=>{ if(!lost.has(pp)) otkosArea+=m2(pp.dep,pp.len); });
@@ -2817,10 +2828,10 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
   walls.forEach((w0,i)=>{
     const w=wallCutView(w0,cornerCuts.get(w0.id));
     const W=w.W,H=w.H,L=layouts[i];
-    // край области: каждая сторона — нет / заглушка / LED-стартовый. Накладной короб
-    // (o.mount==='surface') не касается сюда: стена под ним целая, край не режется, даже
-    // если короб геометрически касается края стены.
-    const throughOps=w.ops.filter(o=>o.mount!=='surface');
+    // край области: каждая сторона — нет / заглушка / LED-стартовый. Накладной короб со сплошной
+    // стеной под ним (mountKeepsWall) не касается сюда: стена под ним целая, край не режется,
+    // даже если короб геометрически касается края стены.
+    const throughOps=w.ops.filter(o=>!mountKeepsWall(o));
     const sides=[
       ['top',  W, throughOps.filter(o=>o.y+o.h>=H-1).map(o=>[o.x,o.x+o.w])],
       ['bot',  W, throughOps.filter(o=>o.y<=1).map(o=>[o.x,o.x+o.w])],
@@ -2856,7 +2867,7 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
     L.seams.forEach(sm=>{
       const gaps=[];
       w.ops.forEach(o=>{
-        if(o.mount==='surface') return;   // накладной короб не рвёт поперечный шов
+        if(mountKeepsWall(o)) return;   // накладной короб со сплошной стеной не рвёт поперечный шов
         const [a0,aL]=L.vert?[o.x,o.w]:[o.y,o.h];
         const [b0,bL]=L.vert?[o.y,o.h]:[o.x,o.w];
         if(b0<sm.pos-1 && b0+bL>sm.pos+1){ gaps.push([Math.max(sm.a0,a0),Math.min(sm.a1,a0+aL)]); }
@@ -2870,9 +2881,9 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
     });
 
     if(G.edgeOps) w.ops.forEach(o=>{
-      // накладной короб не режет саму панель — голого торца стены тут не бывает вовсе,
-      // заглушку/LED на нём ставить не на что
-      if(o.otkos||o.mount==='surface') return;
+      // накладной короб со сплошной стеной не режет саму панель — голого торца стены тут
+      // не бывает вовсе, заглушку/LED на нём ставить не на что
+      if(o.otkos||mountKeepsWall(o)) return;
       if(o.y>1)       opsRuns.push(o.w);
       if(o.y+o.h<H-1) opsRuns.push(o.w);
       if(o.x>1)       opsRuns.push(o.h);
@@ -4003,11 +4014,12 @@ function wallCanvasTexture3D(wv,L,baseColorHex,cuts){
   // заполнение не выбрано (o.fillMat), сквозь проём должны быть видны детали откоса и/или фон
   // сцены, а не непрозрачная «стена изнутри». Заполнение, если оно есть, рисуется ОТДЕЛЬНОЙ
   // деталью в глубине проёма (см. renderScene3D — за откосом), а не здесь, на лицевой плоскости.
-  // Накладной короб (o.mount==='surface') — исключение: стена под ним целая (см. buildLayout:
-  // никакого выреза в самой панели для него нет вовсе), дыру тут пробивать нельзя — она бы
-  // «просвечивала» насквозь через сплошную стену.
+  // Накладной короб со сплошной стеной под ним (mountKeepsWall) — исключение: стена под ним
+  // целая (см. buildLayout: никакого выреза в самой панели для него нет вовсе), дыру тут
+  // пробивать нельзя — она бы «просвечивала» насквозь через сплошную стену. Если материал
+  // под коробом убран (o.mountCut) — это обычный проём, дыра нужна как всегда.
   (wv.ops||[]).forEach(o=>{
-    if(o.mount==='surface') return;
+    if(mountKeepsWall(o)) return;
     const x=o.x*scale, y=ch-(o.y+o.h)*scale, w=o.w*scale, h=o.h*scale;
     ctx.clearRect(Math.max(0,x),Math.max(0,y),w,h);
   });
@@ -4974,10 +4986,10 @@ $('#btn-print').addEventListener('click',()=>window.print());
     const names={top:'Сверху',bottom:'Снизу',left:'Слева',right:'Справа'};
     const menu=menuShell(ev,`Откос · ${names[side]||side}`);
     const cur0=(o.otkosMode&&o.otkosMode[side])||'corner';
-    const cur=cur0==='bend'&&o.mount==='surface'?'corner':cur0;
-    // «Изгиб» скрыт для накладного короба — см. коммент у otkosSideSelect (та же причина)
+    const cur=cur0==='bend'&&mountKeepsWall(o)?'corner':cur0;
+    // «Изгиб» скрыт для короба со сплошной стеной — см. коммент у otkosSideSelect (та же причина)
     [['corner','Г-образный угол'],['butt','Встык (без профиля)'],
-     ...(o.mount==='surface'?[]:[['bend','Изгиб панели']]),
+     ...(mountKeepsWall(o)?[]:[['bend','Изгиб панели']]),
      ['protrude','Выступающий (накладка на стену)']].forEach(([val,label])=>{
       menuBtn(menu,label,cur===val,()=>{
         o.otkosMode=o.otkosMode||{}; o.otkosMode[side]=val;
