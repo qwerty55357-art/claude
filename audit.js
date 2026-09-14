@@ -31,6 +31,7 @@ function mkWall(r){
     w.ops.push({kind:['window','door','niche'][Math.floor(r()*3)],w:ow,h:oh,x:ox,y:oy,otkos:r()<0.5,depth:[100,150,200,250][Math.floor(r()*4)],
       otkosOverlap:r()<0.5?[50,100,150,200,300][Math.floor(r()*5)]:0,
       fillMat:r()<0.3?['marble','slat','rockL','rockS'][Math.floor(r()*4)]:null,id:i+1,
+      mount:r()<0.15?'surface':null,
       otkosMode:{left:modes(),right:modes(),top:modes(),bottom:modes()}});
   }
   return w;
@@ -535,6 +536,11 @@ for(let t=0;t<N;t++){
       if(!o.otkos||!(o.depth>0)) return;
       const m=k=>{
         const raw=(o.otkosMode&&o.otkosMode[k])||'corner';
+        // накладной короб (o.mount==='surface') — «изгиб» там вообще недостижим (нет своей
+        // панели стены, которую можно вырастить/подогнуть, см. core: otkosMode подменяет его
+        // на 'corner' безусловно, ДО попытки любого bend-механизма — в bendRejected он поэтому
+        // никогда не попадает, это отдельный случай от «изгиб отклонён геометрией»)
+        if(raw==='bend'&&o.mount==='surface') return 'corner';
         return raw==='bend'&&rej.has(oi+'|'+k) ? 'corner' : raw;   // отклонённый изгиб = деталь есть
       };
       const has=v=>v==='corner'||v==='butt'||v==='protrude';
@@ -574,6 +580,22 @@ for(let t=0;t<N;t++){
     chk('L70',Math.abs(R.otkosArea-(expArea-failedArea))<0.01,
       `${id}: otkosArea ${R.otkosArea.toFixed(3)} != ожидаемой ${(expArea-failedArea).toFixed(3)}`);
   }
+  // L80/L81 (нов): накладной короб (o.mount==='surface') — стена под ним остаётся целой панелью:
+  // никакого выреза в ней самой (p.cuts), площадь проёма НЕ вычитается из opsArea/netArea.
+  {
+    let expOpsArea=0;
+    wallsArr.forEach(w=>w.ops.forEach(o=>{ if(o.mount!=='surface') expOpsArea+=(o.w*o.h)/1e6; }));
+    chk('L80',Math.abs(R.opsArea-expOpsArea)<0.01,
+      `${id}: opsArea ${R.opsArea.toFixed(3)} != ожидаемой ${expOpsArea.toFixed(3)} (без накладных коробов)`);
+  }
+  R.layouts.forEach((L,wi)=>{
+    const w=wallsArr[wi];
+    w.ops.forEach((o,oi)=>{
+      if(o.mount!=='surface') return;
+      L.pieces.forEach(p=>chk('L81',!p.cuts.some(c=>c.op===oi),
+        `${id} стена ${wi}: накладной короб op=${oi} режет деталь ${p.label} — стена под коробом должна остаться целой`));
+    });
+  });
   // L73 (нов): «заглушка примыкания к раме» — на каждую сторону с материалом или изгибом
   // (corner/butt/bend/protrude), длиной lenOf — у «выступающих» верх/низ она длиннее на Т-стык
   // (см. buildOtkosParts и effOps-блок в computeProject).
@@ -614,9 +636,10 @@ for(let t=0;t<N;t++){
             if(m(k)==='cap') expOps+=len;
             if(m(k)==='led') expLed+=len;
           });
-        } else {
+        } else if(o.mount!=='surface') {
           // старый источник ops: проём вообще без откоса — торец закрыт заглушкой на сторонах,
-          // не касающихся края стены
+          // не касающихся края стены. Накладной короб исключён — панель под ним целая, торца
+          // самой стены тут попросту не существует (см. computeProject: edgeOps-блок)
           if(o.y>1)       expOps+=o.w;
           if(o.y+o.h<H-1) expOps+=o.w;
           if(o.x>1)       expOps+=o.h;

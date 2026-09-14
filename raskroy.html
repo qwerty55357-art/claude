@@ -1116,9 +1116,10 @@ function miniSvg(o,W,H){
   if(W<=0||H<=0) return '';
   const pad=Math.max(W,H)*0.04;
   const bad=o.x<0||o.y<0||o.x+o.w>W+1||o.y+o.h>H+1;
+  const surfMount=o.mount==='surface';
   return `<svg viewBox="${-pad} ${-pad} ${W+pad*2} ${H+pad*2}" style="max-height:110px">
     <rect x="0" y="0" width="${W}" height="${H}" fill="var(--straw-face)" fill-opacity=".35" stroke="var(--line-2)" stroke-width="${pad*0.35}"/>
-    <rect x="${o.x}" y="${H-o.y-o.h}" width="${o.w}" height="${o.h}" fill="var(--void)" stroke="${bad?'var(--err)':'var(--alu)'}" stroke-width="${pad*0.5}"/>
+    <rect x="${o.x}" y="${H-o.y-o.h}" width="${o.w}" height="${o.h}" fill="${surfMount?'var(--straw)':'var(--void)'}" fill-opacity="${surfMount?'.4':'1'}" stroke="${bad?'var(--err)':surfMount?'var(--ok)':'var(--alu)'}" stroke-width="${pad*0.5}"${surfMount?` stroke-dasharray="${pad*1.2} ${pad*0.7}"`:''}/>
   </svg>`;
 }
 // [ОТРИСОВКА]
@@ -1139,6 +1140,8 @@ function renderOpenings(){
         <option value="door"${o.kind==='door'?' selected':''}>Дверь</option>
         <option value="niche"${o.kind==='niche'?' selected':''}>Ниша / вырез</option>
       </select></div></div>
+      <label class="chk"><input type="checkbox" data-k="mount"${o.mount==='surface'?' checked':''}><span>Накладной короб (выступает в комнату, не врезан в стену)</span></label>
+      <p class="hint" ${o.mount==='surface'?'':'hidden'} style="margin:0 0 6px">Стена под коробом остаётся целой — короб держится на её поверхности. Для обшивки парящих конструкций/коробов материалом, а не настоящих проёмов.</p>
       <div class="row">
         <div class="f"><label>Привязка по горизонтали</label><select data-k="anchorH">
           <option value="left"${o.anchorH==='left'?' selected':''}>От левой стены</option>
@@ -1179,6 +1182,10 @@ function renderOpenings(){
     </div>`).join('');
 }
 function otkosSideSelect(o,side,label){
+  // «Изгиб» скрыт для накладного короба (o.mount==='surface') — у короба нет собственной панели
+  // стены, которую можно было бы удлинить/подогнуть (см. otkosMode в core: там это и так тихо
+  // подменяется на «Г-образный угол», но лучше не предлагать выбор, ведущий в ту же сторону
+  // незаметно для пользователя)
   const cur=otkosModeJs(o,side);
   const seamable=cur==='corner'||cur==='butt'||cur==='protrude';   // шов возможен там, где реально режется материал
   const seamVal=((o.otkosSeamPos&&o.otkosSeamPos[side])||[]).join(', ');
@@ -1186,7 +1193,7 @@ function otkosSideSelect(o,side,label){
     <optgroup label="С материалом откоса">
       <option value="corner"${cur==='corner'?' selected':''}>Г-образный угол</option>
       <option value="butt"${cur==='butt'?' selected':''}>Встык (без профиля)</option>
-      <option value="bend"${cur==='bend'?' selected':''}>Изгиб панели</option>
+      ${o.mount==='surface'?'':`<option value="bend"${cur==='bend'?' selected':''}>Изгиб панели</option>`}
       <option value="protrude"${cur==='protrude'?' selected':''}>Выступающий (накладка на стену)</option>
     </optgroup>
     <optgroup label="Без откоса (напр. подоконник)">
@@ -1198,7 +1205,7 @@ function otkosSideSelect(o,side,label){
   ${seamable?`<input type="text" data-k="otkosSeam" data-side="${side}" value="${esc(seamVal)}" placeholder="шов авто (мм от ${side==='left'||side==='right'?'пола':'левого края'})" style="margin-top:4px" title="Позиция шва, если деталь придётся стыковать. Пусто — автоматически.">`:''}
   </div>`;
 }
-function otkosModeJs(o,side){ return (o.otkosMode&&o.otkosMode[side])||'corner'; }
+function otkosModeJs(o,side){ const m=(o.otkosMode&&o.otkosMode[side])||'corner'; return m==='bend'&&o.mount==='surface'?'corner':m; }
 // пересчёт x по привязке
 function applyAnchor(o,W,off){
   if(o.anchorH==='right')       o.x=W-off-o.w;
@@ -1218,6 +1225,7 @@ $('#openings').addEventListener('input', e=>{
   else if(k==='ylow'){ const top=o.y+o.h; o.y=v; o.h=Math.max(top-v,50); }
   else if(k==='yhigh'){ o.h=Math.max(v-o.y,50); }
   else if(k==='fillMat'){ o.fillMat=v||null; }
+  else if(k==='mount'){ o.mount=v?'surface':null; renderOpenings(); run(); return; }
   else if(k==='otkosMode'){
     const side=e.target.dataset.side; if(!side) return;
     o.otkosMode=o.otkosMode||{}; o.otkosMode[side]=v;
@@ -1479,6 +1487,11 @@ function buildLayout(S){
   // материал слева и справа от него не связан, сетку надо строить в каждом отдельно.
   const dividers=[];
   opsHole.forEach(o=>{
+    // накладной короб (o.mount==='surface') не режет стеновую панель вообще — стена под ним
+    // остаётся целой (см. ответ пользователю про «обшивку парящих конструкций»), поэтому не
+    // участвует ни в разбиении на регионы, ни в вырезах/стыках ниже — только в раскрое своих
+    // собственных деталей откоса+заполнения (buildOtkosParts, ниже по коду не трогается).
+    if(o.mount==='surface') return;
     const [b0,bL]=oB(o), [a0,aL]=oA(o);
     if(b0<=1 && b0+bL>=along-1) dividers.push([a0,a0+aL]);
   });
@@ -1580,6 +1593,7 @@ function buildLayout(S){
   strips.forEach(st=>{
     const gaps=[];
     opsHole.forEach((o,oi)=>{
+      if(o.mount==='surface') return;   // накладной короб — см. коммент у dividers выше
       const [a0,aL]=oA(o),[b0,bL]=oB(o);
       if(a0<=st.start+1 && a0+aL>=st.end-1){ gaps.push([b0,b0+bL]); return; }
       const x0=Math.max(st.start,a0), x1=Math.min(st.end,a0+aL);
@@ -1717,7 +1731,10 @@ function buildLayout(S){
     const next=strips[k+1];
     if(!next||next.region!==st.region) return;   // через проём-разделитель стыка нет
     const gaps=[];
-    S.ops.forEach(o=>{const [a0,aL]=oA(o),[b0,bL]=oB(o); if(a0<st.end-1&&a0+aL>st.end+1) gaps.push([b0,b0+bL]);});
+    S.ops.forEach(o=>{
+      if(o.mount==='surface') return;   // накладной короб не рвёт стык — стена под ним целая
+      const [a0,aL]=oA(o),[b0,bL]=oB(o); if(a0<st.end-1&&a0+aL>st.end+1) gaps.push([b0,b0+bL]);
+    });
     joints.push({pos:st.end,segs:subRanges(along,gaps)});
   });
   // ---- «Изгиб недорезом»: если у стороны нет соседней полосы (край проёма пришёлся
@@ -1979,7 +1996,7 @@ function buildOtkosParts(S){
   });
   return parts;
 }
-const otkosMode=(o,side)=>(o.otkosMode&&o.otkosMode[side])||'corner';
+const otkosMode=(o,side)=>{const m=(o.otkosMode&&o.otkosMode[side])||'corner';return m==='bend'&&o.mount==='surface'?'corner':m;};
 function packOtkos(parts,sheets,S,opt){
   opt=opt||{};
   const cmps={
@@ -2738,7 +2755,8 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
   let grossArea=0, opsArea=0, otkosArea=0;
   walls.forEach(w=>{
     grossArea+=m2(w.W,w.H);
-    w.ops.forEach(o=>{ opsArea+=m2(o.w,o.h); });
+    // накладной короб (o.mount==='surface') не отнимает материал стены — панель под ним целая
+    w.ops.forEach(o=>{ if(o.mount!=='surface') opsArea+=m2(o.w,o.h); });
   });
   const lost=new Set(ot.failed);
   parts.forEach(pp=>{ if(!lost.has(pp)) otkosArea+=m2(pp.dep,pp.len); });
@@ -2799,12 +2817,15 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
   walls.forEach((w0,i)=>{
     const w=wallCutView(w0,cornerCuts.get(w0.id));
     const W=w.W,H=w.H,L=layouts[i];
-    // край области: каждая сторона — нет / заглушка / LED-стартовый
+    // край области: каждая сторона — нет / заглушка / LED-стартовый. Накладной короб
+    // (o.mount==='surface') не касается сюда: стена под ним целая, край не режется, даже
+    // если короб геометрически касается края стены.
+    const throughOps=w.ops.filter(o=>o.mount!=='surface');
     const sides=[
-      ['top',  W, w.ops.filter(o=>o.y+o.h>=H-1).map(o=>[o.x,o.x+o.w])],
-      ['bot',  W, w.ops.filter(o=>o.y<=1).map(o=>[o.x,o.x+o.w])],
-      ['left', H, w.ops.filter(o=>o.x<=1).map(o=>[o.y,o.y+o.h])],
-      ['right',H, w.ops.filter(o=>o.x+o.w>=W-1).map(o=>[o.y,o.y+o.h])]
+      ['top',  W, throughOps.filter(o=>o.y+o.h>=H-1).map(o=>[o.x,o.x+o.w])],
+      ['bot',  W, throughOps.filter(o=>o.y<=1).map(o=>[o.x,o.x+o.w])],
+      ['left', H, throughOps.filter(o=>o.x<=1).map(o=>[o.y,o.y+o.h])],
+      ['right',H, throughOps.filter(o=>o.x+o.w>=W-1).map(o=>[o.y,o.y+o.h])]
     ];
     sides.forEach(([k,len,gaps])=>{
       let mode=edgeMode(w.edges[k]);
@@ -2835,6 +2856,7 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
     L.seams.forEach(sm=>{
       const gaps=[];
       w.ops.forEach(o=>{
+        if(o.mount==='surface') return;   // накладной короб не рвёт поперечный шов
         const [a0,aL]=L.vert?[o.x,o.w]:[o.y,o.h];
         const [b0,bL]=L.vert?[o.y,o.h]:[o.x,o.w];
         if(b0<sm.pos-1 && b0+bL>sm.pos+1){ gaps.push([Math.max(sm.a0,a0),Math.min(sm.a1,a0+aL)]); }
@@ -2848,7 +2870,9 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
     });
 
     if(G.edgeOps) w.ops.forEach(o=>{
-      if(o.otkos) return;
+      // накладной короб не режет саму панель — голого торца стены тут не бывает вовсе,
+      // заглушку/LED на нём ставить не на что
+      if(o.otkos||o.mount==='surface') return;
       if(o.y>1)       opsRuns.push(o.w);
       if(o.y+o.h<H-1) opsRuns.push(o.w);
       if(o.x>1)       opsRuns.push(o.h);
@@ -3255,6 +3279,7 @@ function schemeFor(G,R,wi){
   // проёмы
   S.ops.forEach((o,i)=>{
     const x=o.x, y=H-o.y-o.h;
+    const surfMount=o.mount==='surface';
     if(o.fillMat){
       const mp=PRESETS.find(pp=>pp.id===o.fillMat);
       const mc=matColor(o.fillMat);
@@ -3268,10 +3293,14 @@ function schemeFor(G,R,wi){
         }
       }
     } else {
-      g+=`<rect x="${x}" y="${y}" width="${o.w}" height="${o.h}" fill="var(--void)" stroke="var(--line-2)" stroke-width="${fs*0.08}" data-drag="${o.id}" style="cursor:move"/>`;
+      // накладной короб (surfMount) — НЕ настоящая дыра в стене (см. buildLayout/computeProject:
+      // панель под ним целая), поэтому вместо чёрной «дыры» — полупрозрачная зона тем же тоном,
+      // что и стена, плюс пунктирная рамка ниже подчёркивает «короб на поверхности», а не вырез
+      g+=`<rect x="${x}" y="${y}" width="${o.w}" height="${o.h}" fill="${surfMount?'var(--straw)':'var(--void)'}" fill-opacity="${surfMount?'.3':'1'}" stroke="var(--line-2)" stroke-width="${fs*0.08}" data-drag="${o.id}" style="cursor:move"/>`;
     }
+    if(surfMount) g+=`<rect x="${x}" y="${y}" width="${o.w}" height="${o.h}" fill="none" stroke="var(--ok)" stroke-width="${fs*0.12}" stroke-dasharray="${fs*0.3} ${fs*0.18}" pointer-events="none"/>`;
     g+=`<rect x="${x+o.w-fs*0.9}" y="${y+o.h-fs*0.9}" width="${fs*0.9}" height="${fs*0.9}" fill="var(--alu)" data-resize="${o.id}" style="cursor:nwse-resize"/>`;
-    const onm=`${o.kind==='door'?'ДВЕРЬ':o.kind==='niche'?'НИША':'ОКНО'} ${i+1}`;
+    const onm=`${o.kind==='door'?'ДВЕРЬ':o.kind==='niche'?'НИША':'ОКНО'} ${i+1}${surfMount?' · КОРОБ':''}`;
     if(tw(onm,fs*0.8)<o.w*0.9 && o.h>fs*2.4){
       const ink=o.fillMat?'var(--ink-face)':'var(--muted)';
       const halo=o.fillMat?matColor(o.fillMat):'var(--void)';
@@ -3974,7 +4003,11 @@ function wallCanvasTexture3D(wv,L,baseColorHex,cuts){
   // заполнение не выбрано (o.fillMat), сквозь проём должны быть видны детали откоса и/или фон
   // сцены, а не непрозрачная «стена изнутри». Заполнение, если оно есть, рисуется ОТДЕЛЬНОЙ
   // деталью в глубине проёма (см. renderScene3D — за откосом), а не здесь, на лицевой плоскости.
+  // Накладной короб (o.mount==='surface') — исключение: стена под ним целая (см. buildLayout:
+  // никакого выреза в самой панели для него нет вовсе), дыру тут пробивать нельзя — она бы
+  // «просвечивала» насквозь через сплошную стену.
   (wv.ops||[]).forEach(o=>{
+    if(o.mount==='surface') return;
     const x=o.x*scale, y=ch-(o.y+o.h)*scale, w=o.w*scale, h=o.h*scale;
     ctx.clearRect(Math.max(0,x),Math.max(0,y),w,h);
   });
@@ -4085,6 +4118,10 @@ function renderScene3D(G,R){
     (wv.ops||[]).forEach(o=>{
       if(!o.otkos||!(o.depth>0)) return;
       const dep=o.depth;
+      // накладной короб (o.mount==='surface') — та же геометрия, но глубина уходит В КОМНАТУ
+      // (+z, к камере), а не в толщу стены (-z, как у обычного проёма/ниши): короб не врезан в
+      // стену, а стоит на её сплошной поверхности, обшивка того же материала выступает вперёд.
+      const dz=o.mount==='surface'?1:-1;
       const revealSides=[['left',o.x,o.y,o.x,o.y+o.h],['right',o.x+o.w,o.y,o.x+o.w,o.y+o.h],
         ['top',o.x,o.y+o.h,o.x+o.w,o.y+o.h]];
       if(o.kind!=='door') revealSides.push(['bottom',o.x,o.y,o.x+o.w,o.y]);
@@ -4093,7 +4130,7 @@ function renderScene3D(G,R){
         const colorHex=(mid&&cssVar3d('--mat-'+mid))||defaultColorHex;
         const geo=new THREE.BufferGeometry();
         geo.setAttribute('position',new THREE.Float32BufferAttribute(
-          [x0,y0,0, x0,y0,-dep, x1,y1,0, x1,y1,-dep],3));
+          [x0,y0,0, x0,y0,dz*dep, x1,y1,0, x1,y1,dz*dep],3));
         geo.setAttribute('uv',new THREE.Float32BufferAttribute([0,0, 0,1, 1,0, 1,1],2));
         geo.setIndex([0,1,2, 2,1,3]);
         geo.computeVertexNormals();
@@ -4110,9 +4147,10 @@ function renderScene3D(G,R){
       if(!o.fillMat) return;
       const colorHex=cssVar3d('--mat-'+o.fillMat)||defaultColorHex;
       const dep=(o.otkos&&o.depth>0)?o.depth:2;
+      const dz=o.mount==='surface'?1:-1;   // см. коммент у откосов выше — та же логика для лицевой панели короба
       const fillGeo=new THREE.BufferGeometry();
       fillGeo.setAttribute('position',new THREE.Float32BufferAttribute(
-        [o.x,o.y,-dep, o.x+o.w,o.y,-dep, o.x,o.y+o.h,-dep, o.x+o.w,o.y+o.h,-dep],3));
+        [o.x,o.y,dz*dep, o.x+o.w,o.y,dz*dep, o.x,o.y+o.h,dz*dep, o.x+o.w,o.y+o.h,dz*dep],3));
       fillGeo.setAttribute('uv',new THREE.Float32BufferAttribute([0,0, 1,0, 0,1, 1,1],2));
       fillGeo.setIndex([0,1,2, 2,1,3]);
       fillGeo.computeVertexNormals();
@@ -4935,8 +4973,11 @@ $('#btn-print').addEventListener('click',()=>window.print());
     const w=AW(); const o=w.ops.find(x=>x.id==opId); if(!o) return;
     const names={top:'Сверху',bottom:'Снизу',left:'Слева',right:'Справа'};
     const menu=menuShell(ev,`Откос · ${names[side]||side}`);
-    const cur=(o.otkosMode&&o.otkosMode[side])||'corner';
-    [['corner','Г-образный угол'],['butt','Встык (без профиля)'],['bend','Изгиб панели'],
+    const cur0=(o.otkosMode&&o.otkosMode[side])||'corner';
+    const cur=cur0==='bend'&&o.mount==='surface'?'corner':cur0;
+    // «Изгиб» скрыт для накладного короба — см. коммент у otkosSideSelect (та же причина)
+    [['corner','Г-образный угол'],['butt','Встык (без профиля)'],
+     ...(o.mount==='surface'?[]:[['bend','Изгиб панели']]),
      ['protrude','Выступающий (накладка на стену)']].forEach(([val,label])=>{
       menuBtn(menu,label,cur===val,()=>{
         o.otkosMode=o.otkosMode||{}; o.otkosMode[side]=val;
