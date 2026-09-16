@@ -81,10 +81,12 @@ for(let t=0;t<N;t++){
       if(e.leg.el==='jointH') jhSum+=len;
     });
     const L=C.buildLayout(C.wallS(G,w));
+    const keepsWall=o=>o.mount==='surface'&&!o.mountCut;
     const expJv=L.joints.reduce((a,j)=>a+j.segs.reduce((s,sg)=>s+(sg[1]-sg[0]),0),0);
     const expJh=L.seams.reduce((a,sm)=>{
       const gaps=[];
       w.ops.forEach(o=>{
+        if(keepsWall(o)) return;   // накладной короб со сплошной стеной не рвёт поперечный шов
         const [a0,aL]=L.vert?[o.x,o.w]:[o.y,o.h];
         const [b0,bL]=L.vert?[o.y,o.h]:[o.x,o.w];
         if(b0<sm.pos-1 && b0+bL>sm.pos+1){ gaps.push([Math.max(sm.a0,a0),Math.min(sm.a1,a0+aL)]); }
@@ -93,6 +95,19 @@ for(let t=0;t<N;t++){
     },0);
     chk('L135e',Math.abs(jvSum-expJv)<1,`${id} стена ${wi}: сумма рёбер jointV в графе ${jvSum} != ${expJv} по L.joints`);
     chk('L135f',Math.abs(jhSum-expJh)<1,`${id} стена ${wi}: сумма рёбер jointH в графе ${jhSum} != ${expJh} по L.seams`);
+
+    // L135g: край области (el:'edge') в графе LED — тот же mountKeepsWall, что и в computeProject
+    // (throughOps): короб со сплошной стеной не режет край стены, даже если геометрически касается
+    let edgeSum=0; graph.edges.forEach(e=>{ if(e.leg.el==='edge') edgeSum+=Math.hypot(
+      (byKey.get(e.a)||{}).x-(byKey.get(e.b)||{}).x,(byKey.get(e.a)||{}).y-(byKey.get(e.b)||{}).y); });
+    const throughOps=w.ops.filter(o=>!keepsWall(o));
+    const expEdge=[
+      ['top',w.W,throughOps.filter(o=>o.y+o.h>=w.H-1).map(o=>[o.x,o.x+o.w])],
+      ['bot',w.W,throughOps.filter(o=>o.y<=1).map(o=>[o.x,o.x+o.w])],
+      ['left',w.H,throughOps.filter(o=>o.x<=1).map(o=>[o.y,o.y+o.h])],
+      ['right',w.H,throughOps.filter(o=>o.x+o.w>=w.W-1).map(o=>[o.y,o.y+o.h])]
+    ].reduce((a,[,len,gaps])=>a+C.subRanges(len,gaps).reduce((s,g)=>s+(g[1]-g[0]),0),0);
+    chk('L135g',Math.abs(edgeSum-expEdge)<1,`${id} стена ${wi}: сумма рёбер edge в графе ${edgeSum} != ${expEdge} (короб со сплошной стеной не должен рвать край)`);
   });
 
   // L1: деталь внутри листа

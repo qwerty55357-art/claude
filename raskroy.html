@@ -2501,11 +2501,14 @@ function wallLedGraph(w,G,cuts){
   };
   addNode(0,0); addNode(W,0); addNode(0,H); addNode(W,H);
 
+  // накладной короб со сплошной стеной под ним (mountKeepsWall) не режет край стены, даже если
+  // геометрически касается его — та же логика, что и в computeProject (throughOps)
+  const throughOps=w.ops.filter(o=>!mountKeepsWall(o));
   const edgeSides=[
-    ['top',  W, w.ops.filter(o=>o.y+o.h>=H-1).map(o=>[o.x,o.x+o.w])],
-    ['bot',  W, w.ops.filter(o=>o.y<=1).map(o=>[o.x,o.x+o.w])],
-    ['left', H, w.ops.filter(o=>o.x<=1).map(o=>[o.y,o.y+o.h])],
-    ['right',H, w.ops.filter(o=>o.x+o.w>=W-1).map(o=>[o.y,o.y+o.h])]
+    ['top',  W, throughOps.filter(o=>o.y+o.h>=H-1).map(o=>[o.x,o.x+o.w])],
+    ['bot',  W, throughOps.filter(o=>o.y<=1).map(o=>[o.x,o.x+o.w])],
+    ['left', H, throughOps.filter(o=>o.x<=1).map(o=>[o.y,o.y+o.h])],
+    ['right',H, throughOps.filter(o=>o.x+o.w>=W-1).map(o=>[o.y,o.y+o.h])]
   ];
   edgeSides.forEach(([k,len,gaps])=>{
     subRanges(len,gaps).forEach(([s,e])=>{
@@ -2531,6 +2534,7 @@ function wallLedGraph(w,G,cuts){
   L.seams.forEach(sm=>{
     const gaps=[];
     w.ops.forEach(o=>{
+      if(mountKeepsWall(o)) return;   // накладной короб со сплошной стеной не рвёт поперечный шов
       const [a0,aL]=L.vert?[o.x,o.w]:[o.y,o.h];
       const [b0,bL]=L.vert?[o.y,o.h]:[o.x,o.w];
       if(b0<sm.pos-1 && b0+bL>sm.pos+1){ gaps.push([Math.max(sm.a0,a0),Math.min(sm.a1,a0+aL)]); }
