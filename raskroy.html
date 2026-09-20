@@ -385,7 +385,8 @@ tbody tr:hover td{background:var(--surface)}
       <p class="hint">Вместо готового (плоского) рендера — полупрозрачная схема поверх исходного
         фото плюс текстовое описание проекта: отдаёте оба нейросети (вручную, в любой генератор
         изображений) — она сама дорисует реалистичные текстуру, свет и тени, а точную геометрию
-        (где панель, где стык, где LED, где откос) возьмёт со схемы.</p>
+        (где панель, где стык, где LED, где откос) возьмёт со схемы. После первого «Наложить»
+        картинка выше уже показывает саму схему — ползунок ниже сразу меняет её прозрачность.</p>
       <div class="row row-1"><div class="f"><label>Непрозрачность схемы, %</label><input type="range" id="viz-guide-opacity" min="15" max="80" value="45"><span class="unit" id="viz-guide-opacity-val">45%</span></div></div>
       <div class="viz-actions">
         <button type="button" class="btn btn-mini" id="viz-guide-download" disabled>Скачать схему для нейросети</button>
@@ -5657,6 +5658,13 @@ window.addEventListener('beforeprint',flushScene3D);
   // пересобраться заново в любой момент — например, при сдвиге ползунка прозрачности — поэтому
   // хранится не картинка, а сами координаты/параметры каждого наложенного слоя
   let appliedLayers=[];
+  // кэш «схемы» (диаграммы) в полном разрешении, собранной из appliedLayers/exclusionRects —
+  // сама сборка (полная прорисовка проективного варпа по каждому применённому слою) стоит
+  // заметного времени, а вот композит фото+схема с разной прозрачностью — копеечная операция.
+  // Разделяем это, чтобы ползунок прозрачности двигался в реальном времени (redraw на каждый
+  // input), не пересчитывая тяжёлую часть на каждый тик слайдера — только когда список слоёв
+  // или зон исключения реально изменился (diagramDirty=true)
+  let diagramCache=null, diagramDirty=true;
 
   function resetWorking(){
     if(!photoImg) return;
@@ -5668,9 +5676,20 @@ window.addEventListener('beforeprint',flushScene3D);
   function redraw(){
     if(!photoImg||!workingCanvas) return;
     canvas.width=dispW; canvas.height=dispH;
-    // фон превью — текущий НАКОПЛЕННЫЙ результат (а не всегда исходное фото): при разметке второй
-    // стены на том же снимке видно уже применённую первую, а не как будто её и не было
-    ctx.drawImage(workingCanvas,0,0,dispW,dispH);
+    // фон превью: если уже есть хотя бы один применённый слой — показываем ТУ ЖЕ «схему для
+    // нейросети» (фото + полупрозрачная диаграмма), которую скачивает «Скачать схему», и с ТЕМ ЖЕ
+    // процентом прозрачности — иначе ползунок «Непрозрачность схемы» двигается без видимого
+    // эффекта на экране (пользователь видит результат только после скачивания файла). Пока слоёв
+    // нет — превью показывает просто накопленный рабочий холст (нечего ещё показывать как схему)
+    const diagram=ensureDiagram();
+    if(diagram){
+      ctx.drawImage(photoImg,0,0,dispW,dispH);
+      ctx.globalAlpha=Math.max(0,Math.min(1,+opacityInp.value/100));
+      ctx.drawImage(diagram,0,0,dispW,dispH);
+      ctx.globalAlpha=1;
+    } else {
+      ctx.drawImage(workingCanvas,0,0,dispW,dispH);
+    }
     // зоны исключения — глобальные, видны при разметке любой цели (не только когда выбрана сама
     // цель «Зоны исключения»), полупрозрачной красной штриховкой поверх фото/уже применённого
     exclusionRects.forEach(r=>{
@@ -5726,6 +5745,7 @@ window.addEventListener('beforeprint',flushScene3D);
         dispW=Math.max(1,Math.round(img.naturalWidth*dispScale));
         dispH=Math.max(1,Math.round(img.naturalHeight*dispScale));
         pointsByTarget={}; exclusionRects=[]; resultCanvas=null; appliedLayers=[]; btnDownload.disabled=true;
+        diagramCache=null; diagramDirty=true;
         clearAiOutputs();
         resetWorking();
         redraw();
@@ -5747,13 +5767,16 @@ window.addEventListener('beforeprint',flushScene3D);
   targetSel.addEventListener('change',redraw);
   btnResetAll.addEventListener('click',()=>{
     pointsByTarget={}; exclusionRects=[]; resultCanvas=null; appliedLayers=[]; btnDownload.disabled=true;
+    diagramCache=null; diagramDirty=true;
     clearAiOutputs();
     resetWorking(); redraw();
   });
   function clearAiOutputs(){
     btnGuideDownload.disabled=true; btnJsonCopy.disabled=true; btnDownloadAll.disabled=true; jsonOutput.value='';
   }
-  opacityInp.addEventListener('input',()=>{ opacityVal.textContent=opacityInp.value+'%'; });
+  // redraw() здесь дешёвый: тяжёлая часть (ensureDiagram) кэширована и не пересчитывается на
+  // каждый тик слайдера — см. объявление diagramCache/diagramDirty
+  opacityInp.addEventListener('input',()=>{ opacityVal.textContent=opacityInp.value+'%'; redraw(); });
 
   function ptFromEvent(ev){
     const r=canvas.getBoundingClientRect();
@@ -5770,7 +5793,7 @@ window.addEventListener('beforeprint',flushScene3D);
     if(targetSel.value==='exclude'){
       // клик ВНУТРИ уже отмеченной зоны — убрать её (тот же жест, без отдельной кнопки-урны)
       const hitIdx=exclusionRects.findIndex(r=>pt.x>=r.x0&&pt.x<=r.x1&&pt.y>=r.y0&&pt.y<=r.y1);
-      if(hitIdx>=0){ exclusionRects.splice(hitIdx,1); redraw(); return; }
+      if(hitIdx>=0){ exclusionRects.splice(hitIdx,1); diagramDirty=true; redraw(); return; }
       exclDraft={x0:pt.x,y0:pt.y,x1:pt.x,y1:pt.y};
       canvas.setPointerCapture(ev.pointerId);
       return;
@@ -5794,7 +5817,7 @@ window.addEventListener('beforeprint',flushScene3D);
       const x0=Math.min(exclDraft.x0,exclDraft.x1), y0=Math.min(exclDraft.y0,exclDraft.y1);
       const x1=Math.max(exclDraft.x0,exclDraft.x1), y1=Math.max(exclDraft.y0,exclDraft.y1);
       exclDraft=null;
-      if(x1-x0>4&&y1-y0>4) exclusionRects.push({x0,y0,x1,y1}); // отсекаем случайный клик без реального перетаскивания
+      if(x1-x0>4&&y1-y0>4){ exclusionRects.push({x0,y0,x1,y1}); diagramDirty=true; } // отсекаем случайный клик без реального перетаскивания
       redraw();
       return;
     }
@@ -5804,7 +5827,7 @@ window.addEventListener('beforeprint',flushScene3D);
   canvas.addEventListener('pointercancel',endDrag);
 
   btnReset.addEventListener('click',()=>{
-    if(targetSel.value==='exclude') exclusionRects=[];
+    if(targetSel.value==='exclude'){ exclusionRects=[]; diagramDirty=true; }
     else delete pointsByTarget[targetSel.value];
     redraw();
   });
@@ -6082,6 +6105,7 @@ window.addEventListener('beforeprint',flushScene3D);
     // стены) для последующей пересборки схемы для нейросети/JSON-описания (см. объявление
     // appliedLayers) в любой момент, даже после того как разметка стены уже сброшена/сменилась
     appliedLayers.push({wi, wallPts:wallPts.map(p=>({x:p.x,y:p.y})), otkos:appliedOtkos});
+    diagramDirty=true; // новый слой — кэш схемы для нейросети (ensureDiagram) больше не актуален
     return workingCanvas;
   }
 
@@ -6113,8 +6137,10 @@ window.addEventListener('beforeprint',flushScene3D);
       btnApply.disabled=false; btnApply.textContent=prevLabel;
       if(!full){ alert('Не получилось наложить раскладку — проверьте выбранную стену и точки.'); return; }
       resultCanvas=full;
-      canvas.width=dispW; canvas.height=dispH;
-      ctx.drawImage(full,0,0,dispW,dispH);
+      // превью теперь показывает схему для нейросети (см. redraw/ensureDiagram) — тот же вид,
+      // что скачивается кнопкой «Скачать схему», и с тем же ползунком прозрачности; сам
+      // «реалистичный» результат (resultCanvas) по-прежнему доступен через «Скачать»
+      redraw();
       btnDownload.disabled=false;
       btnGuideDownload.disabled=false; btnJsonCopy.disabled=false; btnDownloadAll.disabled=false;
     }));
@@ -6130,9 +6156,14 @@ window.addEventListener('beforeprint',flushScene3D);
   // ---- схема для нейросети: исходное фото + полупрозрачная (настраиваемый %) «схемная» текстура
   // всех уже применённых слоёв (appliedLayers) — БЕЗ смешивания с освещением фото (см. flat-режим
   // warpTextureOnto), т.к. реалистичный свет/тени должна навести сама нейросеть, а не мы —
-  // задача этой картинки только точно передать геометрию (где панель/стык/LED/откос)
-  function computeGuideOverlay(opacityFrac){
-    if(!photoImg||!LAST||!LAST.R||!appliedLayers.length) return null;
+  // задача этой картинки только точно передать геометрию (где панель/стык/LED/откос).
+  // Сама сборка диаграммы (тяжёлый варп по каждому слою) кэшируется в diagramCache и
+  // пересчитывается только когда diagramDirty=true (новый применённый слой/изменённые зоны
+  // исключения) — см. объявление выше. Это и позволяет ползунку прозрачности ниже двигаться
+  // в реальном времени: на каждый его тик пересчитывается только дешёвый композит с photoImg
+  function ensureDiagram(){
+    if(!photoImg||!LAST||!LAST.R||!appliedLayers.length){ diagramCache=null; return null; }
+    if(!diagramDirty&&diagramCache) return diagramCache;
     const diagram=document.createElement('canvas');
     diagram.width=photoImg.naturalWidth; diagram.height=photoImg.naturalHeight;
     const dctx=diagram.getContext('2d'); // изначально полностью прозрачный
@@ -6146,6 +6177,12 @@ window.addEventListener('beforeprint',flushScene3D);
         warpTextureOnto(dctx,diagram.width,diagram.height,otex,o.pts,exclFull,true);
       });
     });
+    diagramCache=diagram; diagramDirty=false;
+    return diagram;
+  }
+  function computeGuideOverlay(opacityFrac){
+    const diagram=ensureDiagram();
+    if(!diagram) return null;
     const out=document.createElement('canvas');
     out.width=photoImg.naturalWidth; out.height=photoImg.naturalHeight;
     const octx=out.getContext('2d');
