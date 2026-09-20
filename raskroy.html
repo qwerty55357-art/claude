@@ -4099,8 +4099,24 @@ function ensureScene3D(){
     st.radius=Math.min(40000,Math.max(1200,st.radius*(1+ev.deltaY*0.001)));
     updateCam();
   },{passive:false});
-  const loop=()=>{ renderer.render(scene,camera); requestAnimationFrame(loop); };
-  loop();
+  // рендер-луп раньше крутился безусловно вечно (кадр за кадром, независимо от того, виден ли
+  // блок 3D на экране и активна ли вообще вкладка) — на телефоне и просто на слабом железе это
+  // постоянная лишняя нагрузка на GPU и расход батареи, даже когда пользователь читает карту
+  // раскроя далеко внизу страницы. Рендерим, только пока блок реально в зоне видимости И вкладка
+  // активна — RAF при этом не просто «пропускает кадр», а полностью останавливается (cancelAnimationFrame),
+  // а не крутится вхолостую, и заново стартует, когда любое из двух условий снова выполняется.
+  let rafId=null;
+  const loop=()=>{ renderer.render(scene,camera); rafId=requestAnimationFrame(loop); };
+  const startLoop=()=>{ if(rafId==null) loop(); };
+  const stopLoop=()=>{ if(rafId!=null){ cancelAnimationFrame(rafId); rafId=null; } };
+  let isOnScreen=true, isTabVisible=!document.hidden;
+  const syncLoop=()=>{ if(isOnScreen&&isTabVisible) startLoop(); else stopLoop(); };
+  if(typeof IntersectionObserver!=='undefined'){
+    new IntersectionObserver(entries=>{
+      isOnScreen=entries[entries.length-1].isIntersecting; syncLoop();
+    },{threshold:0}).observe(box);
+  } else startLoop();
+  document.addEventListener('visibilitychange',()=>{ isTabVisible=!document.hidden; syncLoop(); });
   scene3d=Object.assign(st,{updateCam,resize});
   return scene3d;
 }
@@ -4756,6 +4772,28 @@ function renderNotes(G,R){
    раскроя).
    ===================================================================== */
 /* ===================== ЗАПУСК ===================== */
+// renderScene3D — самая дорогая часть run() (полная пересборка Three.js-сцены: dispose всех
+// мешей, перерисовка canvas-текстуры стены, новые геометрии откосов/накладок/LED) — на нашем
+// замере это ~96% времени всего run(). Раньше она гоняла на КАЖДОЕ нажатие клавиши в любом
+// поле формы (см. #rail 'input' ниже), хотя остальная часть run() (2D-схема, карта раскроя,
+// заметки) стоит копейки и должна оставаться мгновенной. Откладываем именно 3D на короткую
+// паузу после последнего изменения — держим { G, R } самого свежего вызова и рендерим один раз,
+// когда ввод затих, вместо того чтобы пересобирать сцену на каждый промежуточный символ.
+let scene3dPending=null, scene3dTimer=null;
+function scheduleScene3D(G,R){
+  scene3dPending={G,R};
+  clearTimeout(scene3dTimer);
+  scene3dTimer=setTimeout(flushScene3D,200);
+}
+// печать должна видеть самую свежую сцену немедленно, а не то, что успело отрендериться до
+// того, как пользователь нажал «Печать» — досрочно выполняем отложенный рендер перед печатью
+// (см. beforeprint ниже), а не просто ждём таймер.
+function flushScene3D(){
+  if(!scene3dPending) return;
+  clearTimeout(scene3dTimer); scene3dTimer=null;
+  const {G,R}=scene3dPending; scene3dPending=null;
+  renderScene3D(G,R);
+}
 function run(){
   formToWall();
   const G=collect();
@@ -4782,7 +4820,8 @@ function run(){
       const w=byId.get(+l.wall); return w&&legIsLedNow(w,G,l);
     })})).filter(c=>c.legs.length);
   }
-  renderNotes(G,R); renderCards(G,R); renderScheme(G,R); renderCutmap(G,R); renderShelf(R); renderScene3D(G,R);
+  renderNotes(G,R); renderCards(G,R); renderScheme(G,R); renderCutmap(G,R); renderShelf(R);
+  scheduleScene3D(G,R);
   renderCuts(G,R); renderSpec(G,R); renderEstimate(G,R); renderJointsV(R); renderLedSummary(R);
   renderLedDraw(G,R);
 }
@@ -4878,6 +4917,10 @@ $('#file-load').addEventListener('change',e=>{
   r.readAsText(f); e.target.value='';
 });
 $('#btn-print').addEventListener('click',()=>window.print());
+// печать может быть вызвана и мимо кнопки (Ctrl+P/меню браузера) — beforeprint срабатывает в
+// любом случае, поэтому именно тут, а не только в клике по кнопке, досрочно проявляем отложенный
+// 3D-рендер (см. scheduleScene3D/flushScene3D выше), чтобы печатный слепок не отстал от экрана
+window.addEventListener('beforeprint',flushScene3D);
 
 /* ---------- DRAG проёмов на большой схеме ---------- */
 (function(){
