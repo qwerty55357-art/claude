@@ -137,6 +137,12 @@ tbody tr:hover td{background:var(--surface)}
 #corner-scheme{display:flex;flex-wrap:wrap;gap:16px}
 .corner-scheme-item{flex:0 0 auto;border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:16px;overflow:auto}
 .corner-scheme-item-h{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
+/* блок «Визуализация на фото» (см. IIFE в самом низу скрипта, рядом с 3D) — фото + раскладка
+   стены поверх него через проективное преобразование по 4 точкам, целиком canvas/JS, без сети
+   и без нейросетей (см. обсуждение с пользователем перед реализацией) */
+.viz-wrap{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:16px;overflow:auto}
+#viz-canvas{display:block;max-width:100%;border-radius:calc(var(--r) - 2px);cursor:crosshair;touch-action:none;background:var(--surface-2)}
+.viz-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 /* печатная замена живого 3D-канваса — статичный PNG-снимок с собственным (изометрическим) ракурсом
    камеры, отрисованный отдельно от интерактивного вида (см. renderScene3DSnapshot): WebGL-канвас
    не переживает печать, а слепок «как на экране» зависел бы от того, куда пользователь довернул
@@ -170,6 +176,7 @@ tbody tr:hover td{background:var(--surface)}
   .corner-scheme-item{break-inside:avoid;page-break-inside:avoid;overflow:visible}
   .corner-scheme-item svg{max-height:11cm !important;width:auto !important}
   #scene3d-block{display:none !important}
+  #viz-block{display:none !important}
   .scene3d-print-block{display:block;break-inside:avoid;page-break-inside:avoid;text-align:center}
   /* высота самого снимка (img) — АДАПТИВНАЯ, считается и проставляется прямо в inline-style при
      генерации (см. renderScene3DSnapshot: avail) под остаток места на первом листе после шапки/
@@ -351,6 +358,22 @@ tbody tr:hover td{background:var(--surface)}
       <div class="row row-1"><div class="f"><label>Наценка / работа, %</label><input type="number" id="p-markup" value="0"></div></div>
     </div>
   </section>
+  <section class="sect closed" data-sect>
+    <div class="sect-h"><span class="sect-n">07</span><span class="sect-t">Визуализация на фото</span><span class="sect-arrow">▾</span></div>
+    <div class="sect-b">
+      <div class="row row-1"><div class="f"><label>Стена</label><select id="viz-wall"></select></div></div>
+      <div class="row row-1"><div class="f"><label>Фото стены/комнаты</label><input type="file" id="viz-photo" accept="image/*"></div></div>
+      <p class="hint">Отметьте на фото 4 угла выбранной стены кликами по часовой стрелке, начиная с
+        верхнего левого — раскладка панелей ляжет на фото с учётом перспективы и освещения. Точки
+        можно перетаскивать, чтобы подогнать точнее. Работает целиком в браузере, без отправки фото
+        куда-либо.</p>
+      <div class="viz-actions">
+        <button type="button" class="btn btn-mini" id="viz-reset">Сбросить точки</button>
+        <button type="button" class="btn btn-key" id="viz-apply">Наложить раскладку</button>
+        <button type="button" class="btn btn-mini" id="viz-download" disabled>Скачать PNG</button>
+      </div>
+    </div>
+  </section>
 </aside>
 <main class="stage" id="stage">
   <div id="notes" class="notes"></div>
@@ -423,6 +446,14 @@ tbody tr:hover td{background:var(--surface)}
       «Глубина откоса»), с цветом стороны, если для неё назначен свой материал. На раскрой и смету
       никак не влияет — только вид. Перетаскивание — вращение камеры, колесо мыши — масштаб.</p>
     <div id="scene3d" style="width:100%;height:520px;border-radius:var(--r);overflow:hidden"></div>
+  </div>
+  <div class="block" id="viz-block">
+    <div class="stage-h"><h2>Визуализация на фото</h2><span class="meta" id="viz-meta"></span><span class="rule"></span></div>
+    <p class="hint" style="margin:0 0 8px">Загрузите фото в разделе «Визуализация на фото» слева,
+      выберите стену и отметьте на фото её 4 угла — раскладка панелей ляжет на снимок с учётом
+      перспективы и освещения. Только для наглядности — на раскрой и смету не влияет, в печать/PDF
+      не попадает.</p>
+    <div class="viz-wrap"><canvas id="viz-canvas" width="1" height="1"></canvas></div>
   </div>
   <div class="block">
     <div class="stage-h"><h2>Карта раскроя</h2><span class="meta" id="cut-meta"></span><span class="rule"></span></div>
@@ -4879,6 +4910,16 @@ function run(){
   scheduleScene3D(G,R);
   renderCuts(G,R); renderSpec(G,R); renderEstimate(G,R); renderJointsV(R); renderLedSummary(R);
   renderLedDraw(G,R);
+  renderVizWallSelect();
+}
+// список стен для раздела «Визуализация на фото» (см. IIFE в конце скрипта) — держим отдельной
+// функцией и дёргаем из run(), т.к. стены могут переименовываться/добавляться/удаляться где угодно
+// в форме; выбор пользователя (по индексу) стараемся сохранить между перерисовками
+function renderVizWallSelect(){
+  const sel=$('#viz-wall'); if(!sel) return;
+  const prev=sel.value;
+  sel.innerHTML=walls.map((w,i)=>`<option value="${i}">${esc(w.name)}</option>`).join('');
+  if(prev!==''&&+prev<walls.length) sel.value=prev;
 }
 $('#i-preset').innerHTML=PRESETS.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
 $('#i-ledtemp').innerHTML=LED_TEMPS.map(t=>`<option value="${t.k}"${t.k===4000?' selected':''}>${t.name}</option>`).join('');
@@ -5496,6 +5537,240 @@ window.addEventListener('beforeprint',flushScene3D);
   document.addEventListener('pointercancel',()=>finish(false));
 })();
 (function(){const st=document.createElement('style');st.textContent='#cutmap svg{touch-action:none}';document.head.appendChild(st);})();
+
+/* ===================== ВИЗУАЛИЗАЦИЯ НА ФОТО ===================== */
+// Наложение раскладки панелей на фото стены/комнаты через проективное преобразование
+// (гомографию) по 4 точкам, отмеченным пользователем — без сети, без нейросетей, целиком
+// canvas/JS. Пользователь кликает 4 угла стены на фото (по часовой стрелке от верхнего левого),
+// мы строим «чистую» текстуру раскладки (без размеров/подписей — только панели/стыки/вырезы под
+// проёмы) и проективно натягиваем её на этот четырёхугольник, а для правдоподобия — умножаем
+// цвет текстуры на яркость исходного фото в этом месте (тени/блики стены сохраняются, а не
+// перекрываются плоским цветом панели).
+(function(){
+  const canvas=$('#viz-canvas'); if(!canvas) return;
+  const ctx=canvas.getContext('2d');
+  const wallSel=$('#viz-wall'), fileInp=$('#viz-photo');
+  const btnReset=$('#viz-reset'), btnApply=$('#viz-apply'), btnDownload=$('#viz-download');
+  const MAXW=900, MAXH=620;         // размер интерактивного превью (сама подгонка точек)
+  let photoImg=null;                // Image в полном разрешении оригинала
+  let dispScale=1, dispW=0, dispH=0;// коэффициент полное->превью и размер превью
+  let points=[];                    // точки в системе координат ПРЕВЬЮ (0..dispW,0..dispH)
+  let dragIdx=-1;
+  let resultCanvas=null;            // готовый композит в полном разрешении (для скачивания)
+
+  function redraw(){
+    if(!photoImg) return;
+    canvas.width=dispW; canvas.height=dispH;
+    ctx.drawImage(photoImg,0,0,dispW,dispH);
+    if(points.length>1){
+      ctx.beginPath();
+      ctx.moveTo(points[0].x,points[0].y);
+      for(let i=1;i<points.length;i++) ctx.lineTo(points[i].x,points[i].y);
+      if(points.length===4) ctx.closePath();
+      ctx.setLineDash([6,4]); ctx.strokeStyle='#ffb020'; ctx.lineWidth=2; ctx.stroke(); ctx.setLineDash([]);
+    }
+    points.forEach((p,i)=>{
+      ctx.beginPath(); ctx.arc(p.x,p.y,10,0,Math.PI*2);
+      ctx.fillStyle='rgba(255,176,32,.9)'; ctx.fill();
+      ctx.lineWidth=2; ctx.strokeStyle='#fff'; ctx.stroke();
+      ctx.fillStyle='#fff'; ctx.font='bold 11px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(String(i+1),p.x,p.y+.5);
+    });
+  }
+
+  function loadPhoto(file){
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const img=new Image();
+      img.onload=()=>{
+        photoImg=img;
+        dispScale=Math.min(1,MAXW/img.naturalWidth,MAXH/img.naturalHeight);
+        dispW=Math.max(1,Math.round(img.naturalWidth*dispScale));
+        dispH=Math.max(1,Math.round(img.naturalHeight*dispScale));
+        points=[]; resultCanvas=null; btnDownload.disabled=true;
+        redraw();
+      };
+      img.src=ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+  fileInp.addEventListener('change',()=>{
+    const f=fileInp.files&&fileInp.files[0];
+    if(f) loadPhoto(f);
+  });
+
+  function ptFromEvent(ev){
+    const r=canvas.getBoundingClientRect();
+    const sx=canvas.width/r.width, sy=canvas.height/r.height;
+    return {x:(ev.clientX-r.left)*sx, y:(ev.clientY-r.top)*sy};
+  }
+  canvas.addEventListener('pointerdown',ev=>{
+    if(!photoImg) return;
+    const pt=ptFromEvent(ev);
+    for(let i=0;i<points.length;i++){
+      if(Math.hypot(points[i].x-pt.x,points[i].y-pt.y)<14){
+        dragIdx=i; canvas.setPointerCapture(ev.pointerId); return;
+      }
+    }
+    if(points.length<4){ points.push(pt); redraw(); }
+  });
+  canvas.addEventListener('pointermove',ev=>{
+    if(dragIdx<0) return;
+    points[dragIdx]=ptFromEvent(ev); redraw();
+  });
+  const endDrag=()=>{ dragIdx=-1; };
+  canvas.addEventListener('pointerup',endDrag);
+  canvas.addEventListener('pointercancel',endDrag);
+
+  btnReset.addEventListener('click',()=>{
+    points=[]; resultCanvas=null; btnDownload.disabled=true; redraw();
+  });
+
+  // ---- проективное отображение единичного квадрата (u,v)∈[0,1] на произвольный 4-угольник
+  // (алгоритм Хекберта square-to-quad) + его обращение (для обратного варпа: из точки назначения
+  // в исходные (u,v) текстуры). Матрица в column-vector виде: [x';y';w']=M·[u;v;1], x=x'/w'
+  function squareToQuad(x0,y0,x1,y1,x2,y2,x3,y3){
+    const dx1=x1-x2, dx2=x3-x2, dx3=x0-x1+x2-x3;
+    const dy1=y1-y2, dy2=y3-y2, dy3=y0-y1+y2-y3;
+    if(Math.abs(dx3)<1e-9&&Math.abs(dy3)<1e-9) return [x1-x0,x3-x0,x0, y1-y0,y3-y0,y0, 0,0,1];
+    const den=dx1*dy2-dx2*dy1;
+    const a13=(dx3*dy2-dx2*dy3)/den, a23=(dx1*dy3-dx3*dy1)/den;
+    const a11=x1-x0+a13*x1, a21=x3-x0+a23*x3, a31=x0;
+    const a12=y1-y0+a13*y1, a22=y3-y0+a23*y3, a32=y0;
+    return [a11,a21,a31, a12,a22,a32, a13,a23,1];
+  }
+  function mat3Apply(m,u,v){
+    const xp=m[0]*u+m[1]*v+m[2], yp=m[3]*u+m[4]*v+m[5], wp=m[6]*u+m[7]*v+m[8];
+    return [xp/wp,yp/wp];
+  }
+  function mat3Invert(m){
+    const [a,b,c,d,e,f,g,h,i]=m;
+    const A=e*i-f*h, B=-(d*i-f*g), C=d*h-e*g;
+    const D=-(b*i-c*h), E=a*i-c*g, F=-(a*h-b*g);
+    const G=b*f-c*e, H=-(a*f-c*d), I=a*e-b*d;
+    const det=a*A+b*B+c*C;
+    return [A/det,D/det,G/det, B/det,E/det,H/det, C/det,F/det,I/det];
+  }
+  function sampleBilinear(data,w,h,x,y){
+    const x0=Math.floor(x), y0=Math.floor(y);
+    const x1=Math.min(w-1,x0+1), y1=Math.min(h-1,y0+1);
+    const fx=x-x0, fy=y-y0, xi=Math.max(0,x0), yi=Math.max(0,y0);
+    const idx=(xx,yy)=>(yy*w+xx)*4;
+    const c00=idx(xi,yi), c10=idx(x1,yi), c01=idx(xi,y1), c11=idx(x1,y1);
+    const out=[0,0,0,0];
+    for(let k=0;k<4;k++){
+      const top=data[c00+k]*(1-fx)+data[c10+k]*fx;
+      const bot=data[c01+k]*(1-fx)+data[c11+k]*fx;
+      out[k]=top*(1-fy)+bot*fy;
+    }
+    return out;
+  }
+
+  // ---- «чистая» текстура раскладки одной стены: те же геометрия/цвета, что и в «Схема
+  // раскладки» (schemeFor), но без размеров/подписей/зон клика, и с вырезами под проёмы
+  // ПРОЗРАЧНЫМИ (не залитыми) — чтобы настоящее окно/дверь на фото осталось видно как есть
+  function wallTextureCanvas(wi,G,R){
+    const wall=wallCutView(walls[wi],R.cornerCuts&&R.cornerCuts.get(walls[wi].id));
+    const S=wallS(G,wall);
+    const L=R.layouts[wi], W=S.W, H=S.H;
+    if(!(W>0)||!(H>0)) return null;
+    const px=Math.min(2,2200/Math.max(W,H));
+    const cw=Math.max(1,Math.round(W*px)), ch=Math.max(1,Math.round(H*px));
+    const c=document.createElement('canvas'); c.width=cw; c.height=ch;
+    const cx=c.getContext('2d');
+    const cs=getComputedStyle(document.documentElement);
+    const faceColor=(cs.getPropertyValue('--straw-face')||'#e8d49f').trim();
+    const deepColor=(cs.getPropertyValue('--straw-deep')||'#8a6d16').trim();
+    cx.fillStyle=faceColor; cx.fillRect(0,0,cw,ch);
+    L.strips.forEach(st=>{
+      // та же формула, что в schemeFor — геометрия полосы (вертикальной или горизонтальной раскладки)
+      const x=L.vert?st.start:0, y=L.vert?0:H-st.end, w=L.vert?st.w:W, h=L.vert?H:st.w;
+      cx.strokeStyle=deepColor; cx.lineWidth=Math.max(1,px*1.1);
+      cx.strokeRect(x*px+cx.lineWidth/2,y*px+cx.lineWidth/2,w*px-cx.lineWidth,h*px-cx.lineWidth);
+    });
+    L.pieces.forEach(p=>{
+      if(!p.matOverride) return;
+      const st=L.strips[p.strip];
+      // та же формула, что в schemeFor — прямоугольник детали со своим материалом
+      const x=L.vert?st.start:p.from, y=L.vert?H-p.to:H-st.end, w=L.vert?st.w:p.len, h=L.vert?p.len:st.w;
+      cx.fillStyle=matColor(p.matOverride);
+      cx.fillRect(x*px,y*px,w*px,h*px);
+    });
+    S.ops.forEach(o=>{
+      // та же формула, что в schemeFor — прямоугольник проёма; clearRect вместо заливки:
+      // получаем настоящую дыру (альфа=0), а не непрозрачный цвет поверх реального окна/двери
+      const x=o.x, y=H-o.y-o.h;
+      cx.clearRect(x*px-0.5,y*px-0.5,o.w*px+1,o.h*px+1);
+    });
+    return {canvas:c,W,H};
+  }
+
+  function computeComposite(){
+    if(!LAST||!LAST.R) return null;
+    const wi=+wallSel.value;
+    const tex=wallTextureCanvas(wi,LAST.G,LAST.R);
+    if(!tex) return null;
+    const fx=points.map(p=>p.x/dispScale), fy=points.map(p=>p.y/dispScale);
+    const full=document.createElement('canvas');
+    full.width=photoImg.naturalWidth; full.height=photoImg.naturalHeight;
+    const fctx=full.getContext('2d');
+    fctx.drawImage(photoImg,0,0);
+
+    const minX=Math.max(0,Math.floor(Math.min(...fx))), maxX=Math.min(full.width,Math.ceil(Math.max(...fx)));
+    const minY=Math.max(0,Math.floor(Math.min(...fy))), maxY=Math.min(full.height,Math.ceil(Math.max(...fy)));
+    const regW=maxX-minX, regH=maxY-minY;
+    if(regW<=0||regH<=0) return null;
+
+    const M=squareToQuad(fx[0],fy[0],fx[1],fy[1],fx[2],fy[2],fx[3],fy[3]);
+    const Minv=mat3Invert(M);
+
+    const tctx=tex.canvas.getContext('2d');
+    const tw=tex.canvas.width, th=tex.canvas.height;
+    const tdata=tctx.getImageData(0,0,tw,th).data;
+
+    const outData=fctx.getImageData(minX,minY,regW,regH);
+    const od=outData.data;
+    for(let yy=0;yy<regH;yy++){
+      for(let xx=0;xx<regW;xx++){
+        const [u,v]=mat3Apply(Minv,minX+xx,minY+yy);
+        if(u<0||u>1||v<0||v>1) continue;
+        // текстура строится в тех же координатах «сверху-вниз», что и клик-точки (P0=левый
+        // верхний угол стены = u=0,v=0) — поэтому прямое соответствие, без переворота по Y
+        const [tr,tg,tb,ta]=sampleBilinear(tdata,tw,th,u*(tw-1),v*(th-1));
+        if(ta<250) continue; // вырез под проём (почти прозрачно) — оставляем фото как есть
+        const di=(yy*regW+xx)*4;
+        // «плоский» цвет панели умножаем на яркость фото в этом месте (якорь на среднем сером
+        // 0.5 — там множитель ровно 1, т.е. цвет текстуры не искажается), чтобы сохранить реальные
+        // тени/блики стены на фото, а не перекрыть их ровной заливкой панели
+        const lum=(od[di]*0.299+od[di+1]*0.587+od[di+2]*0.114)/255;
+        const factor=Math.min(2,lum*2);
+        od[di]=Math.min(255,tr*factor);
+        od[di+1]=Math.min(255,tg*factor);
+        od[di+2]=Math.min(255,tb*factor);
+      }
+    }
+    fctx.putImageData(outData,minX,minY);
+    return full;
+  }
+
+  btnApply.addEventListener('click',()=>{
+    if(!photoImg){ alert('Сначала загрузите фото стены/комнаты.'); return; }
+    if(points.length<4){ alert('Отметьте на фото все 4 угла стены (по часовой стрелке от левого верхнего).'); return; }
+    const full=computeComposite();
+    if(!full){ alert('Не получилось наложить раскладку — проверьте выбранную стену и точки.'); return; }
+    resultCanvas=full;
+    canvas.width=dispW; canvas.height=dispH;
+    ctx.drawImage(full,0,0,dispW,dispH);
+    btnDownload.disabled=false;
+  });
+  btnDownload.addEventListener('click',()=>{
+    if(!resultCanvas) return;
+    const a=document.createElement('a');
+    a.download='визуализация.png';
+    a.href=resultCanvas.toDataURL('image/png');
+    a.click();
+  });
+})();
 
 /* ---------- старт ---------- */
 walls=[newWall()];
