@@ -142,6 +142,12 @@ tbody tr:hover td{background:var(--surface)}
    мышью интерактивную камеру */
 .scene3d-print-block{display:none}
 @media print{
+  /* без явного размера листа/полей физический размер страницы (A4 или Letter) и доступная под
+     контент ширина берутся из настроек по умолчанию конкретного браузера/ОС/принтера — на разных
+     устройствах документ выходил бы разного физического масштаба, хотя разметка (svg width:100%)
+     одна и та же. Фиксируем формат и поля явно, чтобы печать/PDF выглядели одинаково независимо
+     от устройства (пользователь всё ещё может переопределить формат в диалоге печати вручную) */
+  @page{ size:A4; margin:12mm; }
   .wall-scheme{display:block !important;break-inside:avoid;page-break-inside:avoid}
   .wall-scheme-h{display:block !important}
   [data-resize],[data-cmrot]{display:none !important}
@@ -3180,8 +3186,21 @@ function compute(S){
    не обрабатывают, только строят и вставляют разметку.
    ===================================================================== */
 /* ===================== ЧЕРТЁЖНЫЕ ПРИМИТИВЫ ===================== */
-// ширина строки моноширинного шрифта ~0.6em — этого хватает, чтобы решить, влезет ли подпись
-const tw=(str,size)=>str.length*0.6*size;
+// ширина строки РЕАЛЬНО отрисованным шрифтом (--mono) — раньше была фиксированная эвристика
+// str.length*0.6*size, не привязанная ни к какому настоящему шрифту: если на устройстве нужный
+// шрифт не загрузился (см. Google Fonts в <head>) и браузер тихо подставил другой, эвристика всё
+// равно давала тот же ответ, хотя реальная ширина текста уже другая — «влезает ли подпись» решалось
+// неверно именно там, где шрифты отличаются между устройствами. Меряем настоящим canvas.measureText
+// тем же семейством, что и у самих подписей (font-family:var(--mono) в txt() ниже) — тогда решение
+// всегда соответствует тому, что реально нарисуется, каким бы шрифтом браузер его ни отрисовал.
+const _twCtx=(()=>{ try{ return document.createElement('canvas').getContext('2d'); }catch(_){ return null; } })();
+let _twFont=null;
+const tw=(str,size)=>{
+  if(!_twCtx) return str.length*0.6*size;
+  if(_twFont==null) _twFont=(getComputedStyle(document.documentElement).getPropertyValue('--mono')||'monospace').trim();
+  _twCtx.font=`${size}px ${_twFont}`;
+  return _twCtx.measureText(str).width;
+};
 // текст с ореолом цвета подложки: остаётся читаемым, на что бы ни попал
 function txt(x,y,str,size,ink,halo,opt){
   const o=opt||{};
