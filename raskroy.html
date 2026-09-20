@@ -5602,7 +5602,11 @@ window.addEventListener('beforeprint',flushScene3D);
   function ptFromEvent(ev){
     const r=canvas.getBoundingClientRect();
     const sx=canvas.width/r.width, sy=canvas.height/r.height;
-    return {x:(ev.clientX-r.left)*sx, y:(ev.clientY-r.top)*sy};
+    // зажимаем в границы канвы — иначе точку, утянутую пальцем/мышью за край во время
+    // перетаскивания (setPointerCapture позволяет двигать курсор куда угодно), не видно
+    // на экране, хотя логически она продолжает существовать где-то за пределами фото
+    const x=(ev.clientX-r.left)*sx, y=(ev.clientY-r.top)*sy;
+    return {x:Math.min(dispW,Math.max(0,x)), y:Math.min(dispH,Math.max(0,y))};
   }
   canvas.addEventListener('pointerdown',ev=>{
     if(!photoImg) return;
@@ -5625,6 +5629,30 @@ window.addEventListener('beforeprint',flushScene3D);
   btnReset.addEventListener('click',()=>{
     points=[]; resultCanvas=null; btnDownload.disabled=true; redraw();
   });
+
+  // ---- проверки на некорректный четырёхугольник — до того, как считать сам композит ----
+  // самопересекающийся контур («бабочка», точки отмечены не по порядку обхода) — у него нет
+  // осмысленной «внутренней» области в проективном смысле: отображение (u,v)∈[0,1] выродилось
+  // бы в почти пустую полоску вместо всей стены, и пользователь увидел бы "ничего не произошло"
+  // без объяснения. Проверяем ровно так же, как обычно ищут самопересечение многоугольника —
+  // пересекаются ли "противоположные" стороны четырёхугольника (0-1 с 2-3, 1-2 с 3-0)
+  function segIntersect(a,b,c,d){
+    const cross=(o,p,q)=>(p.x-o.x)*(q.y-o.y)-(p.y-o.y)*(q.x-o.x);
+    const d1=cross(c,d,a), d2=cross(c,d,b), d3=cross(a,b,c), d4=cross(a,b,d);
+    return ((d1>0&&d2<0)||(d1<0&&d2>0)) && ((d3>0&&d4<0)||(d3<0&&d4>0));
+  }
+  function quadArea(pts){
+    let a=0;
+    for(let i=0;i<4;i++){ const p=pts[i], q=pts[(i+1)%4]; a+=p.x*q.y-q.x*p.y; }
+    return Math.abs(a)/2;
+  }
+  function quadProblem(pts){
+    if(segIntersect(pts[0],pts[1],pts[2],pts[3])||segIntersect(pts[1],pts[2],pts[3],pts[0]))
+      return 'Точки образуют самопересекающийся контур — отметьте 4 угла стены по порядку обхода (по часовой стрелке), без перехлёста сторон.';
+    if(quadArea(pts)<400)
+      return 'Точки стоят слишком близко друг к другу — расставьте их по настоящим углам стены на фото.';
+    return null;
+  }
 
   // ---- проективное отображение единичного квадрата (u,v)∈[0,1] на произвольный 4-угольник
   // (алгоритм Хекберта square-to-quad) + его обращение (для обратного варпа: из точки назначения
@@ -5733,20 +5761,26 @@ window.addEventListener('beforeprint',flushScene3D);
     for(let yy=0;yy<regH;yy++){
       for(let xx=0;xx<regW;xx++){
         const [u,v]=mat3Apply(Minv,minX+xx,minY+yy);
-        if(u<0||u>1||v<0||v>1) continue;
+        if(!(u>=0)||!(u<=1)||!(v>=0)||!(v<=1)) continue; // !(x>=0) вместо x<0 — отсекает и NaN на вырожденной геометрии
         // текстура строится в тех же координатах «сверху-вниз», что и клик-точки (P0=левый
         // верхний угол стены = u=0,v=0) — поэтому прямое соответствие, без переворота по Y
         const [tr,tg,tb,ta]=sampleBilinear(tdata,tw,th,u*(tw-1),v*(th-1));
-        if(ta<250) continue; // вырез под проём (почти прозрачно) — оставляем фото как есть
+        if(ta<1) continue; // центр выреза под проём (полностью прозрачно) — фото совсем не трогаем
         const di=(yy*regW+xx)*4;
         // «плоский» цвет панели умножаем на яркость фото в этом месте (якорь на среднем сером
         // 0.5 — там множитель ровно 1, т.е. цвет текстуры не искажается), чтобы сохранить реальные
-        // тени/блики стены на фото, а не перекрыть их ровной заливкой панели
+        // тени/блики стены на фото, а не перекрыть их ровной заливкой панели; нижний порог 0.45 —
+        // чтобы на тёмном (плохо освещённом) фото панель не уходила в почти чёрный цвет и оставалась
+        // узнаваемой
         const lum=(od[di]*0.299+od[di+1]*0.587+od[di+2]*0.114)/255;
-        const factor=Math.min(2,lum*2);
-        od[di]=Math.min(255,tr*factor);
-        od[di+1]=Math.min(255,tg*factor);
-        od[di+2]=Math.min(255,tb*factor);
+        const factor=Math.max(0.45,Math.min(2,lum*2));
+        // альфа текстуры — не 0/1, а честная доля (антиалиасинг на границе панели/выреза из
+        // билинейной интерполяции) — блендим с фото, а не жёстко переключаем: иначе на самой
+        // границе выреза под проём/между соседними углами оставался бы тонкий непрокрашенный шов
+        const al=ta/255;
+        od[di]  =od[di]  *(1-al)+Math.min(255,tr*factor)*al;
+        od[di+1]=od[di+1]*(1-al)+Math.min(255,tg*factor)*al;
+        od[di+2]=od[di+2]*(1-al)+Math.min(255,tb*factor)*al;
       }
     }
     fctx.putImageData(outData,minX,minY);
@@ -5756,12 +5790,27 @@ window.addEventListener('beforeprint',flushScene3D);
   btnApply.addEventListener('click',()=>{
     if(!photoImg){ alert('Сначала загрузите фото стены/комнаты.'); return; }
     if(points.length<4){ alert('Отметьте на фото все 4 угла стены (по часовой стрелке от левого верхнего).'); return; }
-    const full=computeComposite();
-    if(!full){ alert('Не получилось наложить раскладку — проверьте выбранную стену и точки.'); return; }
-    resultCanvas=full;
-    canvas.width=dispW; canvas.height=dispH;
-    ctx.drawImage(full,0,0,dispW,dispH);
-    btnDownload.disabled=false;
+    const problem=quadProblem(points);
+    if(problem){ alert(problem); return; }
+    // сам расчёт (варп полного разрешения фото) может занимать заметное время на больших снимках
+    // (~1-2с на 12-мегапиксельном фото и четырёхугольнике во весь кадр) — если считать его сразу
+    // в этом же обработчике, кнопка не успеет перерисоваться в состояние "занято" ДО блокировки
+    // потока, и приложение на время расчёта выглядело бы зависшим без всякой обратной связи.
+    // Двойной requestAnimationFrame — надёжный способ гарантировать, что браузер успел
+    // ОТРИСОВАТЬ смену текста кнопки (первый rAF — начало следующего кадра, ещё до отрисовки;
+    // второй — уже после неё) прежде, чем стартует тяжёлый синхронный расчёт; одиночный
+    // setTimeout(...,10) такой гарантии не даёт (может отработать и до, и после отрисовки кадра)
+    const prevLabel=btnApply.textContent;
+    btnApply.disabled=true; btnApply.textContent='Считаю…';
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{
+      const full=computeComposite();
+      btnApply.disabled=false; btnApply.textContent=prevLabel;
+      if(!full){ alert('Не получилось наложить раскладку — проверьте выбранную стену и точки.'); return; }
+      resultCanvas=full;
+      canvas.width=dispW; canvas.height=dispH;
+      ctx.drawImage(full,0,0,dispW,dispH);
+      btnDownload.disabled=false;
+    }));
   });
   btnDownload.addEventListener('click',()=>{
     if(!resultCanvas) return;
