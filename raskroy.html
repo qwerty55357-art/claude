@@ -392,6 +392,16 @@ tbody tr:hover td{background:var(--surface)}
         <button type="button" class="btn btn-mini" id="viz-json-copy" disabled>Скопировать JSON-описание</button>
       </div>
       <textarea id="viz-json-output" readonly rows="6" style="width:100%;margin-top:8px;font-family:var(--mono);font-size:10.5px;background:var(--void);border:1px solid var(--line);border-radius:var(--r);padding:8px;color:var(--muted);resize:vertical" placeholder="Появится здесь после первого «Наложить» — нажмите «Скопировать JSON-описание»"></textarea>
+      <div class="row row-1" style="margin-top:10px"><div class="f">
+        <label class="chk"><input type="checkbox" id="viz-guide-include-iso"> Добавить 3D-изометрию макета (только для общего контекста формы комнаты — другой ракурс, не для копирования)</label>
+      </div></div>
+      <div class="viz-actions">
+        <button type="button" class="btn btn-key" id="viz-guide-download-all" disabled>Скачать всё для нейросети (отдельными файлами)</button>
+      </div>
+      <p class="hint">Скачает отдельными файлами (не архивом — нейросети обычно не умеют
+        распаковывать zip): исходное фото, схему-оверлей, JSON-описание (.txt) и, если отмечено
+        выше, 3D-изометрию. Закиньте все файлы одним движением в чат нейросети вместе с просьбой
+        сгенерировать результат по приложенному JSON.</p>
     </div>
   </section>
 </aside>
@@ -5621,6 +5631,7 @@ window.addEventListener('beforeprint',flushScene3D);
   const btnReset=$('#viz-reset'), btnApply=$('#viz-apply'), btnDownload=$('#viz-download'), btnResetAll=$('#viz-reset-all');
   const opacityInp=$('#viz-guide-opacity'), opacityVal=$('#viz-guide-opacity-val');
   const btnGuideDownload=$('#viz-guide-download'), btnJsonCopy=$('#viz-json-copy'), jsonOutput=$('#viz-json-output');
+  const btnDownloadAll=$('#viz-guide-download-all'), includeIsoChk=$('#viz-guide-include-iso');
   const MAXW=900, MAXH=620;         // размер интерактивного превью (сама подгонка точек)
   let photoImg=null;                // Image в полном разрешении оригинала — неизменный эталон
   // накопленный результат в полном разрешении: старт — копия photoImg, дальше каждое «Наложить»
@@ -5703,12 +5714,14 @@ window.addEventListener('beforeprint',flushScene3D);
     }
   }
 
+  let photoDataUrl=null; // исходные байты загруженного фото как есть (для «Скачать всё для нейросети» — отдаём то же самое, что загрузили, а не пере-кодированную копию)
   function loadPhoto(file){
     const reader=new FileReader();
     reader.onload=ev=>{
       const img=new Image();
       img.onload=()=>{
         photoImg=img;
+        photoDataUrl=ev.target.result;
         dispScale=Math.min(1,MAXW/img.naturalWidth,MAXH/img.naturalHeight);
         dispW=Math.max(1,Math.round(img.naturalWidth*dispScale));
         dispH=Math.max(1,Math.round(img.naturalHeight*dispScale));
@@ -5738,7 +5751,7 @@ window.addEventListener('beforeprint',flushScene3D);
     resetWorking(); redraw();
   });
   function clearAiOutputs(){
-    btnGuideDownload.disabled=true; btnJsonCopy.disabled=true; jsonOutput.value='';
+    btnGuideDownload.disabled=true; btnJsonCopy.disabled=true; btnDownloadAll.disabled=true; jsonOutput.value='';
   }
   opacityInp.addEventListener('input',()=>{ opacityVal.textContent=opacityInp.value+'%'; });
 
@@ -6103,7 +6116,7 @@ window.addEventListener('beforeprint',flushScene3D);
       canvas.width=dispW; canvas.height=dispH;
       ctx.drawImage(full,0,0,dispW,dispH);
       btnDownload.disabled=false;
-      btnGuideDownload.disabled=false; btnJsonCopy.disabled=false;
+      btnGuideDownload.disabled=false; btnJsonCopy.disabled=false; btnDownloadAll.disabled=false;
     }));
   });
   btnDownload.addEventListener('click',()=>{
@@ -6156,7 +6169,7 @@ window.addEventListener('beforeprint',flushScene3D);
   // «что менять нельзя» (геометрия/цвета/положение стыков и LED — берём с приложенной схемы как
   // истину) и «что нужно дорисовать самому» (фотореалистичная текстура/свет/тени) — иначе модель
   // с равной вероятностью либо перерисует всё по-своему, либо тупо скопирует плоскую схему как есть
-  function buildAiPromptObject(){
+  function buildAiPromptObject(includeIso){
     if(!LAST||!LAST.R||!appliedLayers.length) return null;
     const G=LAST.G, R=LAST.R;
     const cs=getComputedStyle(document.documentElement);
@@ -6245,6 +6258,14 @@ window.addEventListener('beforeprint',flushScene3D);
       ],
       walls:walls_,
       led:ledInfo,
+      // прикладывается отдельным файлом, только если пользователь включил чекбокс — упоминаем в
+      // JSON лишь тогда, когда файл действительно приложен, иначе нейросеть будет ждать картинку,
+      // которой нет
+      isometric_reference: includeIso ? 'Приложено ещё одно изображение — синтетическая 3D-изометрия '+
+        'всего макета комнаты, СОВСЕМ ДРУГИМ ракурсом камеры, чем на фото. Используй её ТОЛЬКО как '+
+        'общий контекст формы/planировки комнаты (сколько стен, как они стыкуются), НЕ как образец '+
+        'для копирования ракурса, освещения или стиля — целевой ракурс и стиль задаёт именно '+
+        'фото+схема.' : undefined,
       output:{style:'photorealistic interior photography, natural lighting, high detail material texture, no watermark', aspect_ratio:'как у приложенного фото', resolution:'как у приложенного фото или выше'}
     };
   }
@@ -6262,6 +6283,42 @@ window.addEventListener('beforeprint',flushScene3D);
       // в textarea ниже, пользователь скопирует его вручную (Ctrl+A/Ctrl+C)
       jsonOutput.focus(); jsonOutput.select();
     }
+  });
+
+  // ---- «Скачать всё для нейросети» — НЕ архив (нейросети в обычном чат-режиме не заглядывают
+  // внутрь zip), а несколько ОТДЕЛЬНЫХ файлов одним кликом: исходное фото (как загрузили, без
+  // перекодирования), схема-оверлей, JSON-описание текстом и, по желанию, 3D-изометрия — их потом
+  // разом перетаскивают в чат нейросети вместе с просьбой сгенерировать результат по JSON
+  function triggerDownload(href,filename){
+    const a=document.createElement('a');
+    a.href=href; a.download=filename; a.click();
+  }
+  function extFromDataUrl(durl){
+    const m=/^data:image\/([a-zA-Z0-9.+-]+);/.exec(durl||'');
+    if(!m) return 'jpg';
+    const t=m[1].toLowerCase();
+    return t==='jpeg'?'jpg':t;
+  }
+  btnDownloadAll.addEventListener('click',()=>{
+    if(!photoDataUrl){ alert('Сначала загрузите фото стены/комнаты.'); return; }
+    const includeIso=includeIsoChk.checked;
+    const obj=buildAiPromptObject(includeIso);
+    if(!obj){ alert('Сначала хотя бы раз нажмите «Наложить раскладку».'); return; }
+    const guide=computeGuideOverlay(+opacityInp.value/100);
+    if(!guide){ alert('Не получилось собрать схему — попробуйте ещё раз.'); return; }
+    let isoUrl=null;
+    if(includeIso){
+      const isoImg=document.querySelector('#scene3d-print img');
+      isoUrl=isoImg&&isoImg.src;
+      if(!isoUrl){ alert('3D-изометрия ещё не построена (нет стен/проекта) — снимите галочку «Добавить 3D-изометрию» или подождите пересчёта.'); return; }
+    }
+    triggerDownload(photoDataUrl,'фото.'+extFromDataUrl(photoDataUrl));
+    triggerDownload(guide.toDataURL('image/png'),'схема-для-нейросети.png');
+    const blob=new Blob([JSON.stringify(obj,null,2)],{type:'text/plain'});
+    const blobUrl=URL.createObjectURL(blob);
+    triggerDownload(blobUrl,'описание-проекта.txt');
+    setTimeout(()=>URL.revokeObjectURL(blobUrl),10000);
+    if(isoUrl) triggerDownload(isoUrl,'3d-изометрия.png');
   });
 })();
 
