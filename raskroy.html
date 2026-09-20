@@ -170,17 +170,11 @@ tbody tr:hover td{background:var(--surface)}
   .corner-scheme-item{break-inside:avoid;page-break-inside:avoid;overflow:visible}
   .corner-scheme-item svg{max-height:11cm !important;width:auto !important}
   #scene3d-block{display:none !important}
-  .scene3d-print-block{display:block;break-inside:avoid;page-break-inside:avoid}
-  /* при заметках подлиннее (несколько предупреждений) снимок в полный рост (width:100%, высота
-     по пропорции 1200×800 ≈ 124мм) вместе с таблицей итогов уже не помещается в один лист — блок
-     целиком уезжает на следующую страницу (break-inside:avoid не режет его), а под ним снова
-     остаётся пустой лист, ровно та же болезнь, что была у страницы «карточки». Пользователь явно
-     попросил: заметки+таблица+3D — всегда один лист. Единственный надёжный способ — сделать сам
-     снимок заведомо компактным (уже не «во всю ширину», а с потолком по высоте, как у радиусных
-     углов выше), а не полагаться на то, что случайно наберётся достаточно места после заметок
-     произвольной длины */
-  .scene3d-print-block img{max-height:8cm !important;width:auto !important;margin:0 auto}
-  .scene3d-print-block{text-align:center}
+  .scene3d-print-block{display:block;break-inside:avoid;page-break-inside:avoid;text-align:center}
+  /* высота самого снимка (img) — АДАПТИВНАЯ, считается и проставляется прямо в inline-style при
+     генерации (см. renderScene3DSnapshot: avail) под остаток места на первом листе после шапки/
+     заметок/таблицы итогов — здесь её трогать не нужно и НЕЛЬЗЯ через !important (перебьёт то,
+     что реально посчитано под конкретный проект, а не одно и то же число для всех) */
   *{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important }
   .svg-wrap{overflow:visible}
   svg{max-height:none !important}
@@ -4570,7 +4564,27 @@ function renderScene3DSnapshot(scene,minX,maxX,minZ,maxZ,maxH){
     url=renderer.domElement.toDataURL('image/png');
   }
   scene.background=prevBg;
-  box.innerHTML=`<img src="${url}" alt="Изометрия 3D-макета" style="display:block;width:100%;height:auto">`;
+  // высота снимка на печати — АДАПТИВНАЯ, а не жёсткий сантиметровый потолок: тот жал изображение
+  // до неоправданно мелкого на простом проекте (свободного места под таблицей оставалось много,
+  // а картинка не пыталась его занять). Пытались мерить реальную высоту #notes/#cards через
+  // офскрин-клон, суженный до печатной ширины колонки, — оказалось ненадёжно (высота текста внутри
+  // зависит от того, успели ли догрузиться веб-шрифты именно в момент клонирования, см. коммент у
+  // tw() выше про ту же природу проблемы — там же лечили для SVG-подписей, здесь та же болезнь
+  // добралась и до обычного HTML-текста). Вместо точных пикселей — количество строк/карточек,
+  // которое к этому моменту уже гарантированно известно (сколько .note реально отрисовано,
+  // сколько .card) и не зависит от того, какой шрифт фактически отрисовался — только от того,
+  // сколько СТРОК заметок и карточек будет в печати, с намеренно щедрым запасом на каждую (заметка
+  // редко, но может перенестись на 2 строки).
+  const pageContentPx=(297-24)*96/25.4;   // A4 минус поля 12мм (см. @page в @media print), 96dpi
+  const topbarH=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--topbar-h'))||60;
+  const noteCount=($('#notes')||{children:[]}).children.length;
+  const cardRows=Math.max(1,Math.ceil((($('#cards')||{children:[]}).children.length)/4));
+  const reserved=topbarH+noteCount*46+cardRows*115+90; // 90 — заголовок «3D — изометрия» + отступы между блоками
+  // потолок 350 — не оценка «сколько ещё влезет», а отдельная, эмпирически проверенная граница:
+  // выше неё даже с щедрым запасом внутри reserved печать по факту переставала попадать на один
+  // лист (проверено натурными PDF-прогонами с разным числом заметок, не только теорией по пикселям)
+  const avail=Math.max(180,Math.min(350,pageContentPx-reserved));
+  box.innerHTML=`<img src="${url}" alt="Изометрия 3D-макета" style="display:block;width:auto;max-width:100%;height:auto;max-height:${avail}px;margin:0 auto">`;
 }
 
 /* ===================== ТАБЛИЦЫ ===================== */
