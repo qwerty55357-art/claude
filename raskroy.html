@@ -368,12 +368,18 @@ tbody tr:hover td{background:var(--surface)}
         перехлёста сторон) — она ляжет на фото с учётом перспективы и освещения. Точки можно
         перетаскивать, чтобы подогнать точнее. Стена — обязательная цель; если у её проёмов есть
         откосы, ниже в списке появится отдельная цель на каждую видимую грань откоса — отмечать их
-        необязательно, неотмеченные грани останутся на фото как есть (видно сквозь проём). Работает
-        целиком в браузере, без отправки фото куда-либо.</p>
+        необязательно, неотмеченные грани останутся на фото как есть (видно сквозь проём). Каждое
+        нажатие «Наложить» добавляет текущую стену (и её откосы) поверх уже полученного результата —
+        так можно последовательно оформить несколько стен на одном фото (угол комнаты): отметили и
+        наложили одну стену, переключили стену в списке выше, отметили и наложили вторую. Цель
+        «Зоны исключения» — тянуть прямоугольником поверх мебели/розеток/выключателей на фото,
+        чтобы туда ничего не легло (эти места останутся как на фото); клик по уже отмеченной зоне
+        удаляет её. Работает целиком в браузере, без отправки фото куда-либо.</p>
       <div class="viz-actions">
         <button type="button" class="btn btn-mini" id="viz-reset">Сбросить точки цели</button>
         <button type="button" class="btn btn-key" id="viz-apply">Наложить раскладку</button>
         <button type="button" class="btn btn-mini" id="viz-download" disabled>Скачать PNG</button>
+        <button type="button" class="btn btn-mini btn-del" id="viz-reset-all">Сбросить всё, начать заново</button>
       </div>
     </div>
   </section>
@@ -4951,7 +4957,11 @@ function renderVizTargetSelect(){
   const prev=targetSel.value;
   const otkosTargets=wallOtkosTargets(wi);
   targetSel.innerHTML=['<option value="wall">Стена (контур)</option>']
-    .concat(otkosTargets.map(t=>`<option value="${esc(t.key)}">${esc(t.label)}</option>`)).join('');
+    .concat(otkosTargets.map(t=>`<option value="${esc(t.key)}">${esc(t.label)}</option>`))
+    // «Зоны исключения» — не привязана к конкретной стене (мебель/розетка на фото никуда не
+    // девается при переключении стены), поэтому фиксированный пункт, а не часть otkosTargets
+    .concat(['<option value="exclude">Зоны исключения (мебель, розетки…)</option>'])
+    .join('');
   if([...targetSel.options].some(o=>o.value===prev)) targetSel.value=prev;
 }
 $('#i-preset').innerHTML=PRESETS.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
@@ -5583,21 +5593,53 @@ window.addEventListener('beforeprint',flushScene3D);
   const canvas=$('#viz-canvas'); if(!canvas) return;
   const ctx=canvas.getContext('2d');
   const wallSel=$('#viz-wall'), targetSel=$('#viz-target'), fileInp=$('#viz-photo');
-  const btnReset=$('#viz-reset'), btnApply=$('#viz-apply'), btnDownload=$('#viz-download');
+  const btnReset=$('#viz-reset'), btnApply=$('#viz-apply'), btnDownload=$('#viz-download'), btnResetAll=$('#viz-reset-all');
   const MAXW=900, MAXH=620;         // размер интерактивного превью (сама подгонка точек)
-  let photoImg=null;                // Image в полном разрешении оригинала
+  let photoImg=null;                // Image в полном разрешении оригинала — неизменный эталон
+  // накопленный результат в полном разрешении: старт — копия photoImg, дальше каждое «Наложить»
+  // дорисовывает поверх НЕГО (а не поверх свежей копии фото) — так на одном фото можно
+  // последовательно оформить несколько стен (типичный кадр — угол комнаты, видно 2 стены сразу).
+  // «Сбросить всё» и загрузка нового фото возвращают его к чистой копии photoImg
+  let workingCanvas=null;
   let dispScale=1, dispW=0, dispH=0;// коэффициент полное->превью и размер превью
   // точки в системе координат ПРЕВЬЮ (0..dispW,0..dispH), СВОИ на каждую цель разметки (стена
   // и по желанию — каждая видимая грань откоса, см. renderVizTargetSelect/wallOtkosTargets):
   // {[targetKey]: [{x,y}, ...до 4]}
   let pointsByTarget={};
   let dragKey=null, dragIdx=-1;
-  let resultCanvas=null;            // готовый композит в полном разрешении (для скачивания)
+  // зоны исключения — НЕ привязаны к конкретной цели/стене (мебель и розетка на фото остаются на
+  // месте независимо от того, какую стену сейчас размечаем), поэтому отдельный список, а не запись
+  // в pointsByTarget; прямоугольники в координатах ПРЕВЬЮ, {x0,y0,x1,y1}, x0<x1, y0<y1
+  let exclusionRects=[];
+  let exclDraft=null;               // прямоугольник, который сейчас тянут мышью (ещё не отпущен)
+  let resultCanvas=null;            // = workingCanvas после первого успешного «Наложить» (для скачивания)
+
+  function resetWorking(){
+    if(!photoImg) return;
+    workingCanvas=document.createElement('canvas');
+    workingCanvas.width=photoImg.naturalWidth; workingCanvas.height=photoImg.naturalHeight;
+    workingCanvas.getContext('2d').drawImage(photoImg,0,0);
+  }
 
   function redraw(){
-    if(!photoImg) return;
+    if(!photoImg||!workingCanvas) return;
     canvas.width=dispW; canvas.height=dispH;
-    ctx.drawImage(photoImg,0,0,dispW,dispH);
+    // фон превью — текущий НАКОПЛЕННЫЙ результат (а не всегда исходное фото): при разметке второй
+    // стены на том же снимке видно уже применённую первую, а не как будто её и не было
+    ctx.drawImage(workingCanvas,0,0,dispW,dispH);
+    // зоны исключения — глобальные, видны при разметке любой цели (не только когда выбрана сама
+    // цель «Зоны исключения»), полупрозрачной красной штриховкой поверх фото/уже применённого
+    exclusionRects.forEach(r=>{
+      ctx.fillStyle='rgba(220,50,50,.18)'; ctx.fillRect(r.x0,r.y0,r.x1-r.x0,r.y1-r.y0);
+      ctx.setLineDash([4,3]); ctx.strokeStyle='rgba(220,50,50,.9)'; ctx.lineWidth=1.5;
+      ctx.strokeRect(r.x0,r.y0,r.x1-r.x0,r.y1-r.y0); ctx.setLineDash([]);
+    });
+    if(exclDraft){
+      const x0=Math.min(exclDraft.x0,exclDraft.x1), y0=Math.min(exclDraft.y0,exclDraft.y1);
+      const w=Math.abs(exclDraft.x1-exclDraft.x0), h=Math.abs(exclDraft.y1-exclDraft.y0);
+      ctx.fillStyle='rgba(220,50,50,.12)'; ctx.fillRect(x0,y0,w,h);
+      ctx.setLineDash([4,3]); ctx.strokeStyle='rgba(220,50,50,.7)'; ctx.lineWidth=1.5; ctx.strokeRect(x0,y0,w,h); ctx.setLineDash([]);
+    }
     const activeKey=targetSel.value;
     // сначала неактивные цели — тонким белым пунктиром для ориентира, без номеров (не мешают
     // видеть/перетаскивать точки текущей активной цели, которая рисуется поверх них ниже)
@@ -5609,21 +5651,23 @@ window.addEventListener('beforeprint',flushScene3D);
       if(pts.length===4) ctx.closePath();
       ctx.setLineDash([3,3]); ctx.strokeStyle='rgba(255,255,255,.4)'; ctx.lineWidth=1; ctx.stroke(); ctx.setLineDash([]);
     });
-    const active=pointsByTarget[activeKey]||[];
-    if(active.length>1){
-      ctx.beginPath();
-      ctx.moveTo(active[0].x,active[0].y);
-      for(let i=1;i<active.length;i++) ctx.lineTo(active[i].x,active[i].y);
-      if(active.length===4) ctx.closePath();
-      ctx.setLineDash([6,4]); ctx.strokeStyle='#ffb020'; ctx.lineWidth=2; ctx.stroke(); ctx.setLineDash([]);
+    if(activeKey!=='exclude'){
+      const active=pointsByTarget[activeKey]||[];
+      if(active.length>1){
+        ctx.beginPath();
+        ctx.moveTo(active[0].x,active[0].y);
+        for(let i=1;i<active.length;i++) ctx.lineTo(active[i].x,active[i].y);
+        if(active.length===4) ctx.closePath();
+        ctx.setLineDash([6,4]); ctx.strokeStyle='#ffb020'; ctx.lineWidth=2; ctx.stroke(); ctx.setLineDash([]);
+      }
+      active.forEach((p,i)=>{
+        ctx.beginPath(); ctx.arc(p.x,p.y,10,0,Math.PI*2);
+        ctx.fillStyle='rgba(255,176,32,.9)'; ctx.fill();
+        ctx.lineWidth=2; ctx.strokeStyle='#fff'; ctx.stroke();
+        ctx.fillStyle='#fff'; ctx.font='bold 11px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText(String(i+1),p.x,p.y+.5);
+      });
     }
-    active.forEach((p,i)=>{
-      ctx.beginPath(); ctx.arc(p.x,p.y,10,0,Math.PI*2);
-      ctx.fillStyle='rgba(255,176,32,.9)'; ctx.fill();
-      ctx.lineWidth=2; ctx.strokeStyle='#fff'; ctx.stroke();
-      ctx.fillStyle='#fff'; ctx.font='bold 11px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
-      ctx.fillText(String(i+1),p.x,p.y+.5);
-    });
   }
 
   function loadPhoto(file){
@@ -5635,7 +5679,8 @@ window.addEventListener('beforeprint',flushScene3D);
         dispScale=Math.min(1,MAXW/img.naturalWidth,MAXH/img.naturalHeight);
         dispW=Math.max(1,Math.round(img.naturalWidth*dispScale));
         dispH=Math.max(1,Math.round(img.naturalHeight*dispScale));
-        pointsByTarget={}; resultCanvas=null; btnDownload.disabled=true;
+        pointsByTarget={}; exclusionRects=[]; resultCanvas=null; btnDownload.disabled=true;
+        resetWorking();
         redraw();
       };
       img.src=ev.target.result;
@@ -5647,10 +5692,16 @@ window.addEventListener('beforeprint',flushScene3D);
     if(f) loadPhoto(f);
   });
   // смена стены — набор целей (откосов) полностью меняется, ключи прежней стены больше не имеют
-  // смысла (тот же 'otkos:0:left' у другой стены — другой проём и другие реальные размеры)
-  wallSel.addEventListener('change',()=>{ pointsByTarget={}; resultCanvas=null; btnDownload.disabled=true; redraw(); });
+  // смысла (тот же 'otkos:0:left' у другой стены — другой проём и другие реальные размеры).
+  // Уже НАКОПЛЕННЫЙ результат (workingCanvas) НЕ трогаем — в этом и смысл: можно доразметить
+  // следующую стену того же фото, не потеряв уже применённую
+  wallSel.addEventListener('change',()=>{ pointsByTarget={}; redraw(); });
   // смена текущей цели — просто перерисовать (сделать её точки активными/редактируемыми)
   targetSel.addEventListener('change',redraw);
+  btnResetAll.addEventListener('click',()=>{
+    pointsByTarget={}; exclusionRects=[]; resultCanvas=null; btnDownload.disabled=true;
+    resetWorking(); redraw();
+  });
 
   function ptFromEvent(ev){
     const r=canvas.getBoundingClientRect();
@@ -5663,9 +5714,17 @@ window.addEventListener('beforeprint',flushScene3D);
   }
   canvas.addEventListener('pointerdown',ev=>{
     if(!photoImg) return;
+    const pt=ptFromEvent(ev);
+    if(targetSel.value==='exclude'){
+      // клик ВНУТРИ уже отмеченной зоны — убрать её (тот же жест, без отдельной кнопки-урны)
+      const hitIdx=exclusionRects.findIndex(r=>pt.x>=r.x0&&pt.x<=r.x1&&pt.y>=r.y0&&pt.y<=r.y1);
+      if(hitIdx>=0){ exclusionRects.splice(hitIdx,1); redraw(); return; }
+      exclDraft={x0:pt.x,y0:pt.y,x1:pt.x,y1:pt.y};
+      canvas.setPointerCapture(ev.pointerId);
+      return;
+    }
     const key=targetSel.value;
     const pts=pointsByTarget[key]||(pointsByTarget[key]=[]);
-    const pt=ptFromEvent(ev);
     for(let i=0;i<pts.length;i++){
       if(Math.hypot(pts[i].x-pt.x,pts[i].y-pt.y)<14){
         dragKey=key; dragIdx=i; canvas.setPointerCapture(ev.pointerId); return;
@@ -5674,16 +5733,28 @@ window.addEventListener('beforeprint',flushScene3D);
     if(pts.length<4){ pts.push(pt); redraw(); }
   });
   canvas.addEventListener('pointermove',ev=>{
+    if(exclDraft){ const pt=ptFromEvent(ev); exclDraft.x1=pt.x; exclDraft.y1=pt.y; redraw(); return; }
     if(dragIdx<0) return;
     pointsByTarget[dragKey][dragIdx]=ptFromEvent(ev); redraw();
   });
-  const endDrag=()=>{ dragIdx=-1; dragKey=null; };
+  const endDrag=ev=>{
+    if(exclDraft){
+      const x0=Math.min(exclDraft.x0,exclDraft.x1), y0=Math.min(exclDraft.y0,exclDraft.y1);
+      const x1=Math.max(exclDraft.x0,exclDraft.x1), y1=Math.max(exclDraft.y0,exclDraft.y1);
+      exclDraft=null;
+      if(x1-x0>4&&y1-y0>4) exclusionRects.push({x0,y0,x1,y1}); // отсекаем случайный клик без реального перетаскивания
+      redraw();
+      return;
+    }
+    dragIdx=-1; dragKey=null;
+  };
   canvas.addEventListener('pointerup',endDrag);
   canvas.addEventListener('pointercancel',endDrag);
 
   btnReset.addEventListener('click',()=>{
-    delete pointsByTarget[targetSel.value];
-    resultCanvas=null; btnDownload.disabled=true; redraw();
+    if(targetSel.value==='exclude') exclusionRects=[];
+    else delete pointsByTarget[targetSel.value];
+    redraw();
   });
 
   // ---- проверки на некорректный четырёхугольник — до того, как считать сам композит ----
@@ -5810,8 +5881,10 @@ window.addEventListener('beforeprint',flushScene3D);
 
   // ---- варп ОДНОЙ текстуры на ОДИН четырёхугольник точек, поверх уже нарисованного в fctx —
   // общая часть для стены и для каждой грани откоса (см. computeComposite): считаем всё в тех же
-  // координатах полного разрешения фото (points пересчитаны из превью через dispScale)
-  function warpTextureOnto(fctx,fullW,fullH,tex,pts){
+  // координатах полного разрешения фото (points пересчитаны из превью через dispScale).
+  // exclFull — зоны исключения В ПОЛНОМ РАЗРЕШЕНИИ (уже пересчитаны из превью вызывающей стороной,
+  // один раз на весь computeComposite, а не заново на каждый вызов warpTextureOnto)
+  function warpTextureOnto(fctx,fullW,fullH,tex,pts,exclFull){
     const fx=pts.map(p=>p.x/dispScale), fy=pts.map(p=>p.y/dispScale);
     const minX=Math.max(0,Math.floor(Math.min(...fx))), maxX=Math.min(fullW,Math.ceil(Math.max(...fx)));
     const minY=Math.max(0,Math.floor(Math.min(...fy))), maxY=Math.min(fullH,Math.ceil(Math.max(...fy)));
@@ -5829,7 +5902,10 @@ window.addEventListener('beforeprint',flushScene3D);
     const od=outData.data;
     for(let yy=0;yy<regH;yy++){
       for(let xx=0;xx<regW;xx++){
-        const [u,v]=mat3Apply(Minv,minX+xx,minY+yy);
+        const X=minX+xx, Y=minY+yy;
+        // зона исключения (мебель/розетка на фото) — пропускаем пиксель целиком, фото остаётся как есть
+        if(exclFull&&exclFull.some(r=>X>=r.x0&&X<=r.x1&&Y>=r.y0&&Y<=r.y1)) continue;
+        const [u,v]=mat3Apply(Minv,X,Y);
         if(!(u>=0)||!(u<=1)||!(v>=0)||!(v<=1)) continue; // !(x>=0) вместо x<0 — отсекает и NaN на вырожденной геометрии
         // текстура строится в тех же координатах «сверху-вниз», что и клик-точки (P0=левый
         // верхний угол стены = u=0,v=0) — поэтому прямое соответствие, без переворота по Y
@@ -5863,18 +5939,18 @@ window.addEventListener('beforeprint',flushScene3D);
   }
 
   function computeComposite(){
-    if(!LAST||!LAST.R) return null;
+    if(!LAST||!LAST.R||!workingCanvas) return null;
     const wi=+wallSel.value;
     const wallPts=pointsByTarget.wall;
     if(!wallPts||wallPts.length<4) return null;
     const tex=wallTextureCanvas(wi,LAST.G,LAST.R);
     if(!tex) return null;
 
-    const full=document.createElement('canvas');
-    full.width=photoImg.naturalWidth; full.height=photoImg.naturalHeight;
-    const fctx=full.getContext('2d');
-    fctx.drawImage(photoImg,0,0);
-    warpTextureOnto(fctx,full.width,full.height,tex,wallPts);
+    // рисуем ПРЯМО НА workingCanvas (не на свежей копии фото) — так накапливаются несколько
+    // применённых стен подряд на одном снимке, см. комментарий у объявления workingCanvas
+    const fctx=workingCanvas.getContext('2d');
+    const exclFull=exclusionRects.map(r=>({x0:r.x0/dispScale,y0:r.y0/dispScale,x1:r.x1/dispScale,y1:r.y1/dispScale}));
+    warpTextureOnto(fctx,workingCanvas.width,workingCanvas.height,tex,wallPts,exclFull);
 
     // грани откоса — НЕОБЯЗАТЕЛЬНЫ: рисуем только те, что пользователь реально разметил (4
     // точки); остальные проёмы остаются прозрачной дырой — сквозь них видно исходное фото, как
@@ -5886,9 +5962,9 @@ window.addEventListener('beforeprint',flushScene3D);
       const pts=pointsByTarget[t.key];
       if(!pts||pts.length<4) return;
       const otex=otkosTextureCanvas(t.len,t.dep,t.matId,faceColorFallback);
-      warpTextureOnto(fctx,full.width,full.height,otex,pts);
+      warpTextureOnto(fctx,workingCanvas.width,workingCanvas.height,otex,pts,exclFull);
     });
-    return full;
+    return workingCanvas;
   }
 
   btnApply.addEventListener('click',()=>{
