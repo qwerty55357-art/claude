@@ -171,6 +171,16 @@ tbody tr:hover td{background:var(--surface)}
   .corner-scheme-item svg{max-height:11cm !important;width:auto !important}
   #scene3d-block{display:none !important}
   .scene3d-print-block{display:block;break-inside:avoid;page-break-inside:avoid}
+  /* при заметках подлиннее (несколько предупреждений) снимок в полный рост (width:100%, высота
+     по пропорции 1200×800 ≈ 124мм) вместе с таблицей итогов уже не помещается в один лист — блок
+     целиком уезжает на следующую страницу (break-inside:avoid не режет его), а под ним снова
+     остаётся пустой лист, ровно та же болезнь, что была у страницы «карточки». Пользователь явно
+     попросил: заметки+таблица+3D — всегда один лист. Единственный надёжный способ — сделать сам
+     снимок заведомо компактным (уже не «во всю ширину», а с потолком по высоте, как у радиусных
+     углов выше), а не полагаться на то, что случайно наберётся достаточно места после заметок
+     произвольной длины */
+  .scene3d-print-block img{max-height:8cm !important;width:auto !important;margin:0 auto}
+  .scene3d-print-block{text-align:center}
   *{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important }
   .svg-wrap{overflow:visible}
   svg{max-height:none !important}
