@@ -4609,24 +4609,56 @@ function renderScene3DSnapshot(scene,minX,maxX,minZ,maxZ,maxH){
   }
   const renderer=scene3dSnapshotRenderer;
   const target=new THREE.Vector3((minX+maxX)/2,Math.min(maxH,2500)/2,(minZ+maxZ)/2);
-  const span=Math.max(maxX-minX,maxZ-minZ,maxH,2000);
+  const aspect=w/h;
+  const theta=Math.PI*0.25, phi=Math.PI*0.34; // классический изометрический ракурс сверху-сбоку
+  const prevBg=scene.background;
+  scene.background=null;
   // ортографическая (истинно изометрическая) камера, а не перспективная — у перспективы даже при
   // точном lookAt(target) в центр кадра целятся лучи, а не объём: несимметричная относительно
   // target геометрия (типичный случай — комната из 2-3 стен, а не замкнутый прямоугольник)
   // проецируется несимметрично из-за перспективных искажений по глубине, и снимок «съезжает»
   // в сторону той части макета, что ближе к камере. У параллельной проекции такого смещения
   // нет в принципе — величина искажения по глубине отсутствует, симметричный относительно
-  // target объём остаётся симметричным и на экране, вне зависимости от формы комнаты
-  const aspect=w/h, viewH=span*1.7, viewW=viewH*aspect;
-  const camera=new THREE.OrthographicCamera(-viewW/2,viewW/2,viewH/2,-viewH/2,10,100000);
-  const radius=span*2.1;
-  const theta=Math.PI*0.25, phi=Math.PI*0.34; // классический изометрический ракурс сверху-сбоку
-  camera.position.set(target.x+radius*Math.sin(phi)*Math.cos(theta),target.y+radius*Math.cos(phi),
-    target.z+radius*Math.sin(phi)*Math.sin(theta));
-  camera.lookAt(target);
-  const prevBg=scene.background;
-  scene.background=null;
-  renderer.render(scene,camera);
+  // target объём остаётся симметричным и на экране, вне зависимости от формы комнаты.
+  // Вынесено в функцию — вызывается дважды (см. ниже), второй раз с подогнанным span
+  function renderPass(span){
+    const viewH=span*1.7, viewW=viewH*aspect;
+    const camera=new THREE.OrthographicCamera(-viewW/2,viewW/2,viewH/2,-viewH/2,10,100000);
+    const radius=span*2.1;
+    camera.position.set(target.x+radius*Math.sin(phi)*Math.cos(theta),target.y+radius*Math.cos(phi),
+      target.z+radius*Math.sin(phi)*Math.sin(theta));
+    camera.lookAt(target);
+    renderer.render(scene,camera);
+    const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+    cv.getContext('2d').drawImage(renderer.domElement,0,0);
+    const px=cv.getContext('2d').getImageData(0,0,w,h).data;
+    let minPX=w,maxPX=-1,minPY=h,maxPY=-1;
+    for(let y=0;y<h;y++){
+      for(let x=0;x<w;x++){
+        if(px[(y*w+x)*4+3]>10){ if(x<minPX)minPX=x; if(x>maxPX)maxPX=x; if(y<minPY)minPY=y; if(y>maxPY)maxPY=y; }
+      }
+    }
+    return {canvas:cv,minPX,maxPX,minPY,maxPY};
+  }
+  let span=Math.max(maxX-minX,maxZ-minZ,maxH,2000);
+  let pass=renderPass(span);
+  // «наивный» span (по мировым X/Z-габаритам сцены) занижает реальный масштаб, когда в сцене
+  // несколько НЕ связанных углами групп стен: computeWallPlacements3D раздвигает такие группы
+  // фиксированным зазором 2000мм, чтобы они не перекрывались на экране — для интерактивного вида
+  // это верно, но для печатного снимка этот зазор ошибочно считается «частью макета» и раздувает
+  // span, из-за чего сам макет на снимке выходит мелким в пустом кадре. Чиним не переделкой
+  // раскладки (она нужна такой для экрана), а вторым проходом здесь: меряем, какую ДОЛЮ кадра
+  // реально занял непрозрачный контент после первого рендера, и если она заметно меньше целевой —
+  // пересчитываем span под фактический размер контента и рендерим ещё раз с более тесным кадром
+  if(pass.maxPX>=pass.minPX){
+    const fillRatio=Math.max((pass.maxPX-pass.minPX)/w,(pass.maxPY-pass.minPY)/h);
+    const targetFill=0.82;
+    if(fillRatio>0&&fillRatio<targetFill*0.85){
+      span=Math.max(span*fillRatio/targetFill,800);
+      pass=renderPass(span);
+    }
+  }
+  const {canvas:w2,minPX,maxPX,minPY,maxPY}=pass;
   // «target по центру объёма X/Z» НЕ значит «объект по центру КАДРА» для наклонной (изометрической)
   // проекции: комната обычно НЕ замкнутый симметричный прямоугольник (2-3 стены, разной длины,
   // проём только на одной), и проекция такой формы на диагональную ось камеры может лежать
@@ -4635,16 +4667,6 @@ function renderScene3DSnapshot(scene,minX,maxX,minZ,maxZ,maxH){
   // плоские зоны, откосы), проще и надёжнее один раз измерить, где реально оказалась картинка
   // (бокс непрозрачных пикселей), и просто сдвинуть готовый кадр на разницу — это верно для
   // любой формы комнаты, а не только для тех случаев, что подсмотрены в тестах.
-  const w2=document.createElement('canvas'); w2.width=w; w2.height=h;
-  const wctx=w2.getContext('2d');
-  wctx.drawImage(renderer.domElement,0,0);
-  const px=wctx.getImageData(0,0,w,h).data;
-  let minPX=w,maxPX=-1,minPY=h,maxPY=-1;
-  for(let y=0;y<h;y++){
-    for(let x=0;x<w;x++){
-      if(px[(y*w+x)*4+3]>10){ if(x<minPX)minPX=x; if(x>maxPX)maxPX=x; if(y<minPY)minPY=y; if(y>maxPY)maxPY=y; }
-    }
-  }
   let url;
   if(maxPX>=minPX){
     const shiftX=w/2-(minPX+maxPX)/2, shiftY=h/2-(minPY+maxPY)/2;
@@ -4652,7 +4674,7 @@ function renderScene3DSnapshot(scene,minX,maxX,minZ,maxZ,maxH){
     out.getContext('2d').drawImage(w2,shiftX,shiftY);
     url=out.toDataURL('image/png');
   } else {
-    url=renderer.domElement.toDataURL('image/png');
+    url=w2.toDataURL('image/png');
   }
   scene.background=prevBg;
   // высота снимка на печати — АДАПТИВНАЯ, а не жёсткий сантиметровый потолок: тот жал изображение
