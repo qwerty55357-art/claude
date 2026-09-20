@@ -188,7 +188,12 @@ tbody tr:hover td{background:var(--surface)}
   .stage{padding:0}
   .topbar{position:static}
   .block{break-inside:avoid;page-break-inside:avoid}
-  .cards{grid-template-columns:repeat(4,1fr)}
+  /* #cards — не .block (отдельный сосед #notes, не обёрнут в .block), поэтому общее правило выше
+     его не защищало: при нехватке места на листе браузер резал сетку прямо посередине карточки
+     (заголовок «Клей» — на одной странице, значение «14 туб» — на следующей). Тот же break-inside,
+     что и у остальных секций — либо вся таблица целиком, либо переносится на новый лист целиком */
+  .cards{grid-template-columns:repeat(4,1fr);break-inside:avoid;page-break-inside:avoid}
+  .card{break-inside:avoid;page-break-inside:avoid}
   /* карточек 5 (обычно) или 6 (с LED) — то есть НИКОГДА не кратно 4, последняя строка сетки всегда
      остаётся неполной. Пустая клетка грида — это не пробел, а видимый цвет самого контейнера
      (.cards: background:var(--line), просвечивает через gap между несуществующими карточками) —
