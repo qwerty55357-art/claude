@@ -185,6 +185,16 @@ tbody tr:hover td{background:var(--surface)}
   .topbar{position:static}
   .block{break-inside:avoid;page-break-inside:avoid}
   .cards{grid-template-columns:repeat(4,1fr)}
+  /* карточек 5 (обычно) или 6 (с LED) — то есть НИКОГДА не кратно 4, последняя строка сетки всегда
+     остаётся неполной. Пустая клетка грида — это не пробел, а видимый цвет самого контейнера
+     (.cards: background:var(--line), просвечивает через gap между несуществующими карточками) —
+     тот самый серый прямоугольник рядом с последней карточкой. Классический приём «дотянуть»
+     последнюю карточку до конца строки без JS: она — единственный ребёнок, что и nth-last-child(1),
+     и одновременно N-я по счёту с известным остатком от деления на 4 — растягиваем ровно настолько,
+     чтобы линия карточек всегда доходила до правого края, какой бы ни была их итоговая длина */
+  .cards>*:nth-last-child(1):nth-child(4n+1){grid-column:span 4}
+  .cards>*:nth-last-child(1):nth-child(4n+2){grid-column:span 3}
+  .cards>*:nth-last-child(1):nth-child(4n+3){grid-column:span 2}
   body{font-size:11px}
 }
 @media (max-width:960px){
@@ -336,6 +346,10 @@ tbody tr:hover td{background:var(--surface)}
 <main class="stage" id="stage">
   <div id="notes" class="notes"></div>
   <div class="cards" id="cards"></div>
+  <div class="block scene3d-print-block" id="scene3d-print-block">
+    <div class="wall-scheme-h">3D — изометрия макета</div>
+    <div id="scene3d-print"></div>
+  </div>
   <div class="block">
     <div class="stage-h"><h2>Схема раскладки</h2><span class="meta" id="scheme-meta"></span><span class="rule"></span></div>
     <div class="svg-wrap" id="scheme"></div>
@@ -400,10 +414,6 @@ tbody tr:hover td{background:var(--surface)}
       «Глубина откоса»), с цветом стороны, если для неё назначен свой материал. На раскрой и смету
       никак не влияет — только вид. Перетаскивание — вращение камеры, колесо мыши — масштаб.</p>
     <div id="scene3d" style="width:100%;height:520px;border-radius:var(--r);overflow:hidden"></div>
-  </div>
-  <div class="block scene3d-print-block" id="scene3d-print-block">
-    <div class="wall-scheme-h">3D — изометрия макета</div>
-    <div id="scene3d-print"></div>
   </div>
   <div class="block">
     <div class="stage-h"><h2>Карта раскроя</h2><span class="meta" id="cut-meta"></span><span class="rule"></span></div>
