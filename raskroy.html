@@ -129,12 +129,13 @@ tbody tr:hover td{background:var(--surface)}
 /* список LED-отрезков стены — печатная замена раздела «LED» (см. renderScheme): на экране скрыт,
    там и так есть интерактивный раздел «LED — рисование отрезков» с тем же списком */
 .led-print-list{display:none}
-/* один элемент списка «Развёртки радиусных углов» (см. renderCornerScheme) — тот же вид рамки/
-   отступов, что у .svg-wrap, но своя карточка на КАЖДЫЙ угол (список общий и на экране, и в печати,
-   без разбивки по отдельным разделам/страницам — см. cornerSchemeSvg: сама SVG вписывается в
-   max-height:76vh точно так же, как у обычной стены) */
-.corner-scheme-item{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:16px;margin-bottom:16px;overflow:auto}
-.corner-scheme-item:last-child{margin-bottom:0}
+/* список «Развёртки радиусных углов» (см. renderCornerScheme) — карточка на КАЖДЫЙ угол, общий
+   список и на экране, и в печати, без разбивки по отдельным разделам/страницам. Деталь угла узкая
+   и высокая (портретные пропорции) — при развороте в ряд (flex-wrap) несколько таких карточек
+   естественным образом умещаются рядом друг с другом по ширине листа, а не только один столбец
+   сверху вниз, как раньше */
+#corner-scheme{display:flex;flex-wrap:wrap;gap:16px}
+.corner-scheme-item{flex:0 0 auto;border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:16px;overflow:auto}
 .corner-scheme-item-h{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
 /* печатная замена живого 3D-канваса — статичный PNG-снимок с собственным (изометрическим) ракурсом
    камеры, отрисованный отдельно от интерактивного вида (см. renderScene3DSnapshot): WebGL-канвас
@@ -153,16 +154,21 @@ tbody tr:hover td{background:var(--surface)}
   [data-resize],[data-cmrot]{display:none !important}
   #led-draw-block{display:none !important}
   .led-print-list{display:block}
-  /* карточки углов не должны рваться по середине, но, в отличие от прежней версии, НЕ каждая на
-     своей странице — пользователь явно попросил не разносить углы по отдельным разделам/страницам,
-     несколько компактных углов вполне могут ужиться на одном листе. Деталь угла — узкая и высокая
-     (портретные пропорции, в отличие от широкой альбомной стены), поэтому общее правило ниже
-     (svg{max-height:none!important}), рассчитанное на стену (та при width:100% и без предела высоты
-     сама укладывается в лист), для угла не годится — при том же width:100% высота ушла бы далеко за
-     пределы листа. Возвращаем предел высоты именно для угла, чтобы каждая карточка гарантированно
-     помещалась на лист (см. break-inside:avoid выше) */
+  /* карточки углов не должны рваться по середине, и НЕ каждая на своей странице — пользователь явно
+     попросил не разносить углы по отдельным разделам/страницам, несколько компактных углов вполне
+     могут ужиться на одном листе. Деталь угла — узкая и высокая (портретные пропорции, в отличие
+     от широкой альбомной стены), поэтому общее правило ниже (svg{max-height:none!important}),
+     рассчитанное на стену (та при width:100% и без предела высоты сама укладывается в лист), для
+     угла не годится — при том же width:100% высота ушла бы далеко за пределы листа. Возвращаем
+     предел высоты именно для угла — но теперь СУЩЕСТВЕННО меньше (было 20cm, почти во весь лист,
+     из-за чего влезал только один угол на странице): целимся в туже величину, что и обычно
+     занимает на листе развёрнутая на всю ширину схема стены (высота обычно на порядок меньше
+     ширины при альбомных пропорциях стены) — это и даёт «тот же масштаб отрисовки, что у стен» на
+     практике, и оставляет место для нескольких углов подряд. #corner-scheme — flex-wrap (см. общее
+     правило вне @media print выше), поэтому несколько узких карточек одинаковой малой высоты
+     естественно выстраиваются В РЯД по ширине листа, а не только друг под другом */
   .corner-scheme-item{break-inside:avoid;page-break-inside:avoid;overflow:visible}
-  .corner-scheme-item svg{max-height:20cm !important;width:auto !important}
+  .corner-scheme-item svg{max-height:11cm !important;width:auto !important}
   #scene3d-block{display:none !important}
   .scene3d-print-block{display:block;break-inside:avoid;page-break-inside:avoid}
   *{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important }
