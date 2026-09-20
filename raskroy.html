@@ -363,12 +363,15 @@ tbody tr:hover td{background:var(--surface)}
     <div class="sect-b">
       <div class="row row-1"><div class="f"><label>Стена</label><select id="viz-wall"></select></div></div>
       <div class="row row-1"><div class="f"><label>Фото стены/комнаты</label><input type="file" id="viz-photo" accept="image/*"></div></div>
-      <p class="hint">Отметьте на фото 4 угла выбранной стены кликами по часовой стрелке, начиная с
-        верхнего левого — раскладка панелей ляжет на фото с учётом перспективы и освещения. Точки
-        можно перетаскивать, чтобы подогнать точнее. Работает целиком в браузере, без отправки фото
-        куда-либо.</p>
+      <div class="row row-1"><div class="f"><label>Что размечаем сейчас</label><select id="viz-target"></select></div></div>
+      <p class="hint">Отметьте на фото 4 угла текущей цели кликами по порядку (в один обход, без
+        перехлёста сторон) — она ляжет на фото с учётом перспективы и освещения. Точки можно
+        перетаскивать, чтобы подогнать точнее. Стена — обязательная цель; если у её проёмов есть
+        откосы, ниже в списке появится отдельная цель на каждую видимую грань откоса — отмечать их
+        необязательно, неотмеченные грани останутся на фото как есть (видно сквозь проём). Работает
+        целиком в браузере, без отправки фото куда-либо.</p>
       <div class="viz-actions">
-        <button type="button" class="btn btn-mini" id="viz-reset">Сбросить точки</button>
+        <button type="button" class="btn btn-mini" id="viz-reset">Сбросить точки цели</button>
         <button type="button" class="btn btn-key" id="viz-apply">Наложить раскладку</button>
         <button type="button" class="btn btn-mini" id="viz-download" disabled>Скачать PNG</button>
       </div>
@@ -4920,6 +4923,36 @@ function renderVizWallSelect(){
   const prev=sel.value;
   sel.innerHTML=walls.map((w,i)=>`<option value="${i}">${esc(w.name)}</option>`).join('');
   if(prev!==''&&+prev<walls.length) sel.value=prev;
+  renderVizTargetSelect();
+}
+// геометрия (без раскроя/упаковки — она нам тут не нужна) видимых граней откоса стены wi: та же
+// buildOtkosParts, что использует настоящий раскрой (см. computeProject), поэтому размеры/наличие
+// материала на стороне гарантированно совпадают с реальным проектом, без риска разъехаться
+function wallOtkosTargets(wi){
+  if(!LAST||!LAST.R||!walls[wi]) return [];
+  const G=LAST.G, R=LAST.R;
+  const wall=wallCutView(walls[wi],R.cornerCuts&&R.cornerCuts.get(walls[wi].id));
+  const S=wallS(G,wall);
+  const sideLabel={left:'слева',right:'справа',top:'сверху',bottom:'снизу'};
+  const kindLabel={window:'Окно',door:'Дверь',niche:'Ниша'};
+  return buildOtkosParts(S).map(p=>({
+    key:'otkos:'+p.op+':'+p.side,
+    label:`${kindLabel[S.ops[p.op].kind]||'Проём'} ${p.op+1} — откос ${sideLabel[p.side]}`,
+    len:p.len, dep:p.dep,
+    matId:(S.ops[p.op].otkosMat&&S.ops[p.op].otkosMat[p.side])||null
+  }));
+}
+// список целей разметки (стена + её откосы) в разделе «Визуализация на фото» — зависит от ТЕКУЩЕЙ
+// выбранной стены (#viz-wall), поэтому дёргается и из run() (через renderVizWallSelect), и сразу
+// после смены самой стены в селекте (см. IIFE ниже, слушатель change на #viz-wall)
+function renderVizTargetSelect(){
+  const wallSel=$('#viz-wall'), targetSel=$('#viz-target'); if(!wallSel||!targetSel) return;
+  const wi=+wallSel.value||0;
+  const prev=targetSel.value;
+  const otkosTargets=wallOtkosTargets(wi);
+  targetSel.innerHTML=['<option value="wall">Стена (контур)</option>']
+    .concat(otkosTargets.map(t=>`<option value="${esc(t.key)}">${esc(t.label)}</option>`)).join('');
+  if([...targetSel.options].some(o=>o.value===prev)) targetSel.value=prev;
 }
 $('#i-preset').innerHTML=PRESETS.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
 $('#i-ledtemp').innerHTML=LED_TEMPS.map(t=>`<option value="${t.k}"${t.k===4000?' selected':''}>${t.name}</option>`).join('');
@@ -5549,27 +5582,42 @@ window.addEventListener('beforeprint',flushScene3D);
 (function(){
   const canvas=$('#viz-canvas'); if(!canvas) return;
   const ctx=canvas.getContext('2d');
-  const wallSel=$('#viz-wall'), fileInp=$('#viz-photo');
+  const wallSel=$('#viz-wall'), targetSel=$('#viz-target'), fileInp=$('#viz-photo');
   const btnReset=$('#viz-reset'), btnApply=$('#viz-apply'), btnDownload=$('#viz-download');
   const MAXW=900, MAXH=620;         // размер интерактивного превью (сама подгонка точек)
   let photoImg=null;                // Image в полном разрешении оригинала
   let dispScale=1, dispW=0, dispH=0;// коэффициент полное->превью и размер превью
-  let points=[];                    // точки в системе координат ПРЕВЬЮ (0..dispW,0..dispH)
-  let dragIdx=-1;
+  // точки в системе координат ПРЕВЬЮ (0..dispW,0..dispH), СВОИ на каждую цель разметки (стена
+  // и по желанию — каждая видимая грань откоса, см. renderVizTargetSelect/wallOtkosTargets):
+  // {[targetKey]: [{x,y}, ...до 4]}
+  let pointsByTarget={};
+  let dragKey=null, dragIdx=-1;
   let resultCanvas=null;            // готовый композит в полном разрешении (для скачивания)
 
   function redraw(){
     if(!photoImg) return;
     canvas.width=dispW; canvas.height=dispH;
     ctx.drawImage(photoImg,0,0,dispW,dispH);
-    if(points.length>1){
+    const activeKey=targetSel.value;
+    // сначала неактивные цели — тонким белым пунктиром для ориентира, без номеров (не мешают
+    // видеть/перетаскивать точки текущей активной цели, которая рисуется поверх них ниже)
+    Object.keys(pointsByTarget).forEach(key=>{
+      if(key===activeKey) return;
+      const pts=pointsByTarget[key]; if(!pts||pts.length<2) return;
+      ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y);
+      for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x,pts[i].y);
+      if(pts.length===4) ctx.closePath();
+      ctx.setLineDash([3,3]); ctx.strokeStyle='rgba(255,255,255,.4)'; ctx.lineWidth=1; ctx.stroke(); ctx.setLineDash([]);
+    });
+    const active=pointsByTarget[activeKey]||[];
+    if(active.length>1){
       ctx.beginPath();
-      ctx.moveTo(points[0].x,points[0].y);
-      for(let i=1;i<points.length;i++) ctx.lineTo(points[i].x,points[i].y);
-      if(points.length===4) ctx.closePath();
+      ctx.moveTo(active[0].x,active[0].y);
+      for(let i=1;i<active.length;i++) ctx.lineTo(active[i].x,active[i].y);
+      if(active.length===4) ctx.closePath();
       ctx.setLineDash([6,4]); ctx.strokeStyle='#ffb020'; ctx.lineWidth=2; ctx.stroke(); ctx.setLineDash([]);
     }
-    points.forEach((p,i)=>{
+    active.forEach((p,i)=>{
       ctx.beginPath(); ctx.arc(p.x,p.y,10,0,Math.PI*2);
       ctx.fillStyle='rgba(255,176,32,.9)'; ctx.fill();
       ctx.lineWidth=2; ctx.strokeStyle='#fff'; ctx.stroke();
@@ -5587,7 +5635,7 @@ window.addEventListener('beforeprint',flushScene3D);
         dispScale=Math.min(1,MAXW/img.naturalWidth,MAXH/img.naturalHeight);
         dispW=Math.max(1,Math.round(img.naturalWidth*dispScale));
         dispH=Math.max(1,Math.round(img.naturalHeight*dispScale));
-        points=[]; resultCanvas=null; btnDownload.disabled=true;
+        pointsByTarget={}; resultCanvas=null; btnDownload.disabled=true;
         redraw();
       };
       img.src=ev.target.result;
@@ -5598,6 +5646,11 @@ window.addEventListener('beforeprint',flushScene3D);
     const f=fileInp.files&&fileInp.files[0];
     if(f) loadPhoto(f);
   });
+  // смена стены — набор целей (откосов) полностью меняется, ключи прежней стены больше не имеют
+  // смысла (тот же 'otkos:0:left' у другой стены — другой проём и другие реальные размеры)
+  wallSel.addEventListener('change',()=>{ pointsByTarget={}; resultCanvas=null; btnDownload.disabled=true; redraw(); });
+  // смена текущей цели — просто перерисовать (сделать её точки активными/редактируемыми)
+  targetSel.addEventListener('change',redraw);
 
   function ptFromEvent(ev){
     const r=canvas.getBoundingClientRect();
@@ -5610,24 +5663,27 @@ window.addEventListener('beforeprint',flushScene3D);
   }
   canvas.addEventListener('pointerdown',ev=>{
     if(!photoImg) return;
+    const key=targetSel.value;
+    const pts=pointsByTarget[key]||(pointsByTarget[key]=[]);
     const pt=ptFromEvent(ev);
-    for(let i=0;i<points.length;i++){
-      if(Math.hypot(points[i].x-pt.x,points[i].y-pt.y)<14){
-        dragIdx=i; canvas.setPointerCapture(ev.pointerId); return;
+    for(let i=0;i<pts.length;i++){
+      if(Math.hypot(pts[i].x-pt.x,pts[i].y-pt.y)<14){
+        dragKey=key; dragIdx=i; canvas.setPointerCapture(ev.pointerId); return;
       }
     }
-    if(points.length<4){ points.push(pt); redraw(); }
+    if(pts.length<4){ pts.push(pt); redraw(); }
   });
   canvas.addEventListener('pointermove',ev=>{
     if(dragIdx<0) return;
-    points[dragIdx]=ptFromEvent(ev); redraw();
+    pointsByTarget[dragKey][dragIdx]=ptFromEvent(ev); redraw();
   });
-  const endDrag=()=>{ dragIdx=-1; };
+  const endDrag=()=>{ dragIdx=-1; dragKey=null; };
   canvas.addEventListener('pointerup',endDrag);
   canvas.addEventListener('pointercancel',endDrag);
 
   btnReset.addEventListener('click',()=>{
-    points=[]; resultCanvas=null; btnDownload.disabled=true; redraw();
+    delete pointsByTarget[targetSel.value];
+    resultCanvas=null; btnDownload.disabled=true; redraw();
   });
 
   // ---- проверки на некорректный четырёхугольник — до того, как считать сам композит ----
@@ -5733,21 +5789,34 @@ window.addEventListener('beforeprint',flushScene3D);
     return {canvas:c,W,H};
   }
 
-  function computeComposite(){
-    if(!LAST||!LAST.R) return null;
-    const wi=+wallSel.value;
-    const tex=wallTextureCanvas(wi,LAST.G,LAST.R);
-    if(!tex) return null;
-    const fx=points.map(p=>p.x/dispScale), fy=points.map(p=>p.y/dispScale);
-    const full=document.createElement('canvas');
-    full.width=photoImg.naturalWidth; full.height=photoImg.naturalHeight;
-    const fctx=full.getContext('2d');
-    fctx.drawImage(photoImg,0,0);
+  // ---- текстура ОДНОЙ грани откоса: сплошной прямоугольник цветом её материала (свой, если
+  // назначен через otkosMat, иначе цвет стены по умолчанию) с тонкой рамкой — та же роль, что у
+  // стыков полос на стене, просто обозначить край детали. Реальные размеры (dep×len, мм) те же,
+  // что в раскрое (см. wallOtkosTargets/buildOtkosParts), но т.к. заливка сплошная и без внутренней
+  // структуры, ориентация текстуры (что считать «верхом») не важна — важен только порядок обхода
+  // 4 точек на фото при разметке (см. quadProblem)
+  function otkosTextureCanvas(len,dep,matId,fallbackColor){
+    const px=Math.min(4,900/Math.max(len,dep,1));
+    const cw=Math.max(1,Math.round(dep*px)), ch=Math.max(1,Math.round(len*px));
+    const c=document.createElement('canvas'); c.width=cw; c.height=ch;
+    const cx=c.getContext('2d');
+    const cs=getComputedStyle(document.documentElement);
+    const color=(matId&&cs.getPropertyValue('--mat-'+matId).trim())||fallbackColor;
+    cx.fillStyle=color; cx.fillRect(0,0,cw,ch);
+    cx.strokeStyle='rgba(0,0,0,.25)'; cx.lineWidth=Math.max(1,px*0.8);
+    cx.strokeRect(cx.lineWidth/2,cx.lineWidth/2,cw-cx.lineWidth,ch-cx.lineWidth);
+    return {canvas:c,W:dep,H:len};
+  }
 
-    const minX=Math.max(0,Math.floor(Math.min(...fx))), maxX=Math.min(full.width,Math.ceil(Math.max(...fx)));
-    const minY=Math.max(0,Math.floor(Math.min(...fy))), maxY=Math.min(full.height,Math.ceil(Math.max(...fy)));
+  // ---- варп ОДНОЙ текстуры на ОДИН четырёхугольник точек, поверх уже нарисованного в fctx —
+  // общая часть для стены и для каждой грани откоса (см. computeComposite): считаем всё в тех же
+  // координатах полного разрешения фото (points пересчитаны из превью через dispScale)
+  function warpTextureOnto(fctx,fullW,fullH,tex,pts){
+    const fx=pts.map(p=>p.x/dispScale), fy=pts.map(p=>p.y/dispScale);
+    const minX=Math.max(0,Math.floor(Math.min(...fx))), maxX=Math.min(fullW,Math.ceil(Math.max(...fx)));
+    const minY=Math.max(0,Math.floor(Math.min(...fy))), maxY=Math.min(fullH,Math.ceil(Math.max(...fy)));
     const regW=maxX-minX, regH=maxY-minY;
-    if(regW<=0||regH<=0) return null;
+    if(regW<=0||regH<=0) return;
 
     const M=squareToQuad(fx[0],fy[0],fx[1],fy[1],fx[2],fy[2],fx[3],fy[3]);
     const Minv=mat3Invert(M);
@@ -5767,39 +5836,82 @@ window.addEventListener('beforeprint',flushScene3D);
         const [tr,tg,tb,ta]=sampleBilinear(tdata,tw,th,u*(tw-1),v*(th-1));
         if(ta<1) continue; // центр выреза под проём (полностью прозрачно) — фото совсем не трогаем
         const di=(yy*regW+xx)*4;
-        // «плоский» цвет панели умножаем на яркость фото в этом месте (якорь на среднем сером
-        // 0.5 — там множитель ровно 1, т.е. цвет текстуры не искажается), чтобы сохранить реальные
-        // тени/блики стены на фото, а не перекрыть их ровной заливкой панели; нижний порог 0.45 —
-        // чтобы на тёмном (плохо освещённом) фото панель не уходила в почти чёрный цвет и оставалась
-        // узнаваемой
+        // «плоский» цвет текстуры смешиваем с яркостью фото в этом месте через Overlay
+        // (тот же режим наложения, что в редакторах фото) — на среднем сером (0.5) отдаёт цвет
+        // текстуры без изменений, темнее/светлее фона — темнее/светлее результат, но НИКОГДА не
+        // ушли бы в чистый чёрный/белый как при прямом умножении на 0-2: тот подход красиво
+        // работал для тёмной "соломенной" панели (тон E8D49F — далеко от границ 0/255), но
+        // на светлом материале отделки откоса (напр. мрамор AEBFCE — уже близко к 255) любой
+        // множитель >1 срезал все три канала в чистый белый, и цвет материала терялся полностью
+        // (проверено на реальном тесте: маркер откоса «мрамор» на светлом участке фото рендерился
+        // чисто белым пятном без единого оттенка голубизны). clamp яркости в [0.12,0.92] — тот же
+        // смысл, что раньше был у floor/ceiling множителя: не даём фото продавить материал в
+        // абсолютный чёрный/белый на самых тёмных/пересвеченных пикселях снимка
         const lum=(od[di]*0.299+od[di+1]*0.587+od[di+2]*0.114)/255;
-        const factor=Math.max(0.45,Math.min(2,lum*2));
+        const bl=Math.max(0.12,Math.min(0.92,lum));
+        const overlay=(base,blend)=>blend<0.5?2*base*blend:1-2*(1-base)*(1-blend);
         // альфа текстуры — не 0/1, а честная доля (антиалиасинг на границе панели/выреза из
         // билинейной интерполяции) — блендим с фото, а не жёстко переключаем: иначе на самой
         // границе выреза под проём/между соседними углами оставался бы тонкий непрокрашенный шов
         const al=ta/255;
-        od[di]  =od[di]  *(1-al)+Math.min(255,tr*factor)*al;
-        od[di+1]=od[di+1]*(1-al)+Math.min(255,tg*factor)*al;
-        od[di+2]=od[di+2]*(1-al)+Math.min(255,tb*factor)*al;
+        od[di]  =od[di]  *(1-al)+overlay(tr/255,bl)*255*al;
+        od[di+1]=od[di+1]*(1-al)+overlay(tg/255,bl)*255*al;
+        od[di+2]=od[di+2]*(1-al)+overlay(tb/255,bl)*255*al;
       }
     }
     fctx.putImageData(outData,minX,minY);
+  }
+
+  function computeComposite(){
+    if(!LAST||!LAST.R) return null;
+    const wi=+wallSel.value;
+    const wallPts=pointsByTarget.wall;
+    if(!wallPts||wallPts.length<4) return null;
+    const tex=wallTextureCanvas(wi,LAST.G,LAST.R);
+    if(!tex) return null;
+
+    const full=document.createElement('canvas');
+    full.width=photoImg.naturalWidth; full.height=photoImg.naturalHeight;
+    const fctx=full.getContext('2d');
+    fctx.drawImage(photoImg,0,0);
+    warpTextureOnto(fctx,full.width,full.height,tex,wallPts);
+
+    // грани откоса — НЕОБЯЗАТЕЛЬНЫ: рисуем только те, что пользователь реально разметил (4
+    // точки); остальные проёмы остаются прозрачной дырой — сквозь них видно исходное фото, как
+    // и раньше. Каждая грань кладётся ПОВЕРХ уже готовой стены (с дырами) — как раз туда, где
+    // сейчас дыра, поэтому порядок «сначала стена, потом откосы» не нуждается ни в какой
+    // сортировке по глубине
+    const faceColorFallback=(getComputedStyle(document.documentElement).getPropertyValue('--straw-face')||'#e8d49f').trim();
+    wallOtkosTargets(wi).forEach(t=>{
+      const pts=pointsByTarget[t.key];
+      if(!pts||pts.length<4) return;
+      const otex=otkosTextureCanvas(t.len,t.dep,t.matId,faceColorFallback);
+      warpTextureOnto(fctx,full.width,full.height,otex,pts);
+    });
     return full;
   }
 
   btnApply.addEventListener('click',()=>{
     if(!photoImg){ alert('Сначала загрузите фото стены/комнаты.'); return; }
-    if(points.length<4){ alert('Отметьте на фото все 4 угла стены (по часовой стрелке от левого верхнего).'); return; }
-    const problem=quadProblem(points);
-    if(problem){ alert(problem); return; }
+    const wallPts=pointsByTarget.wall;
+    if(!wallPts||wallPts.length<4){ alert('Отметьте на фото все 4 угла стены (цель «Стена (контур)» в списке «Что размечаем сейчас»).'); return; }
+    // проверяем ВСЕ размеченные цели (стену и все грани откоса с 4 точками) — самопересекающийся
+    // или вырожденный контур на любой из них даёт непонятный «пустой» результат без этой проверки
+    const wi=+wallSel.value;
+    const allTargets=[{label:'Стена',pts:wallPts}]
+      .concat(wallOtkosTargets(wi).map(t=>({label:t.label,pts:pointsByTarget[t.key]})).filter(t=>t.pts&&t.pts.length===4));
+    for(const t of allTargets){
+      const problem=quadProblem(t.pts);
+      if(problem){ alert(`${t.label}: ${problem}`); return; }
+    }
     // сам расчёт (варп полного разрешения фото) может занимать заметное время на больших снимках
-    // (~1-2с на 12-мегапиксельном фото и четырёхугольнике во весь кадр) — если считать его сразу
-    // в этом же обработчике, кнопка не успеет перерисоваться в состояние "занято" ДО блокировки
-    // потока, и приложение на время расчёта выглядело бы зависшим без всякой обратной связи.
-    // Двойной requestAnimationFrame — надёжный способ гарантировать, что браузер успел
-    // ОТРИСОВАТЬ смену текста кнопки (первый rAF — начало следующего кадра, ещё до отрисовки;
-    // второй — уже после неё) прежде, чем стартует тяжёлый синхронный расчёт; одиночный
-    // setTimeout(...,10) такой гарантии не даёт (может отработать и до, и после отрисовки кадра)
+    // (~1-2с на 12-мегапиксельном фото и четырёхугольнике во весь кадр, и того больше с несколькими
+    // размеченными гранями откоса) — если считать его сразу в этом же обработчике, кнопка не
+    // успеет перерисоваться в состояние "занято" ДО блокировки потока, и приложение на время
+    // расчёта выглядело бы зависшим без всякой обратной связи. Двойной requestAnimationFrame —
+    // надёжный способ гарантировать, что браузер успел ОТРИСОВАТЬ смену текста кнопки (первый rAF —
+    // начало следующего кадра, ещё до отрисовки; второй — уже после неё) прежде, чем стартует
+    // тяжёлый синхронный расчёт; одиночный setTimeout(...,10) такой гарантии не даёт
     const prevLabel=btnApply.textContent;
     btnApply.disabled=true; btnApply.textContent='Считаю…';
     requestAnimationFrame(()=>requestAnimationFrame(()=>{
