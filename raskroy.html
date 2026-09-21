@@ -397,12 +397,14 @@ tbody tr:hover td{background:var(--surface)}
         <label class="chk"><input type="checkbox" id="viz-guide-include-iso"> Добавить 3D-изометрию макета (только для общего контекста формы комнаты — другой ракурс, не для копирования)</label>
       </div></div>
       <div class="viz-actions">
-        <button type="button" class="btn btn-key" id="viz-guide-download-all" disabled>Скачать всё для нейросети (отдельными файлами)</button>
+        <button type="button" class="btn btn-key" id="viz-guide-download-all" disabled>Скачать всё для нейросети (архивом)</button>
       </div>
-      <p class="hint">Скачает отдельными файлами (не архивом — нейросети обычно не умеют
-        распаковывать zip): исходное фото, схему-оверлей, JSON-описание (.txt) и, если отмечено
-        выше, 3D-изометрию. Закиньте все файлы одним движением в чат нейросети вместе с просьбой
-        сгенерировать результат по приложенному JSON.</p>
+      <p class="hint">Скачает один zip-архив (имя — сегодняшняя дата, повторное скачивание в
+        тот же день не перезапишет предыдущее — браузер сам добавит «(2)», «(3)» и т.д.) с
+        исходным фото, схемой-оверлеем, JSON-описанием (.txt) и, если отмечено выше,
+        3D-изометрией. Откройте архив (двойной клик — на Windows и Mac открывается как обычная
+        папка, распаковывать вручную не нужно) и перетащите файлы оттуда в чат нейросети вместе
+        с просьбой сгенерировать результат по приложенному описанию.</p>
     </div>
   </section>
 </aside>
@@ -6409,10 +6411,14 @@ window.addEventListener('beforeprint',flushScene3D);
     }
   });
 
-  // ---- «Скачать всё для нейросети» — НЕ архив (нейросети в обычном чат-режиме не заглядывают
-  // внутрь zip), а несколько ОТДЕЛЬНЫХ файлов одним кликом: исходное фото (как загрузили, без
-  // перекодирования), схема-оверлей, JSON-описание текстом и, по желанию, 3D-изометрия — их потом
-  // разом перетаскивают в чат нейросети вместе с просьбой сгенерировать результат по JSON
+  // ---- «Скачать всё для нейросети» — один zip-архив (собран прямо в браузере, без сервера и без
+  // сетевых библиотек — метод STORE без сжатия: и так уже сжатые PNG + маленький JSON, сжимать
+  // нечем, зато не тащим в файл ещё и реализацию DEFLATE) с исходным фото (как загрузили, без
+  // перекодирования), схемой-оверлеем, JSON-описанием текстом и, по желанию, 3D-изометрией.
+  // Раньше это было 3-4 ОТДЕЛЬНЫХ файла одним кликом (несколько уведомлений о скачивании,
+  // разлетались по «Загрузкам» вперемешку с другими проектами) — по просьбе пользователя заменили
+  // на один архив с именем по сегодняшней дате: повторное скачивание в тот же день не путается
+  // с предыдущим — браузер сам добавляет «(2)», «(3)» к имени файла при совпадении
   function triggerDownload(href,filename){
     const a=document.createElement('a');
     a.href=href; a.download=filename; a.click();
@@ -6422,6 +6428,74 @@ window.addEventListener('beforeprint',flushScene3D);
     if(!m) return 'jpg';
     const t=m[1].toLowerCase();
     return t==='jpeg'?'jpg':t;
+  }
+  function dataUrlToBytes(durl){
+    const bin=atob(durl.split(',')[1]);
+    const bytes=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+    return bytes;
+  }
+  // таблица CRC-32 (стандартный полином 0xEDB88320) — обязательна в заголовке каждой записи ZIP
+  const CRC32_TABLE=(()=>{
+    const t=new Uint32Array(256);
+    for(let n=0;n<256;n++){
+      let c=n;
+      for(let k=0;k<8;k++) c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);
+      t[n]=c>>>0;
+    }
+    return t;
+  })();
+  function crc32(bytes){
+    let crc=0xFFFFFFFF;
+    for(let i=0;i<bytes.length;i++) crc=(crc>>>8)^CRC32_TABLE[(crc^bytes[i])&0xFF];
+    return (crc^0xFFFFFFFF)>>>0;
+  }
+  // минимальный ZIP-писатель (метод STORE — без сжатия, поэтому не нужна реализация DEFLATE):
+  // files — [{name, data:Uint8Array}]. Формат — обычный PK ZIP, читается штатным «Открыть архив»
+  // и на Windows, и на Mac, и в файловых менеджерах Linux — сторонние библиотеки не нужны
+  function buildZipBlob(files){
+    const enc=new TextEncoder();
+    const now=new Date();
+    const dosTime=(((now.getHours()&0x1F)<<11)|((now.getMinutes()&0x3F)<<5)|((now.getSeconds()>>1)&0x1F))&0xFFFF;
+    const dosDate=((((now.getFullYear()-1980)&0x7F)<<9)|(((now.getMonth()+1)&0xF)<<5)|(now.getDate()&0x1F))&0xFFFF;
+    const localParts=[], centralParts=[]; let offset=0;
+    files.forEach(f=>{
+      const nameBytes=enc.encode(f.name), data=f.data, crc=crc32(data);
+      const lh=new DataView(new ArrayBuffer(30));
+      // флаг 0x0800 (бит 11) — имена файлов в UTF-8: без него часть архиваторов (в первую очередь
+      // встроенный в Windows) считает имя в локальной кодовой странице и превращает кириллицу
+      // в имени файла в нечитаемую кашу при просмотре/распаковке архива
+      lh.setUint32(0,0x04034b50,true); lh.setUint16(4,20,true); lh.setUint16(6,0x0800,true);
+      lh.setUint16(8,0,true); lh.setUint16(10,dosTime,true); lh.setUint16(12,dosDate,true);
+      lh.setUint32(14,crc,true); lh.setUint32(18,data.length,true); lh.setUint32(22,data.length,true);
+      lh.setUint16(26,nameBytes.length,true); lh.setUint16(28,0,true);
+      const lhBytes=new Uint8Array(lh.buffer);
+      localParts.push(lhBytes,nameBytes,data);
+      const localOffset=offset;
+      offset+=lhBytes.length+nameBytes.length+data.length;
+      const ch=new DataView(new ArrayBuffer(46));
+      ch.setUint32(0,0x02014b50,true); ch.setUint16(4,20,true); ch.setUint16(6,20,true);
+      ch.setUint16(8,0x0800,true); ch.setUint16(10,0,true); ch.setUint16(12,dosTime,true);
+      ch.setUint16(14,dosDate,true); ch.setUint32(16,crc,true); ch.setUint32(20,data.length,true);
+      ch.setUint32(24,data.length,true); ch.setUint16(28,nameBytes.length,true); ch.setUint16(30,0,true);
+      ch.setUint16(32,0,true); ch.setUint16(34,0,true); ch.setUint16(36,0,true); ch.setUint32(38,0,true);
+      ch.setUint32(42,localOffset,true);
+      centralParts.push(new Uint8Array(ch.buffer),nameBytes);
+    });
+    const centralStart=offset;
+    const centralSize=centralParts.reduce((a,p)=>a+p.length,0);
+    const eo=new DataView(new ArrayBuffer(22));
+    eo.setUint32(0,0x06054b50,true); eo.setUint16(4,0,true); eo.setUint16(6,0,true);
+    eo.setUint16(8,files.length,true); eo.setUint16(10,files.length,true);
+    eo.setUint32(12,centralSize,true); eo.setUint32(16,centralStart,true); eo.setUint16(20,0,true);
+    return new Blob([...localParts,...centralParts,new Uint8Array(eo.buffer)],{type:'application/zip'});
+  }
+  // имя архива — сегодняшняя дата ДДММГГ (напр. 210926 = 21 сентября 2026); при повторном
+  // скачивании в тот же день браузер сам добавит «(2)», «(3)» — своя нумерация нам не нужна
+  function zipFilenameForToday(){
+    const d=new Date();
+    const pad=n=>String(n).padStart(2,'0');
+    return `${pad(d.getDate())}${pad(d.getMonth()+1)}${String(d.getFullYear()).slice(-2)}.zip`;
   }
   btnDownloadAll.addEventListener('click',()=>{
     if(!photoDataUrl){ alert('Сначала загрузите фото стены/комнаты.'); return; }
@@ -6436,13 +6510,16 @@ window.addEventListener('beforeprint',flushScene3D);
       isoUrl=isoImg&&isoImg.src;
       if(!isoUrl){ alert('3D-изометрия ещё не построена (нет стен/проекта) — снимите галочку «Добавить 3D-изометрию» или подождите пересчёта.'); return; }
     }
-    triggerDownload(photoDataUrl,'фото.'+extFromDataUrl(photoDataUrl));
-    triggerDownload(guide.toDataURL('image/png'),'схема-для-нейросети.png');
-    const blob=new Blob([JSON.stringify(obj,null,2)],{type:'text/plain'});
-    const blobUrl=URL.createObjectURL(blob);
-    triggerDownload(blobUrl,'описание-проекта.txt');
-    setTimeout(()=>URL.revokeObjectURL(blobUrl),10000);
-    if(isoUrl) triggerDownload(isoUrl,'3d-изометрия.png');
+    const files=[
+      {name:'фото.'+extFromDataUrl(photoDataUrl), data:dataUrlToBytes(photoDataUrl)},
+      {name:'схема-для-нейросети.png', data:dataUrlToBytes(guide.toDataURL('image/png'))},
+      {name:'описание-проекта.txt', data:new TextEncoder().encode(JSON.stringify(obj,null,2))}
+    ];
+    if(isoUrl) files.push({name:'3d-изометрия.png', data:dataUrlToBytes(isoUrl)});
+    const zipBlob=buildZipBlob(files);
+    const zipUrl=URL.createObjectURL(zipBlob);
+    triggerDownload(zipUrl,zipFilenameForToday());
+    setTimeout(()=>URL.revokeObjectURL(zipUrl),10000);
   });
 })();
 
