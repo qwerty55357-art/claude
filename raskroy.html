@@ -4980,6 +4980,7 @@ function run(){
   renderCuts(G,R); renderSpec(G,R); renderEstimate(G,R); renderJointsV(R); renderLedSummary(R);
   renderLedDraw(G,R);
   renderVizWallSelect();
+  vizNotifyProjectChanged();
 }
 // список стен для раздела «Визуализация на фото» (см. IIFE в конце скрипта) — держим отдельной
 // функцией и дёргаем из run(), т.к. стены могут переименовываться/добавляться/удаляться где угодно
@@ -5008,6 +5009,85 @@ function wallOtkosTargets(wi){
     matId:(S.ops[p.op].otkosMat&&S.ops[p.op].otkosMat[p.side])||null
   }));
 }
+// ---- ОБЩАЯ МОДЕЛЬ ЛИЦЕВОЙ СТОРОНЫ СТЕНЫ для «Визуализации на фото» ----
+// Единственный источник того, ЧТО рисуется на фото и ЧТО пишется в JSON для нейросети: и схема,
+// и «реалистичный» PNG, и описание строятся из одной и той же модели, поэтому разойтись между
+// собой не могут. Раньше у фото-визуализации был свой упрощённый пересказ схемы, и он отстал от
+// неё: красил стену цветом интерфейса вместо материала, не знал поперечных стыков, LED на
+// откосах и свободных LED-линий, «вырезал» проёмы, зашитые другим материалом.
+// Координаты — мм урезанного радиусом вида стены (wallCutView), x от левого края, y ОТ ПОЛА.
+// Стыки и LED берутся из wallLedGraph — того же атомарного перечня краёв/стыков/контуров
+// откосов, что использует 3D-макет и рисование LED, а режим каждого отрезка (заглушка/встык/
+// LED) — теми же edgeMode/jointSegMode, что и схема раскладки. Стена ищется по id, а не по
+// номеру: после удаления/перестановки стен номер указывал бы уже на другую стену.
+function wallFaceModel(wallId){
+  if(!LAST||!LAST.R) return null;
+  const wi=walls.findIndex(w=>w.id===wallId); if(wi<0) return null;
+  const G=LAST.G, R=LAST.R, w0=walls[wi], L=R.layouts[wi];
+  if(!L) return null;
+  const cuts=R.cornerCuts&&R.cornerCuts.get(w0.id);
+  const wall=wallCutView(w0,cuts);
+  const S=wallS(G,wall);
+  const W=S.W, H=S.H;
+  if(!(W>0)||!(H>0)) return null;
+  // canvas не понимает var(--mat-…) (matColor отдаёт именно такую строку для SVG) — нужен
+  // настоящий цвет из CSS-переменной, иначе fillStyle молча остаётся прежним
+  const cs=getComputedStyle(document.documentElement);
+  const hexOf=id=>(id&&cs.getPropertyValue('--mat-'+id).trim())||null;
+  const matName=id=>(PRESETS.find(p=>p.id===id)||{}).name||id;
+  const matId=$('#i-preset').value;
+  const color=hexOf(matId)||hexOf('custom')||'#c9a455';
+  const kindLabel={window:'Окно',door:'Дверь',niche:'Ниша'};
+  const pieces=[];
+  L.pieces.forEach(p=>{
+    if(!p.matOverride) return;
+    const st=L.strips[p.strip];
+    const r=L.vert?{x:st.start,y:p.to-p.len,w:st.w,h:p.len}:{x:p.from,y:st.start,w:p.len,h:st.w};
+    pieces.push(Object.assign(r,{matId:p.matOverride,matName:matName(p.matOverride),color:hexOf(p.matOverride)||color}));
+  });
+  // проём, зашитый другим материалом (fillMat), — это панель, а не дыра; накладной короб со
+  // сплошной стеной под ним (mountKeepsWall) стену не режет вовсе — тоже не дыра
+  const fills=[], holes=[];
+  S.ops.forEach((o,i)=>{
+    const r={x:o.x,y:o.y,w:o.w,h:o.h,op:i,label:`${kindLabel[o.kind]||'Проём'} ${i+1}`};
+    if(o.fillMat){
+      const mp=PRESETS.find(p=>p.id===o.fillMat);
+      fills.push(Object.assign(r,{matId:o.fillMat,matName:matName(o.fillMat),color:hexOf(o.fillMat)||color,bandW:mp&&mp.pw>0?mp.pw:0}));
+    } else if(!mountKeepsWall(o)) holes.push(r);
+  });
+  const graph=wallLedGraph(w0,G,cuts);
+  const nodeByKey=new Map(graph.nodes.map(n=>[n.key,n]));
+  const seams=[], ledLines=[];
+  graph.edges.forEach(ed=>{
+    const a=nodeByKey.get(ed.a), b=nodeByKey.get(ed.b); if(!a||!b) return;
+    const leg=ed.leg, op=leg.el==='otkos'?S.ops[leg.op]:null;
+    const mode=leg.el==='edge'?edgeMode((wall.edges||{})[leg.side])
+      :leg.el==='jointV'?jointSegMode(wall,S,'v',leg.pos,leg.segStart)
+      :leg.el==='jointH'?jointSegMode(wall,S,'h',leg.pos,leg.segStart)
+      :op?otkosMode(op,leg.side):null;
+    const circuit=ledCircuitOf(ledCircuits,Object.assign({wall:w0.id},leg));
+    const seg={x0:a.x,y0:a.y,x1:b.x,y1:b.y,el:leg.el,side:leg.side,pos:leg.pos,op:leg.op};
+    if(circuit||mode==='led'){
+      if(op) seg.opLabel=`${kindLabel[op.kind]||'Проём'} ${leg.op+1}`;
+      ledLines.push(Object.assign(seg,{kind:circuit?circuit.kind:'joint'}));
+      return;
+    }
+    if(leg.el==='otkos'||!mode||mode==='none') return;   // контур проёма — не стык на плоскости
+    seg.mode=mode;
+    seg.user=leg.el==='jointH'&&(wall.seamsU||[]).some(u=>Math.abs(u.pos-leg.pos)<1.5);
+    seams.push(seg);
+  });
+  ledCircuits.forEach(c=>c.legs.forEach(l=>{
+    if(+l.wall!==w0.id||l.el!=='free') return;
+    ledLines.push({x0:l.ax,y0:l.ay,x1:l.bx,y1:l.by,el:'free',kind:c.kind});
+  }));
+  return {wallId:w0.id, wi, name:w0.name, W, H, vert:L.vert, strips:L.strips, wall, S,
+    matId, matName:G.presetName, color, hexOf, pieces, fills, holes, seams, ledLines};
+}
+// run() → «Визуализация на фото»: проект пересчитан, схема на фото и JSON должны пересобраться
+// из актуальных данных (иначе после правки материала/проёма картинка оставалась бы старой, а JSON
+// уже новым). Событие, а не прямой вызов: модуль визуализации — самостоятельный IIFE ниже
+function vizNotifyProjectChanged(){ document.dispatchEvent(new Event('raskroy:recomputed')); }
 // список целей разметки (стена + её откосы) в разделе «Визуализация на фото» — зависит от ТЕКУЩЕЙ
 // выбранной стены (#viz-wall), поэтому дёргается и из run() (через renderVizWallSelect), и сразу
 // после смены самой стены в селекте (см. IIFE ниже, слушатель change на #viz-wall)
@@ -5659,11 +5739,6 @@ window.addEventListener('beforeprint',flushScene3D);
   const btnDownloadAll=$('#viz-guide-download-all'), includeIsoChk=$('#viz-guide-include-iso');
   const MAXW=900, MAXH=620;         // размер интерактивного превью (сама подгонка точек)
   let photoImg=null;                // Image в полном разрешении оригинала — неизменный эталон
-  // накопленный результат в полном разрешении: старт — копия photoImg, дальше каждое «Наложить»
-  // дорисовывает поверх НЕГО (а не поверх свежей копии фото) — так на одном фото можно
-  // последовательно оформить несколько стен (типичный кадр — угол комнаты, видно 2 стены сразу).
-  // «Сбросить всё» и загрузка нового фото возвращают его к чистой копии photoImg
-  let workingCanvas=null;
   let dispScale=1, dispW=0, dispH=0;// коэффициент полное->превью и размер превью
   // точки в системе координат ПРЕВЬЮ (0..dispW,0..dispH), СВОИ на каждую цель разметки (стена
   // и по желанию — каждая видимая грань откоса, см. renderVizTargetSelect/wallOtkosTargets):
@@ -5675,44 +5750,32 @@ window.addEventListener('beforeprint',flushScene3D);
   // в pointsByTarget; прямоугольники в координатах ПРЕВЬЮ, {x0,y0,x1,y1}, x0<x1, y0<y1
   let exclusionRects=[];
   let exclDraft=null;               // прямоугольник, который сейчас тянут мышью (ещё не отпущен)
-  let resultCanvas=null;            // = workingCanvas после первого успешного «Наложить» (для скачивания)
-  // снимок каждого успешно применённого «Наложить» — {wi, wallPts, otkos:[{key,label,pts,len,dep,matId}]}.
-  // workingCanvas хранит только УЖЕ ЗАПЕЧЁННЫЕ пиксели (для готового PNG), а вот схема для
-  // нейросети (computeGuideOverlay) и JSON-описание (buildAiPromptObject) должны уметь
-  // пересобраться заново в любой момент — например, при сдвиге ползунка прозрачности — поэтому
-  // хранится не картинка, а сами координаты/параметры каждого наложенного слоя
+  // снимок каждого «Наложить» — ТОЛЬКО разметка: {wallId, wallPts, otkos:[{key,pts}]}. Ни
+  // картинок, ни размеров/цветов тут нет: схема, реалистичный PNG и JSON каждый раз строятся
+  // заново из wallFaceModel(wallId) — поэтому после правки проекта (материал, проём, стык) все три
+  // сразу показывают актуальное. На одну стену — один слой: повторное «Наложить» той же стены
+  // заменяет её разметку (поправили точки), а не рисует стену второй раз поверх первой
   let appliedLayers=[];
-  // кэш «схемы» (диаграммы) в полном разрешении, собранной из appliedLayers/exclusionRects —
-  // сама сборка (полная прорисовка проективного варпа по каждому применённому слою) стоит
-  // заметного времени, а вот композит фото+схема с разной прозрачностью — копеечная операция.
-  // Разделяем это, чтобы ползунок прозрачности двигался в реальном времени (redraw на каждый
-  // input), не пересчитывая тяжёлую часть на каждый тик слайдера — только когда список слоёв
-  // или зон исключения реально изменился (diagramDirty=true)
+  // кэши в полном разрешении фото: схема (diagram) и реалистичный вариант (realistic). Сборка —
+  // проективный варп по всем слоям, это ощутимое время; композит фото+схема с разной
+  // прозрачностью — копеечный. Поэтому ползунок прозрачности двигается в реальном времени, а
+  // тяжёлая часть пересчитывается только при *Dirty=true (новый слой, зоны исключения, пересчёт
+  // проекта). Реалистичный вариант нужен лишь для «Скачать PNG» — строится лениво при скачивании
   let diagramCache=null, diagramDirty=true;
-
-  function resetWorking(){
-    if(!photoImg) return;
-    workingCanvas=document.createElement('canvas');
-    workingCanvas.width=photoImg.naturalWidth; workingCanvas.height=photoImg.naturalHeight;
-    workingCanvas.getContext('2d').drawImage(photoImg,0,0);
-  }
+  let realisticCache=null, realisticDirty=true;
+  function markDirty(){ diagramDirty=true; realisticDirty=true; }
 
   function redraw(){
-    if(!photoImg||!workingCanvas) return;
+    if(!photoImg) return;
     canvas.width=dispW; canvas.height=dispH;
-    // фон превью: если уже есть хотя бы один применённый слой — показываем ТУ ЖЕ «схему для
-    // нейросети» (фото + полупрозрачная диаграмма), которую скачивает «Скачать схему», и с ТЕМ ЖЕ
-    // процентом прозрачности — иначе ползунок «Непрозрачность схемы» двигается без видимого
-    // эффекта на экране (пользователь видит результат только после скачивания файла). Пока слоёв
-    // нет — превью показывает просто накопленный рабочий холст (нечего ещё показывать как схему)
+    // фон превью: фото, а если уже есть применённые слои — поверх ТА ЖЕ «схема для нейросети»,
+    // что скачивает «Скачать схему», с ТЕМ ЖЕ процентом прозрачности (ползунок работает вживую)
+    ctx.drawImage(photoImg,0,0,dispW,dispH);
     const diagram=ensureDiagram();
     if(diagram){
-      ctx.drawImage(photoImg,0,0,dispW,dispH);
       ctx.globalAlpha=Math.max(0,Math.min(1,+opacityInp.value/100));
       ctx.drawImage(diagram,0,0,dispW,dispH);
       ctx.globalAlpha=1;
-    } else {
-      ctx.drawImage(workingCanvas,0,0,dispW,dispH);
     }
     // зоны исключения — глобальные, видны при разметке любой цели (не только когда выбрана сама
     // цель «Зоны исключения»), полупрозрачной красной штриховкой поверх фото/уже применённого
@@ -5768,10 +5831,7 @@ window.addEventListener('beforeprint',flushScene3D);
         dispScale=Math.min(1,MAXW/img.naturalWidth,MAXH/img.naturalHeight);
         dispW=Math.max(1,Math.round(img.naturalWidth*dispScale));
         dispH=Math.max(1,Math.round(img.naturalHeight*dispScale));
-        pointsByTarget={}; exclusionRects=[]; resultCanvas=null; appliedLayers=[]; btnDownload.disabled=true;
-        diagramCache=null; diagramDirty=true;
-        clearAiOutputs();
-        resetWorking();
+        resetLayers();
         redraw();
       };
       img.src=ev.target.result;
@@ -5782,22 +5842,32 @@ window.addEventListener('beforeprint',flushScene3D);
     const f=fileInp.files&&fileInp.files[0];
     if(f) loadPhoto(f);
   });
+  function resetLayers(){
+    pointsByTarget={}; exclusionRects=[]; appliedLayers=[];
+    diagramCache=null; realisticCache=null; markDirty();
+    setOutputsEnabled(false);
+  }
+  function setOutputsEnabled(on){
+    btnDownload.disabled=!on; btnGuideDownload.disabled=!on; btnJsonCopy.disabled=!on; btnDownloadAll.disabled=!on;
+    if(!on) jsonOutput.value='';
+  }
+  const currentWallId=()=>{ const w=walls[+wallSel.value]; return w?w.id:null; };
+  // разметка уже применённой стены — обратно в редактируемые точки: выбрали эту стену снова,
+  // поправили угол, нажали «Наложить» — слой заменится (см. applyLayer)
+  function loadLayerPoints(){
+    pointsByTarget={};
+    const layer=appliedLayers.find(l=>l.wallId===currentWallId()); if(!layer) return;
+    pointsByTarget.wall=layer.wallPts.map(p=>({x:p.x,y:p.y}));
+    layer.otkos.forEach(o=>{ pointsByTarget[o.key]=o.pts.map(p=>({x:p.x,y:p.y})); });
+  }
   // смена стены — набор целей (откосов) полностью меняется, ключи прежней стены больше не имеют
-  // смысла (тот же 'otkos:0:left' у другой стены — другой проём и другие реальные размеры).
-  // Уже НАКОПЛЕННЫЙ результат (workingCanvas) НЕ трогаем — в этом и смысл: можно доразметить
-  // следующую стену того же фото, не потеряв уже применённую
-  wallSel.addEventListener('change',()=>{ pointsByTarget={}; redraw(); });
+  // смысла (тот же 'otkos:0:left' у другой стены — другой проём); уже применённые слои других
+  // стен остаются — на одном фото можно оформить несколько стен (угол комнаты)
+  wallSel.addEventListener('change',()=>{ loadLayerPoints(); redraw(); });
   // смена текущей цели — просто перерисовать (сделать её точки активными/редактируемыми)
   targetSel.addEventListener('change',redraw);
-  btnResetAll.addEventListener('click',()=>{
-    pointsByTarget={}; exclusionRects=[]; resultCanvas=null; appliedLayers=[]; btnDownload.disabled=true;
-    diagramCache=null; diagramDirty=true;
-    clearAiOutputs();
-    resetWorking(); redraw();
-  });
-  function clearAiOutputs(){
-    btnGuideDownload.disabled=true; btnJsonCopy.disabled=true; btnDownloadAll.disabled=true; jsonOutput.value='';
-  }
+  btnResetAll.addEventListener('click',()=>{ resetLayers(); redraw(); });
+  function clearAiOutputs(){ jsonOutput.value=''; }
   // redraw() здесь дешёвый: тяжёлая часть (ensureDiagram) кэширована и не пересчитывается на
   // каждый тик слайдера — см. объявление diagramCache/diagramDirty
   opacityInp.addEventListener('input',()=>{ opacityVal.textContent=opacityInp.value+'%'; redraw(); });
@@ -5817,7 +5887,7 @@ window.addEventListener('beforeprint',flushScene3D);
     if(targetSel.value==='exclude'){
       // клик ВНУТРИ уже отмеченной зоны — убрать её (тот же жест, без отдельной кнопки-урны)
       const hitIdx=exclusionRects.findIndex(r=>pt.x>=r.x0&&pt.x<=r.x1&&pt.y>=r.y0&&pt.y<=r.y1);
-      if(hitIdx>=0){ exclusionRects.splice(hitIdx,1); diagramDirty=true; redraw(); return; }
+      if(hitIdx>=0){ exclusionRects.splice(hitIdx,1); markDirty(); redraw(); return; }
       exclDraft={x0:pt.x,y0:pt.y,x1:pt.x,y1:pt.y};
       canvas.setPointerCapture(ev.pointerId);
       return;
@@ -5841,7 +5911,7 @@ window.addEventListener('beforeprint',flushScene3D);
       const x0=Math.min(exclDraft.x0,exclDraft.x1), y0=Math.min(exclDraft.y0,exclDraft.y1);
       const x1=Math.max(exclDraft.x0,exclDraft.x1), y1=Math.max(exclDraft.y0,exclDraft.y1);
       exclDraft=null;
-      if(x1-x0>4&&y1-y0>4){ exclusionRects.push({x0,y0,x1,y1}); diagramDirty=true; } // отсекаем случайный клик без реального перетаскивания
+      if(x1-x0>4&&y1-y0>4){ exclusionRects.push({x0,y0,x1,y1}); markDirty(); } // отсекаем случайный клик без реального перетаскивания
       redraw();
       return;
     }
@@ -5851,7 +5921,7 @@ window.addEventListener('beforeprint',flushScene3D);
   canvas.addEventListener('pointercancel',endDrag);
 
   btnReset.addEventListener('click',()=>{
-    if(targetSel.value==='exclude'){ exclusionRects=[]; diagramDirty=true; }
+    if(targetSel.value==='exclude'){ exclusionRects=[]; markDirty(); }
     else delete pointsByTarget[targetSel.value];
     redraw();
   });
@@ -5920,92 +5990,54 @@ window.addEventListener('beforeprint',flushScene3D);
     return out;
   }
 
-  // ---- «чистая» текстура раскладки одной стены: те же геометрия/цвета, что и в «Схема
-  // раскладки» (schemeFor), но без размеров/подписей/зон клика, и с вырезами под проёмы
-  // ПРОЗРАЧНЫМИ (не залитыми) — чтобы настоящее окно/дверь на фото осталось видно как есть
-  function wallTextureCanvas(wi,G,R){
-    const wall=wallCutView(walls[wi],R.cornerCuts&&R.cornerCuts.get(walls[wi].id));
-    const S=wallS(G,wall);
-    const L=R.layouts[wi], W=S.W, H=S.H;
-    if(!(W>0)||!(H>0)) return null;
-    const px=Math.min(2,2200/Math.max(W,H));
-    const cw=Math.max(1,Math.round(W*px)), ch=Math.max(1,Math.round(H*px));
+  // ---- текстура лицевой стороны стены из общей модели (wallFaceModel) в двух стилях:
+  // 'guide' — «схема для нейросети»: сплошной цвет материала без освещения (свет/тени наведёт
+  //   сама нейросеть), стыки жирной тёмной линией (встык — тоньше и пунктиром: это другой тип
+  //   стыка, см. seam_types_glossary в JSON), LED — ярко-бирюзовым, которого не бывает на
+  //   интерьерном фото, чтобы его ни с чем не спутать;
+  // 'real'  — для «Скачать PNG»: тот же цвет, тонкие неброские стыки, LED — тёплым светом.
+  // Проёмы-дыры — прозрачные (сквозь них видно настоящее окно/дверь на фото), зашитые другим
+  // материалом проёмы — залиты этим материалом. Стыки из модели уже обходят проёмы, поэтому
+  // линии рисуются ПОСЛЕ вырезания дыр и не перечёркивают стекло
+  function faceTextureCanvas(m,style){
+    const guide=style==='guide';
+    const px=Math.min(2,2200/Math.max(m.W,m.H));
+    const cw=Math.max(1,Math.round(m.W*px)), ch=Math.max(1,Math.round(m.H*px));
     const c=document.createElement('canvas'); c.width=cw; c.height=ch;
     const cx=c.getContext('2d');
-    const cs=getComputedStyle(document.documentElement);
-    const faceColor=(cs.getPropertyValue('--straw-face')||'#e8d49f').trim();
-    const deepColor=(cs.getPropertyValue('--straw-deep')||'#8a6d16').trim();
-    cx.fillStyle=faceColor; cx.fillRect(0,0,cw,ch);
-    L.strips.forEach(st=>{
-      // та же формула, что в schemeFor — геометрия полосы (вертикальной или горизонтальной раскладки)
-      const x=L.vert?st.start:0, y=L.vert?0:H-st.end, w=L.vert?st.w:W, h=L.vert?H:st.w;
-      cx.strokeStyle=deepColor; cx.lineWidth=Math.max(1,px*1.1);
-      cx.strokeRect(x*px+cx.lineWidth/2,y*px+cx.lineWidth/2,w*px-cx.lineWidth,h*px-cx.lineWidth);
+    const rect=r=>[r.x*px,(m.H-r.y-r.h)*px,r.w*px,r.h*px];
+    cx.fillStyle=m.color; cx.fillRect(0,0,cw,ch);
+    m.pieces.forEach(r=>{ cx.fillStyle=r.color; cx.fillRect(...rect(r)); });
+    m.fills.forEach(r=>{
+      const [x,y,w,h]=rect(r);
+      cx.fillStyle=r.color; cx.fillRect(x,y,w,h);
+      // полосы материала внутри зашитого проёма — как на схеме раскладки
+      if(r.bandW>0){
+        cx.strokeStyle=guide?'rgba(15,15,15,.55)':'rgba(0,0,0,.18)'; cx.lineWidth=Math.max(1,cw/1400);
+        for(let bx=r.x+r.bandW;bx<r.x+r.w-1;bx+=r.bandW){
+          cx.beginPath(); cx.moveTo(bx*px,y); cx.lineTo(bx*px,y+h); cx.stroke();
+        }
+      }
     });
-    L.pieces.forEach(p=>{
-      if(!p.matOverride) return;
-      const st=L.strips[p.strip];
-      // та же формула, что в schemeFor — прямоугольник детали со своим материалом
-      const x=L.vert?st.start:p.from, y=L.vert?H-p.to:H-st.end, w=L.vert?st.w:p.len, h=L.vert?p.len:st.w;
-      cx.fillStyle=matColor(p.matOverride);
-      cx.fillRect(x*px,y*px,w*px,h*px);
+    m.holes.forEach(r=>{ const [x,y,w,h]=rect(r); cx.clearRect(x-0.5,y-0.5,w+1,h+1); });
+    // линия по краю стены стоит ровно на границе канвы — половина её толщины ушла бы за край,
+    // поэтому концы прижимаем внутрь на полтолщины
+    const stroke=(s,lw,color,dash)=>{
+      const cl=(v,max)=>Math.min(max-lw/2,Math.max(lw/2,v));
+      cx.save(); cx.strokeStyle=color; cx.lineWidth=lw; cx.lineCap='butt'; cx.setLineDash(dash||[]);
+      cx.beginPath();
+      cx.moveTo(cl(s.x0*px,cw),cl((m.H-s.y0)*px,ch));
+      cx.lineTo(cl(s.x1*px,cw),cl((m.H-s.y1)*px,ch));
+      cx.stroke(); cx.restore();
+    };
+    const seamW=guide?Math.max(3,cw/600):Math.max(1.5,cw/1100);
+    m.seams.forEach(s=>{
+      if(s.mode==='butt') stroke(s,Math.max(1.5,seamW*0.5),guide?'rgba(15,15,15,.6)':'rgba(0,0,0,.14)',guide?[seamW*3,seamW*2]:null);
+      else stroke(s,seamW,guide?'rgba(15,15,15,.85)':'rgba(0,0,0,.32)');
     });
-    S.ops.forEach(o=>{
-      // та же формула, что в schemeFor — прямоугольник проёма; clearRect вместо заливки:
-      // получаем настоящую дыру (альфа=0), а не непрозрачный цвет поверх реального окна/двери
-      const x=o.x, y=H-o.y-o.h;
-      cx.clearRect(x*px-0.5,y*px-0.5,o.w*px+1,o.h*px+1);
-    });
-    return {canvas:c,W,H};
-  }
-
-  // ---- «схемная» (не реалистичная) текстура стены для нейросети — та же геометрия панелей, что
-  // и wallTextureCanvas, но: (1) без освещения/оттенков — заливка сплошным цветом материала,
-  // реалистичность оттенка тут не нужна и даже вредна (её должна навести сама нейросеть); (2)
-  // стыки — жирной контрастной линией, чтобы точно не потерялись при печати/сжатии/просмотре на
-  // маленьком экране; (3) LED-рёбра/стыки — отдельным ярким бирюзовым цветом, которого не бывает
-  // на обычном интерьерном фото, чтобы нейросеть не спутала его ни с чем другим на снимке
-  function wallGuideTextureCanvas(wi,G,R){
-    const wall=wallCutView(walls[wi],R.cornerCuts&&R.cornerCuts.get(walls[wi].id));
-    const S=wallS(G,wall);
-    const L=R.layouts[wi], W=S.W, H=S.H;
-    if(!(W>0)||!(H>0)) return null;
-    const px=Math.min(2,2200/Math.max(W,H));
-    const cw=Math.max(1,Math.round(W*px)), ch=Math.max(1,Math.round(H*px));
-    const c=document.createElement('canvas'); c.width=cw; c.height=ch;
-    const cx=c.getContext('2d');
-    const cs=getComputedStyle(document.documentElement);
-    const faceColor=(cs.getPropertyValue('--straw-face')||'#e8d49f').trim();
-    cx.fillStyle=faceColor; cx.fillRect(0,0,cw,ch);
-    const seamW=Math.max(2,px*1.8), ledW=Math.max(3,px*3.2);
-    L.strips.forEach(st=>{
-      const x=L.vert?st.start:0, y=L.vert?0:H-st.end, w=L.vert?st.w:W, h=L.vert?H:st.w;
-      cx.strokeStyle='rgba(15,15,15,.85)'; cx.lineWidth=seamW;
-      cx.strokeRect(x*px+seamW/2,y*px+seamW/2,w*px-seamW,h*px-seamW);
-    });
-    // LED вдоль краёв стены (edgeMode на wall.edges) и продольных стыков полос (jointSegMode) —
-    // те же условия, что и в schemeFor, но нас интересует только факт «это LED», без остальных
-    // режимов (заглушка/соединитель/встык), у них на схеме и так есть тёмная линия стыка выше
-    cx.strokeStyle='#00e5ff'; cx.lineWidth=ledW;
-    const em=side=>edgeMode((wall.edges||{})[side]);
-    if(em('top')==='led'){ cx.beginPath(); cx.moveTo(0,ledW/2); cx.lineTo(cw,ledW/2); cx.stroke(); }
-    if(em('bot')==='led'){ cx.beginPath(); cx.moveTo(0,ch-ledW/2); cx.lineTo(cw,ch-ledW/2); cx.stroke(); }
-    if(em('left')==='led'){ cx.beginPath(); cx.moveTo(ledW/2,0); cx.lineTo(ledW/2,ch); cx.stroke(); }
-    if(em('right')==='led'){ cx.beginPath(); cx.moveTo(cw-ledW/2,0); cx.lineTo(cw-ledW/2,ch); cx.stroke(); }
-    (L.joints||[]).forEach(j=>{
-      (j.segs||[]).forEach(s=>{
-        if(jointSegMode(wall,S,'v',j.pos,s[0])!=='led') return;
-        cx.beginPath();
-        if(L.vert){ cx.moveTo(j.pos*px,(H-s[1])*px); cx.lineTo(j.pos*px,(H-s[0])*px); }
-        else { cx.moveTo(s[0]*px,(H-j.pos)*px); cx.lineTo(s[1]*px,(H-j.pos)*px); }
-        cx.stroke();
-      });
-    });
-    S.ops.forEach(o=>{
-      const x=o.x, y=H-o.y-o.h;
-      cx.clearRect(x*px-0.5,y*px-0.5,o.w*px+1,o.h*px+1);
-    });
-    return {canvas:c,W,H};
+    const ledW=guide?Math.max(5,cw/350):Math.max(3,cw/450);
+    m.ledLines.forEach(s=>stroke(s,ledW,guide?'#00e5ff':(s.kind==='none'?'#d7ffe0':'#fff1c2')));
+    return {canvas:c,W:m.W,H:m.H};
   }
 
   // ---- текстура ОДНОЙ грани откоса: сплошной прямоугольник цветом её материала (свой, если
@@ -6028,10 +6060,10 @@ window.addEventListener('beforeprint',flushScene3D);
   }
 
   // ---- варп ОДНОЙ текстуры на ОДИН четырёхугольник точек, поверх уже нарисованного в fctx —
-  // общая часть для стены и для каждой грани откоса (см. computeComposite): считаем всё в тех же
+  // общая часть для стены и для каждой грани откоса (см. renderLayersOnto): считаем всё в тех же
   // координатах полного разрешения фото (points пересчитаны из превью через dispScale).
   // exclFull — зоны исключения В ПОЛНОМ РАЗРЕШЕНИИ (уже пересчитаны из превью вызывающей стороной,
-  // один раз на весь computeComposite, а не заново на каждый вызов warpTextureOnto)
+  // один раз на весь renderLayersOnto, а не заново на каждый вызов warpTextureOnto)
   // flat=true — режим «схемы для нейросети» (см. computeGuideOverlay): без смешивания с
   // освещением фото (тут это не нужно — реалистичный свет/тени наведёт сама нейросеть), просто
   // прямая заливка цветом текстуры с честной альфой по краю. flat-вызовы всегда рисуют в
@@ -6097,42 +6129,57 @@ window.addEventListener('beforeprint',flushScene3D);
     fctx.putImageData(outData,minX,minY);
   }
 
-  function computeComposite(){
-    if(!LAST||!LAST.R||!workingCanvas) return null;
-    const wi=+wallSel.value;
-    const wallPts=pointsByTarget.wall;
-    if(!wallPts||wallPts.length<4) return null;
-    const tex=wallTextureCanvas(wi,LAST.G,LAST.R);
-    if(!tex) return null;
-
-    // рисуем ПРЯМО НА workingCanvas (не на свежей копии фото) — так накапливаются несколько
-    // применённых стен подряд на одном снимке, см. комментарий у объявления workingCanvas
-    const fctx=workingCanvas.getContext('2d');
-    const exclFull=exclusionRects.map(r=>({x0:r.x0/dispScale,y0:r.y0/dispScale,x1:r.x1/dispScale,y1:r.y1/dispScale}));
-    warpTextureOnto(fctx,workingCanvas.width,workingCanvas.height,tex,wallPts,exclFull);
-
-    // грани откоса — НЕОБЯЗАТЕЛЬНЫ: рисуем только те, что пользователь реально разметил (4
-    // точки); остальные проёмы остаются прозрачной дырой — сквозь них видно исходное фото, как
-    // и раньше. Каждая грань кладётся ПОВЕРХ уже готовой стены (с дырами) — как раз туда, где
-    // сейчас дыра, поэтому порядок «сначала стена, потом откосы» не нуждается ни в какой
-    // сортировке по глубине
-    const faceColorFallback=(getComputedStyle(document.documentElement).getPropertyValue('--straw-face')||'#e8d49f').trim();
-    const appliedOtkos=[];
-    wallOtkosTargets(wi).forEach(t=>{
-      const pts=pointsByTarget[t.key];
-      if(!pts||pts.length<4) return;
-      const otex=otkosTextureCanvas(t.len,t.dep,t.matId,faceColorFallback);
-      warpTextureOnto(fctx,workingCanvas.width,workingCanvas.height,otex,pts,exclFull);
-      appliedOtkos.push({key:t.key,label:t.label,len:t.len,dep:t.dep,matId:t.matId,pts:pts.map(p=>({x:p.x,y:p.y}))});
+  // слои → то, что реально можно нарисовать сейчас: модель стены по id (стену могли удалить —
+  // такой слой пропадает и из картинки, и из JSON, а не описывает молча другую стену) и грани
+  // откоса, которые у этой стены всё ещё существуют (проём могли убрать/поменять — размеры граней
+  // берутся из текущего проекта, а не из момента нажатия «Наложить»)
+  function resolveLayers(){
+    const out=[];
+    appliedLayers.forEach(layer=>{
+      const m=wallFaceModel(layer.wallId); if(!m) return;
+      const byKey=new Map(wallOtkosTargets(m.wi).map(t=>[t.key,t]));
+      const otkos=layer.otkos.filter(o=>byKey.has(o.key)).map(o=>Object.assign({},byKey.get(o.key),{pts:o.pts}));
+      out.push({layer,m,otkos});
     });
-    // снимок этого слоя — координаты (не ссылки на pointsByTarget, который очищается при смене
-    // стены) для последующей пересборки схемы для нейросети/JSON-описания (см. объявление
-    // appliedLayers) в любой момент, даже после того как разметка стены уже сброшена/сменилась
-    appliedLayers.push({wi, wallPts:wallPts.map(p=>({x:p.x,y:p.y})), otkos:appliedOtkos});
-    diagramDirty=true; // новый слой — кэш схемы для нейросети (ensureDiagram) больше не актуален
-    return workingCanvas;
+    return out;
+  }
+  // варп всех слоёв на холст размером с фото: guide=true — схема (плоский цвет на прозрачном
+  // холсте), иначе реалистичный вариант (смешивание с яркостью фото, холст — копия фото).
+  // Грани откоса кладутся поверх стены — как раз в её дыры, порядок сортировки не нужен
+  function renderLayersOnto(fctx,W,H,guide){
+    const exclFull=exclusionRects.map(r=>({x0:r.x0/dispScale,y0:r.y0/dispScale,x1:r.x1/dispScale,y1:r.y1/dispScale}));
+    resolveLayers().forEach(({layer,m,otkos})=>{
+      warpTextureOnto(fctx,W,H,faceTextureCanvas(m,guide?'guide':'real'),layer.wallPts,exclFull,guide);
+      otkos.forEach(o=>warpTextureOnto(fctx,W,H,otkosTextureCanvas(o.len,o.dep,o.matId,m.color),o.pts,exclFull,guide));
+    });
+  }
+  // «Наложить»: снимок разметки текущей стены (точки копируются — pointsByTarget меняется при
+  // смене стены). Слой той же стены заменяется, а не добавляется вторым поверх первого
+  function applyLayer(){
+    const wallId=currentWallId();
+    const wallPts=pointsByTarget.wall;
+    if(wallId==null||!wallPts||wallPts.length<4||!wallFaceModel(wallId)) return false;
+    const otkos=wallOtkosTargets(+wallSel.value)
+      .filter(t=>pointsByTarget[t.key]&&pointsByTarget[t.key].length===4)
+      .map(t=>({key:t.key,pts:pointsByTarget[t.key].map(p=>({x:p.x,y:p.y}))}));
+    const layer={wallId,wallPts:wallPts.map(p=>({x:p.x,y:p.y})),otkos};
+    const idx=appliedLayers.findIndex(l=>l.wallId===wallId);
+    if(idx>=0) appliedLayers[idx]=layer; else appliedLayers.push(layer);
+    markDirty();
+    return true;
   }
 
+  // тяжёлый синхронный расчёт (варп полного разрешения фото, ~1-2с на 12-мегапиксельном снимке) —
+  // сначала даём браузеру ОТРИСОВАТЬ «Считаю…» на кнопке: двойной requestAnimationFrame (первый —
+  // начало следующего кадра, ещё до отрисовки; второй — уже после неё) гарантирует это, а
+  // одиночный setTimeout(...,10) — нет, и приложение выглядело бы зависшим без обратной связи
+  function withBusy(btn,fn){
+    const prevLabel=btn.textContent;
+    btn.disabled=true; btn.textContent='Считаю…';
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{
+      try{ fn(); } finally { btn.disabled=false; btn.textContent=prevLabel; }
+    }));
+  }
   btnApply.addEventListener('click',()=>{
     if(!photoImg){ alert('Сначала загрузите фото стены/комнаты.'); return; }
     const wallPts=pointsByTarget.wall;
@@ -6146,61 +6193,41 @@ window.addEventListener('beforeprint',flushScene3D);
       const problem=quadProblem(t.pts);
       if(problem){ alert(`${t.label}: ${problem}`); return; }
     }
-    // сам расчёт (варп полного разрешения фото) может занимать заметное время на больших снимках
-    // (~1-2с на 12-мегапиксельном фото и четырёхугольнике во весь кадр, и того больше с несколькими
-    // размеченными гранями откоса) — если считать его сразу в этом же обработчике, кнопка не
-    // успеет перерисоваться в состояние "занято" ДО блокировки потока, и приложение на время
-    // расчёта выглядело бы зависшим без всякой обратной связи. Двойной requestAnimationFrame —
-    // надёжный способ гарантировать, что браузер успел ОТРИСОВАТЬ смену текста кнопки (первый rAF —
-    // начало следующего кадра, ещё до отрисовки; второй — уже после неё) прежде, чем стартует
-    // тяжёлый синхронный расчёт; одиночный setTimeout(...,10) такой гарантии не даёт
-    const prevLabel=btnApply.textContent;
-    btnApply.disabled=true; btnApply.textContent='Считаю…';
-    requestAnimationFrame(()=>requestAnimationFrame(()=>{
-      const full=computeComposite();
-      btnApply.disabled=false; btnApply.textContent=prevLabel;
-      if(!full){ alert('Не получилось наложить раскладку — проверьте выбранную стену и точки.'); return; }
-      resultCanvas=full;
-      // превью теперь показывает схему для нейросети (см. redraw/ensureDiagram) — тот же вид,
-      // что скачивается кнопкой «Скачать схему», и с тем же ползунком прозрачности; сам
-      // «реалистичный» результат (resultCanvas) по-прежнему доступен через «Скачать»
+    withBusy(btnApply,()=>{
+      if(!applyLayer()){ alert('Не получилось наложить раскладку — проверьте выбранную стену и точки.'); return; }
       redraw();
-      btnDownload.disabled=false;
-      btnGuideDownload.disabled=false; btnJsonCopy.disabled=false; btnDownloadAll.disabled=false;
-    }));
+      setOutputsEnabled(true);
+      refreshJsonIfShown();
+    });
   });
+  function ensureRealistic(){
+    if(!photoImg||!appliedLayers.length) return null;
+    if(!realisticDirty&&realisticCache) return realisticCache;
+    const c=document.createElement('canvas');
+    c.width=photoImg.naturalWidth; c.height=photoImg.naturalHeight;
+    const cctx=c.getContext('2d');
+    cctx.drawImage(photoImg,0,0);
+    renderLayersOnto(cctx,c.width,c.height,false);
+    realisticCache=c; realisticDirty=false;
+    return c;
+  }
   btnDownload.addEventListener('click',()=>{
-    if(!resultCanvas) return;
-    const a=document.createElement('a');
-    a.download='визуализация.png';
-    a.href=resultCanvas.toDataURL('image/png');
-    a.click();
+    withBusy(btnDownload,()=>{
+      const c=ensureRealistic(); if(!c) return;
+      triggerDownload(c.toDataURL('image/png'),'визуализация.png');
+    });
   });
 
   // ---- схема для нейросети: исходное фото + полупрозрачная (настраиваемый %) «схемная» текстура
-  // всех уже применённых слоёв (appliedLayers) — БЕЗ смешивания с освещением фото (см. flat-режим
-  // warpTextureOnto), т.к. реалистичный свет/тени должна навести сама нейросеть, а не мы —
-  // задача этой картинки только точно передать геометрию (где панель/стык/LED/откос).
-  // Сама сборка диаграммы (тяжёлый варп по каждому слою) кэшируется в diagramCache и
-  // пересчитывается только когда diagramDirty=true (новый применённый слой/изменённые зоны
-  // исключения) — см. объявление выше. Это и позволяет ползунку прозрачности ниже двигаться
-  // в реальном времени: на каждый его тик пересчитывается только дешёвый композит с photoImg
+  // всех применённых слоёв — БЕЗ смешивания с освещением фото (flat-режим warpTextureOnto), т.к.
+  // реалистичный свет/тени должна навести сама нейросеть, а не мы — задача этой картинки только
+  // точно передать геометрию (где панель/стык/LED/откос). Диаграмма кэшируется (см. diagramDirty)
   function ensureDiagram(){
     if(!photoImg||!LAST||!LAST.R||!appliedLayers.length){ diagramCache=null; return null; }
     if(!diagramDirty&&diagramCache) return diagramCache;
     const diagram=document.createElement('canvas');
     diagram.width=photoImg.naturalWidth; diagram.height=photoImg.naturalHeight;
-    const dctx=diagram.getContext('2d'); // изначально полностью прозрачный
-    const exclFull=exclusionRects.map(r=>({x0:r.x0/dispScale,y0:r.y0/dispScale,x1:r.x1/dispScale,y1:r.y1/dispScale}));
-    const faceColorFallback=(getComputedStyle(document.documentElement).getPropertyValue('--straw-face')||'#e8d49f').trim();
-    appliedLayers.forEach(layer=>{
-      const tex=wallGuideTextureCanvas(layer.wi,LAST.G,LAST.R);
-      if(tex) warpTextureOnto(dctx,diagram.width,diagram.height,tex,layer.wallPts,exclFull,true);
-      layer.otkos.forEach(o=>{
-        const otex=otkosTextureCanvas(o.len,o.dep,o.matId,faceColorFallback);
-        warpTextureOnto(dctx,diagram.width,diagram.height,otex,o.pts,exclFull,true);
-      });
-    });
+    renderLayersOnto(diagram.getContext('2d'),diagram.width,diagram.height,true); // холст изначально прозрачный
     diagramCache=diagram; diagramDirty=false;
     return diagram;
   }
@@ -6232,74 +6259,65 @@ window.addEventListener('beforeprint',flushScene3D);
   // с равной вероятностью либо перерисует всё по-своему, либо тупо скопирует плоскую схему как есть
   function buildAiPromptObject(includeIso){
     if(!LAST||!LAST.R||!appliedLayers.length) return null;
-    const G=LAST.G, R=LAST.R;
-    const cs=getComputedStyle(document.documentElement);
-    const hex=name=>(cs.getPropertyValue(name)||'').trim()||null;
+    const R=LAST.R;
     const sideRu={left:'слева',right:'справа',top:'сверху',bottom:'снизу'};
     const edgeSideRu={top:'верхний край стены',bot:'нижний край стены',left:'левый край стены',right:'правый край стены'};
     const seamTypeRu={cap:'заглушка (торцевой профиль)',butt:'встык, без профиля',led:'LED — непрерывная светящаяся лента'};
-    const walls_=appliedLayers.map(layer=>{
-      const w=walls[layer.wi]; if(!w) return null;
-      const wall=wallCutView(w,R.cornerCuts&&R.cornerCuts.get(w.id));
-      const S=wallS(G,wall);
-      const L=R.layouts[layer.wi];
-      const matId=$('#i-preset').value;
-      // проёмы этой стены, для которых пользователь НЕ разметил ни одной грани откоса (пустая
-      // otkos-часть) — по факту нейросети об их отделке ничего не сказано. Наблюдение с реального
-      // теста (см. обсуждение с пользователем): без явного запрета генератор по своей инициативе
-      // «докрашивает» такой откос в цвет панели и даже добавляет тёплую подсветку по периметру —
-      // выглядит красиво, но это не то, что было размечено, и от попытки к попытке будет разным.
-      // Явно перечисляем такие проёмы, чтобы hard_constraints ниже мог сослаться на них по имени
-      const markedOpKeys=new Set(layer.otkos.map(o=>o.key.split(':')[1]));
+    // положение линии модели словами: вертикальная — от левого края, горизонтальная — от пола
+    // (раньше при горизонтальной раскладке стык ошибочно подписывался «от левого края»)
+    const linePos=s=>Math.abs(s.x0-s.x1)<1?`на ${fmt(s.x0)} мм от левого края стены`
+      :Math.abs(s.y0-s.y1)<1?`на ${fmt(s.y0)} мм от пола`
+      :`от точки (${fmt(s.x0)}; ${fmt(s.y0)}) до (${fmt(s.x1)}; ${fmt(s.y1)}) мм — от левого нижнего угла стены`;
+    const seamKindRu=s=>s.el==='jointV'?'продольный стык полос':s.user?'дизайнерский шов':'поперечный стык (лист короче стены)';
+    const uniq=arr=>{ const seen=new Set(); return arr.filter(x=>{ const k=JSON.stringify(x); if(seen.has(k)) return false; seen.add(k); return true; }); };
+    // всё берётся из той же модели, по которой нарисована схема на фото (wallFaceModel), — цвет,
+    // стыки, LED и зашитые проёмы в JSON и на картинке совпадают по построению. Один и тот же стык,
+    // прерванный проёмом на несколько кусков, — для описания один стык: дубли убираем
+    const walls_=resolveLayers().map(({layer,m,otkos})=>{
+      // проёмы, для которых НЕ размечена ни одна грань откоса: без явного запрета генератор сам
+      // «докрашивает» такой откос и добавляет подсветку (наблюдалось на реальном тесте) — перечисляем
+      // их, чтобы hard_constraints ниже мог сослаться на них по имени
+      const markedOps=new Set(otkos.map(o=>o.key.split(':')[1]));
       const opLabelByIdx={};
-      wallOtkosTargets(layer.wi).forEach(t=>{
+      wallOtkosTargets(m.wi).forEach(t=>{
         const opIdx=t.key.split(':')[1];
         if(!(opIdx in opLabelByIdx)) opLabelByIdx[opIdx]=t.label.split(' — ')[0];
       });
-      const openingsWithoutMarkedReveal=Object.keys(opLabelByIdx)
-        .filter(idx=>!markedOpKeys.has(idx))
-        .map(idx=>opLabelByIdx[idx]);
-      const seams=[];
-      ['top','bot','left','right'].forEach(side=>{
-        const m=edgeMode((wall.edges||{})[side]);
-        if(m==='none') return;
-        seams.push({position:edgeSideRu[side], type:seamTypeRu[m]||m});
-      });
-      (L.joints||[]).forEach(j=>{
-        (j.segs||[]).forEach(s=>{
-          const m=jointSegMode(wall,S,'v',j.pos,s[0]);
-          seams.push({position:`продольный стык полос на ${fmt(j.pos)} мм от левого края стены`, type:seamTypeRu[m]||m});
-        });
-      });
-      // один и тот же продольный стык может быть прерван проёмом на несколько сегментов (кусок
-      // выше окна/ниже окна и т.п.) — физически корректно, но для JSON-описания это просто один
-      // и тот же стык с одним и тем же профилем, продублированный по числу сегментов; убираем
-      // дубликаты по паре (позиция, тип), чтобы не запутывать нейросеть избыточными повторами
-      const seenSeam=new Set();
-      const dedupedSeams=seams.filter(s=>{
-        const k=s.position+'|'+s.type;
-        if(seenSeam.has(k)) return false;
-        seenSeam.add(k); return true;
-      });
+      const openingsWithoutMarkedReveal=Object.keys(opLabelByIdx).filter(idx=>!markedOps.has(idx)).map(idx=>opLabelByIdx[idx]);
+      const seams=uniq(m.seams.map(sg=>({
+        position:sg.el==='edge'?edgeSideRu[sg.side]:`${seamKindRu(sg)} ${linePos(sg)}`,
+        type:seamTypeRu[sg.mode]||sg.mode
+      })));
+      const ledLines=uniq(m.ledLines.map(sg=>
+        sg.el==='edge'?`вдоль: ${edgeSideRu[sg.side]}`
+        :sg.el==='otkos'?`по контуру проёма «${sg.opLabel}» (${sideRu[sg.side]})`
+        :sg.el==='free'?`свободная линия ${linePos(sg)}`
+        :`по стыку ${linePos(sg)}`));
       return {
-        name:w.name,
-        size_mm:{width:Math.round(S.W),height:Math.round(S.H)},
-        orientation:L.vert?'вертикальная раскладка панелей':'горизонтальная раскладка панелей',
-        material:{name:G.presetName, color_hex:hex('--mat-'+matId), texture_hint:TEXTURE_HINTS[matId]||TEXTURE_HINTS.custom},
+        name:m.name,
+        size_mm:{width:Math.round(m.W),height:Math.round(m.H)},
+        orientation:m.vert?'вертикальная раскладка панелей':'горизонтальная раскладка панелей',
+        material:{name:m.matName, color_hex:m.color, texture_hint:TEXTURE_HINTS[m.matId]||TEXTURE_HINTS.custom},
         // from_mm — позиция вдоль направления раскладки: от левого края стены при вертикальной
         // раскладке (полосы-столбцы), от пола при горизонтальной (полосы-ряды); что именно —
         // уточняет соседнее поле orientation
-        panel_strips_mm:L.strips.map(st=>({from_mm:Math.round(st.start), size_mm:Math.round(st.w)})),
-        seams:dedupedSeams,
-        otkos:layer.otkos.map(o=>({
+        panel_strips_mm:m.strips.map(st=>({from_mm:Math.round(st.start), size_mm:Math.round(st.w)})),
+        seams,
+        led_lines:ledLines.length?ledLines:undefined,
+        other_material_pieces:m.pieces.length?m.pieces.map(r=>({material_name:r.matName,color_hex:r.color,
+          area_mm:{from_left:Math.round(r.x),from_floor:Math.round(r.y),width:Math.round(r.w),height:Math.round(r.h)}})):undefined,
+        filled_openings:m.fills.length?m.fills.map(r=>({opening:r.label,material_name:r.matName,color_hex:r.color,
+          note:'проём зашит панелью этого материала — на схеме он залит цветом, это не ошибка; окна/двери там на результате НЕТ'})):undefined,
+        otkos:otkos.map(o=>({
           opening_side:o.label,
           depth_mm:Math.round(o.dep), length_mm:Math.round(o.len),
-          material_color_hex:o.matId?hex('--mat-'+o.matId):hex('--mat-'+matId),
-          material_name:o.matId?(PRESETS.find(p=>p.id===o.matId)||{}).name||o.matId:G.presetName
+          material_color_hex:(o.matId&&m.hexOf(o.matId))||m.color,
+          material_name:o.matId?(PRESETS.find(p=>p.id===o.matId)||{}).name||o.matId:m.matName
         })),
         openings_without_marked_reveal:openingsWithoutMarkedReveal.length?openingsWithoutMarkedReveal:undefined
       };
-    }).filter(Boolean);
+    });
+    if(!walls_.length) return null;
     // R.led — метраж LED ПО ВСЕМУ ПРОЕКТУ, а не только по стенам, которые попали в walls[] выше
     // (пользователь мог наложить на фото не все стены проекта) — помечаем это явно в scope_note,
     // а не выдаём total_length_m без оговорок как будто это метраж именно на этом фото
@@ -6325,11 +6343,13 @@ window.addEventListener('beforeprint',flushScene3D);
         'установленными панелями — так, будто ремонт выполнен именно по этой схеме.',
       short_prompt:shortPrompt+' (короткая версия задачи ниже — используйте её, если инструмент плохо '+
         'работает с длинным JSON; полная версия ниже точнее и с ней результат стабильнее)',
-      reference_image_legend:'Прозрачная заливка тёплого тона = панель материала (см. wall.material '+
-        'ниже). Тёмная жирная линия = стык между панелями (профиль см. wall.seams). Ярко-бирюзовая '+
-        'линия — это НЕ материал, а обозначение LED-подсветки (см. led ниже). Участки внутри контура '+
-        'без заливки (видно исходное фото) — это проём (окно/дверь) либо зона исключения (мебель, '+
-        'розетка, выключатель) — их трогать нельзя.',
+      reference_image_legend:'Полупрозрачная заливка = панель, её цвет = цвет материала (wall.material.color_hex; '+
+        'другой цвет на части стены — см. wall.other_material_pieces). Тёмная сплошная линия = стык с '+
+        'профилем-заглушкой, тонкая тёмная пунктирная = стык встык без профиля (см. wall.seams и '+
+        'seam_types_glossary). Ярко-бирюзовая линия — это НЕ материал, а место LED-подсветки '+
+        '(wall.led_lines, led). Проём, залитый цветом материала, зашит панелью (wall.filled_openings). '+
+        'Участки внутри контура без заливки (видно исходное фото) — это проём (окно/дверь) либо зона '+
+        'исключения (мебель, розетка, выключатель) — их трогать нельзя.',
       material_reference_note:'Если вместе с этим описанием приложены ОТДЕЛЬНЫЕ референсные фото '+
         'образцов материала — в первую очередь копируй текстуру/рисунок именно с них, а не с '+
         'текстового texture_hint ниже (он лишь приближение на случай, если реального фото образца нет).',
@@ -6409,6 +6429,40 @@ window.addEventListener('beforeprint',flushScene3D);
       // в textarea ниже, пользователь скопирует его вручную (Ctrl+A/Ctrl+C)
       jsonOutput.focus(); jsonOutput.select();
     }
+  });
+  // уже показанный JSON держим актуальным (дёшево — это лишь текст), чтобы после правки проекта
+  // в поле не оставалось старое описание, расходящееся с уже пересобранной схемой
+  function refreshJsonIfShown(){
+    if(!jsonOutput.value) return;
+    const obj=buildAiPromptObject();
+    jsonOutput.value=obj?JSON.stringify(obj,null,2):'';
+  }
+
+  // ---- пересчёт проекта (run → vizNotifyProjectChanged): схема и реалистичный PNG строятся из
+  // текущего проекта, значит после любой правки (материал, проём, стык, LED, удаление стены)
+  // кэши устарели. Слои удалённых стен выбрасываем сразу — иначе висели бы «невидимками».
+  // Саму тяжёлую пересборку схемы делаем не на каждый пересчёт (run() зовётся на каждое нажатие
+  // клавиши в форме), а с задержкой после последней правки и только когда превью видно на
+  // экране; если раздел прокручен вне экрана — пересоберём, когда он туда вернётся
+  let rebuildTimer=null, previewVisible=false;
+  function rebuildPreviewSoon(){
+    clearTimeout(rebuildTimer);
+    if(!previewVisible) return;
+    rebuildTimer=setTimeout(()=>{ if(photoImg&&diagramDirty) redraw(); },350);
+  }
+  if('IntersectionObserver' in window){
+    new IntersectionObserver(entries=>{
+      previewVisible=entries.some(e=>e.isIntersecting);
+      if(previewVisible&&diagramDirty&&appliedLayers.length) rebuildPreviewSoon();
+    }).observe(canvas);
+  } else previewVisible=true;
+  document.addEventListener('raskroy:recomputed',()=>{
+    if(!appliedLayers.length) return;
+    appliedLayers=appliedLayers.filter(l=>walls.some(w=>w.id===l.wallId));
+    markDirty();
+    if(!appliedLayers.length){ setOutputsEnabled(false); diagramCache=null; realisticCache=null; redraw(); return; }
+    refreshJsonIfShown();
+    rebuildPreviewSoon();
   });
 
   // ---- «Скачать всё для нейросети» — один zip-архив (собран прямо в браузере, без сервера и без
