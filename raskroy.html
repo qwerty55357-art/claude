@@ -143,6 +143,11 @@ tbody tr:hover td{background:var(--surface)}
 .viz-wrap{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:16px;overflow:auto}
 #viz-canvas{display:block;max-width:100%;border-radius:calc(var(--r) - 2px);cursor:crosshair;touch-action:none;background:var(--surface-2)}
 .viz-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.viz-step,.viz-notice{margin:0 0 8px;font-size:13px;line-height:1.45}
+.viz-step b,.viz-notice b{white-space:nowrap}
+.viz-more summary{cursor:pointer;color:var(--alu);margin-top:6px}
+.viz-more summary:hover{color:var(--paper)}
+.viz-notice[hidden]{display:none}
 /* печатная замена живого 3D-канваса — статичный PNG-снимок с собственным (изометрическим) ракурсом
    камеры, отрисованный отдельно от интерактивного вида (см. renderScene3DSnapshot): WebGL-канвас
    не переживает печать, а слепок «как на экране» зависел бы от того, куда пользователь довернул
@@ -228,6 +233,7 @@ tbody tr:hover td{background:var(--surface)}
     <div class="brand-sub">панели · профиль · клей · led</div>
   </div>
   <div class="topbar-actions">
+    <button class="btn" id="btn-undo" disabled title="Отменить последнее действие (Ctrl+Z)">↶ Отменить</button>
     <button class="btn" id="btn-load">Открыть проект</button>
     <button class="btn" id="btn-save">Сохранить проект</button>
     <button class="btn btn-key" id="btn-print">Печать / PDF</button>
@@ -365,6 +371,8 @@ tbody tr:hover td{background:var(--surface)}
       <div class="row row-1"><div class="f"><label>Фото стены/комнаты</label><input type="file" id="viz-photo" accept="image/*"></div></div>
       <div class="row row-1"><div class="f"><label>Что размечаем сейчас</label><select id="viz-target"></select></div></div>
       <div class="row row-1"><div class="f"><label class="chk"><input type="checkbox" id="viz-loupe" checked> Лупа при разметке</label></div></div>
+      <p class="hint">Что делать на каждом шаге — подсказка прямо над фото.</p>
+      <details class="hint viz-more"><summary>Подробнее о разметке</summary>
       <p class="hint">Отметьте на фото 4 угла текущей цели кликами по порядку (в один обход, без
         перехлёста сторон) — она ляжет на фото с учётом перспективы и освещения. Точки можно
         перетаскивать, чтобы подогнать точнее; лупа у курсора показывает место в полном разрешении
@@ -376,7 +384,10 @@ tbody tr:hover td{background:var(--surface)}
         к уже наложенной стене — её точки снова можно двигать, повторное «Наложить» заменит её. Цель
         «Зоны исключения» — тянуть прямоугольником поверх мебели/розеток/выключателей на фото,
         чтобы туда ничего не легло (эти места останутся как на фото); клик по уже отмеченной зоне
-        удаляет её. Работает целиком в браузере, без отправки фото куда-либо.</p>
+        удаляет её. Разметка (точки, откосы, зоны) сохраняется вместе с проектом — само фото нет:
+        откройте проект и загрузите то же фото, разметка ляжет на место. Ошиблись — «↶ Отменить»
+        вверху или Ctrl+Z. Работает целиком в браузере, без отправки фото куда-либо.</p>
+      </details>
       <div class="viz-actions">
         <button type="button" class="btn btn-mini" id="viz-reset">Сбросить точки цели</button>
         <button type="button" class="btn btn-key" id="viz-apply">Наложить раскладку</button>
@@ -484,10 +495,10 @@ tbody tr:hover td{background:var(--surface)}
   </div>
   <div class="block" id="viz-block">
     <div class="stage-h"><h2>Визуализация на фото</h2><span class="meta" id="viz-meta"></span><span class="rule"></span></div>
-    <p class="hint" style="margin:0 0 8px">Загрузите фото в разделе «Визуализация на фото» слева,
-      выберите стену и отметьте на фото её 4 угла — раскладка панелей ляжет на снимок с учётом
-      перспективы и освещения. Только для наглядности — на раскрой и смету не влияет, в печать/PDF
-      не попадает.</p>
+    <p class="hint" style="margin:0 0 8px">Раскладка панелей ляжет на снимок с учётом перспективы и
+      освещения. Только для наглядности — на раскрой и смету не влияет, в печать/PDF не попадает.</p>
+    <div class="note info viz-step" id="viz-step"><b></b><span></span></div>
+    <div class="note viz-notice" id="viz-notice" hidden><b></b><span></span></div>
     <div class="viz-wrap"><canvas id="viz-canvas" width="1" height="1"></canvas></div>
   </div>
   <div class="block">
@@ -5114,16 +5125,28 @@ $('#i-preset').addEventListener('change',()=>{
   run();
 });
 document.querySelectorAll('[data-sect] .sect-h').forEach(h=>h.addEventListener('click',()=>h.parentElement.classList.toggle('closed')));
-$('#rail').addEventListener('input',e=>{ if(!e.target.closest('#openings')) run(); });
-$('#rail').addEventListener('change',e=>{ if(!e.target.closest('#openings')) run(); });
+// поля раздела «Визуализация на фото» (id viz-…) на раскрой не влияют — пересчёт проекта им не
+// нужен, а он ещё и помечал схему на фото устаревшей: каждый шаг ползунка прозрачности через
+// 350 мс запускал полную пересборку схемы (варп всего фото). Модуль фото слушает их сам
+const railRecalc=e=>{ if(!e.target.closest('#openings')&&!(e.target.id||'').startsWith('viz-')) run(); };
+$('#rail').addEventListener('input',railRecalc);
+$('#rail').addEventListener('change',railRecalc);
 
+// мост к модулю «Визуализация на фото» (самостоятельный IIFE в конце скрипта — он подменяет
+// эти заглушки): разметка фото (точки углов, откосы, зоны исключения, наложенные стены) живёт
+// там, а в файл проекта и в историю отмены попадает через snapshot()/applySnapshot()
+const vizBridge={exportMarkup:()=>null, importMarkup:()=>{}};
 function snapshot(){
   formToWall();
   const o={v:3,walls:JSON.parse(JSON.stringify(walls)),active,manual:manualMoves,
            cornerLinks:JSON.parse(JSON.stringify(cornerLinks)),cornerType,
-           ledCircuits:JSON.parse(JSON.stringify(ledCircuits)),fields:{}};
+           ledCircuits:JSON.parse(JSON.stringify(ledCircuits)),fields:{},
+           viz:vizBridge.exportMarkup()};
   document.querySelectorAll('#rail input,#rail select').forEach(el=>{
-    if(!el.id||WALL_FIELDS.includes(el.id)) return;
+    // поля раздела «Визуализация на фото» — не данные проекта (выбранная цель, % схемы, сам
+    // файл фото), разметка фото сохраняется отдельно, в o.viz. Значение file-инпута к тому же
+    // нельзя вернуть обратно при открытии (браузер бросает исключение на el.value=…)
+    if(!el.id||WALL_FIELDS.includes(el.id)||el.id.startsWith('viz-')) return;
     o.fields[el.id]= el.type==='checkbox'?el.checked:el.value;
   });
   return o;
@@ -5136,61 +5159,68 @@ $('#btn-save').addEventListener('click',()=>{
   a.click(); URL.revokeObjectURL(a.href);
 });
 $('#btn-load').addEventListener('click',()=>$('#file-load').click());
+// восстановить проект из снимка snapshot(): и при открытии файла (fromFile=true), и при отмене
+// действия (см. historyUndo). Бросает исключение на нечитаемом снимке
+function applySnapshot(o,fromFile){
+  // формат до v3 (одна стена, без массива walls) больше не поддерживается — такие файлы
+  // считаются нечитаемыми (см. catch в обработчике файла), как и любой другой повреждённый JSON
+  if(!(o.v===3 && Array.isArray(o.walls) && o.walls.length)) throw new Error('неподдерживаемый формат файла');
+  Object.entries(o.fields||{}).forEach(([id,v])=>{
+    if(WALL_FIELDS.includes(id)) return;                    // стеновые поля берём из walls
+    if(id.startsWith('viz-')) return;                       // старые файлы писали сюда и поля фото-раздела
+    if(id==='i-joint'){ $('#i-joint-v').checked=!!v; $('#i-joint-h').checked=!!v; return; }
+    if(id==='i-glue' && v>=10) return;                      // старое «м²/туба» не тащим
+    const el=document.getElementById(id); if(!el||el.type==='file') return;
+    if(el.type==='checkbox') el.checked=v; else el.value=v;
+  });
+  // сохраняем исходные id стен (на них могут ссылаться cornerLinks) — донумеровываем только то, чего не было
+  walls=o.walls.map((w,i)=>Object.assign(newWall(),w,{id:w.id||(i+1)}));
+  wallSeq=Math.max(walls.length,...walls.map(w=>w.id||0));
+  // старые файлы не знали autoName — считаем автономером только то, что похоже на «Стена N»
+  // (не трогаем реально переименованные пользователем стены), и сразу подтягиваем к текущим
+  // позициям. ВАЖНО: смотрим на СЫРЫЕ данные o.walls[i], а не на уже смёрженную w — после
+  // Object.assign(newWall(),w,...) поле autoName у w всегда true (дефолт из newWall()),
+  // даже если в файле его не было вовсе, и проверка по w никогда бы не сработала
+  walls.forEach((w,i)=>{ if(o.walls[i].autoName===undefined) w.autoName=/^Стена \d+$/.test(w.name); });
+  renumberWalls();
+  active=Math.min(o.active||0,walls.length-1);
+  manualMoves=(o.manual&&typeof o.manual==='object')?o.manual:{};
+  walls.forEach(w=>{
+    ['top','bot','left','right'].forEach(k=>{ w.edges[k]=edgeMode(w.edges[k]); });
+    w.ops.forEach(op=>{ if(!op.anchorH) op.anchorH='left'; if(!op.otkosMode) op.otkosMode={}; });
+  });
+  // углы: оставляем только ссылки на реально существующие стены (после миграции/удаления часть могла пропасть)
+  {
+    const ids=new Set(walls.map(w=>w.id));
+    cornerLinks=(Array.isArray(o.cornerLinks)?o.cornerLinks:[])
+      .filter(c=>ids.has(+c.aw)&&(c.bw===''||c.bw==null||ids.has(+c.bw)))
+      // старые проекты не знали kind/angle/radius/distance/flatA/flatB — донормализуем как
+      // обычный прямой угол без плоских зон
+      .map(c=>Object.assign({kind:'sharp',angle:90,radius:300,distance:0,flatA:0,flatB:0},c));
+    cornerSeq=Math.max(0,...cornerLinks.map(c=>c.id||0));
+    // тип углов — один на весь проект (см. декларацию cornerType); старые файлы могли хранить
+    // его вразнобой по связям — берём тип первой связи как унифицированный, иначе 'out'
+    cornerType=(o.cornerType==='in'||o.cornerType==='out')?o.cornerType
+      :((cornerLinks[0]&&cornerLinks[0].type==='in')?'in':'out');
+    cornerLinks.forEach(c=>{ c.type=cornerType; });
+    // контуры без стены (после удаления) отбрасываем целиком, а не «вне проекта» — привязка
+    // LED-отрезка к конкретной стене осмысленна только пока эта стена существует
+    ledCircuits=(Array.isArray(o.ledCircuits)?o.ledCircuits:[])
+      .map(c=>Object.assign({},c,{legs:(c.legs||[]).filter(l=>ids.has(+l.wall))}))
+      .filter(c=>c.legs.length);
+    ledCircuitSeq=Math.max(0,...ledCircuits.map(c=>c.id||0));
+    freeLegSeq=Math.max(0,...ledCircuits.flatMap(c=>c.legs).filter(l=>l.el==='free').map(l=>l.id||0));
+  }
+  wallToForm(); renderOpenings(); renderWallCompass(); run();
+  // разметка фото — после run(): ей нужны пересчитанные стены/откосы и список стен в селекте
+  vizBridge.importMarkup(o.viz||null,fromFile);
+}
 $('#file-load').addEventListener('change',e=>{
   const f=e.target.files[0]; if(!f) return;
   const r=new FileReader();
   r.onload=()=>{
     try{
-      const o=JSON.parse(r.result);
-      // формат до v3 (одна стена, без массива walls) больше не поддерживается — такие файлы
-      // считаются нечитаемыми (см. catch ниже), как и любой другой повреждённый JSON
-      if(!(o.v===3 && Array.isArray(o.walls) && o.walls.length)) throw new Error('неподдерживаемый формат файла');
-      Object.entries(o.fields||{}).forEach(([id,v])=>{
-        if(WALL_FIELDS.includes(id)) return;                    // стеновые поля берём из walls
-        if(id==='i-joint'){ $('#i-joint-v').checked=!!v; $('#i-joint-h').checked=!!v; return; }
-        if(id==='i-glue' && v>=10) return;                      // старое «м²/туба» не тащим
-        const el=document.getElementById(id); if(!el) return;
-        if(el.type==='checkbox') el.checked=v; else el.value=v;
-      });
-      // сохраняем исходные id стен (на них могут ссылаться cornerLinks) — донумеровываем только то, чего не было
-      walls=o.walls.map((w,i)=>Object.assign(newWall(),w,{id:w.id||(i+1)}));
-      wallSeq=Math.max(walls.length,...walls.map(w=>w.id||0));
-      // старые файлы не знали autoName — считаем автономером только то, что похоже на «Стена N»
-      // (не трогаем реально переименованные пользователем стены), и сразу подтягиваем к текущим
-      // позициям. ВАЖНО: смотрим на СЫРЫЕ данные o.walls[i], а не на уже смёрженную w — после
-      // Object.assign(newWall(),w,...) поле autoName у w всегда true (дефолт из newWall()),
-      // даже если в файле его не было вовсе, и проверка по w никогда бы не сработала
-      walls.forEach((w,i)=>{ if(o.walls[i].autoName===undefined) w.autoName=/^Стена \d+$/.test(w.name); });
-      renumberWalls();
-      active=Math.min(o.active||0,walls.length-1);
-      manualMoves=(o.manual&&typeof o.manual==='object')?o.manual:{};
-      walls.forEach(w=>{
-        ['top','bot','left','right'].forEach(k=>{ w.edges[k]=edgeMode(w.edges[k]); });
-        w.ops.forEach(op=>{ if(!op.anchorH) op.anchorH='left'; if(!op.otkosMode) op.otkosMode={}; });
-      });
-      // углы: оставляем только ссылки на реально существующие стены (после миграции/удаления часть могла пропасть)
-      {
-        const ids=new Set(walls.map(w=>w.id));
-        cornerLinks=(Array.isArray(o.cornerLinks)?o.cornerLinks:[])
-          .filter(c=>ids.has(+c.aw)&&(c.bw===''||c.bw==null||ids.has(+c.bw)))
-          // старые проекты не знали kind/angle/radius/distance/flatA/flatB — донормализуем как
-          // обычный прямой угол без плоских зон
-          .map(c=>Object.assign({kind:'sharp',angle:90,radius:300,distance:0,flatA:0,flatB:0},c));
-        cornerSeq=Math.max(0,...cornerLinks.map(c=>c.id||0));
-        // тип углов — один на весь проект (см. декларацию cornerType); старые файлы могли хранить
-        // его вразнобой по связям — берём тип первой связи как унифицированный, иначе 'out'
-        cornerType=(o.cornerType==='in'||o.cornerType==='out')?o.cornerType
-          :((cornerLinks[0]&&cornerLinks[0].type==='in')?'in':'out');
-        cornerLinks.forEach(c=>{ c.type=cornerType; });
-        // контуры без стены (после удаления) отбрасываем целиком, а не «вне проекта» — привязка
-        // LED-отрезка к конкретной стене осмысленна только пока эта стена существует
-        ledCircuits=(Array.isArray(o.ledCircuits)?o.ledCircuits:[])
-          .map(c=>Object.assign({},c,{legs:(c.legs||[]).filter(l=>ids.has(+l.wall))}))
-          .filter(c=>c.legs.length);
-        ledCircuitSeq=Math.max(0,...ledCircuits.map(c=>c.id||0));
-        freeLegSeq=Math.max(0,...ledCircuits.flatMap(c=>c.legs).filter(l=>l.el==='free').map(l=>l.id||0));
-      }
-      wallToForm(); renderOpenings(); renderWallCompass(); run();
+      applySnapshot(JSON.parse(r.result),true);
     }catch(err){
       $('#notes').innerHTML=`<div class="note err"><b>Файл</b><span>Не удалось прочитать проект: файл повреждён или это не проект раскроя.</span></div>`;
     }
@@ -5202,6 +5232,52 @@ $('#btn-print').addEventListener('click',()=>window.print());
 // любом случае, поэтому именно тут, а не только в клике по кнопке, досрочно проявляем отложенный
 // 3D-рендер (см. scheduleScene3D/flushScene3D выше), чтобы печатный слепок не отстал от экрана
 window.addEventListener('beforeprint',flushScene3D);
+
+/* ---------- ОТМЕНА ДЕЙСТВИЙ (Ctrl+Z / «↶ Отменить») ----------
+   История — снимки snapshot() целиком (проект + разметка фото), как при сохранении в файл: так
+   отмена одинаково работает для любой правки — поле формы, проём, перетаскивание, LED, угол,
+   точка на фото, «Наложить» — без отдельного «обратного действия» на каждую операцию. Снимок
+   фиксируется не на каждое нажатие клавиши (run() зовётся на каждый символ), а через паузу
+   после последней правки — набор числа «2700» = один шаг отмены, а не четыре. Действия с
+   разметкой фото фиксируются сразу (historyCommit) — там каждый клик и есть отдельный шаг */
+const HISTORY_MAX=20;
+let histStack=[], histCur=null, histTimer=null, histRestoring=false;
+function updateUndoBtn(){ const b=$('#btn-undo'); if(b) b.disabled=!histStack.length; }
+function historyCommit(){
+  clearTimeout(histTimer); histTimer=null;
+  if(histRestoring) return;
+  let cur; try{ cur=JSON.stringify(snapshot()); }catch(err){ return; }
+  if(cur===histCur) return;                     // пересчёт без реальной правки — не шаг
+  if(histCur!==null){ histStack.push(histCur); if(histStack.length>HISTORY_MAX) histStack.shift(); }
+  histCur=cur; updateUndoBtn();
+}
+function historyNoteChange(){
+  if(histRestoring) return;
+  clearTimeout(histTimer); histTimer=setTimeout(historyCommit,500);
+}
+function historyUndo(){
+  historyCommit();                              // правка, которая ещё «в паузе», — сначала отдельным шагом
+  if(!histStack.length) return;
+  const prev=histStack.pop();
+  histRestoring=true;
+  try{ applySnapshot(JSON.parse(prev),false); }
+  catch(err){ histStack=[]; }                   // снимок не читается — историю дальше не тянем
+  finally{ histRestoring=false; clearTimeout(histTimer); histTimer=null; }
+  // текущим считаем то, что реально получилось после восстановления (нормализованный вид),
+  // иначе первый же пересчёт увидел бы «разницу» и вернул отменённый шаг обратно в историю
+  try{ histCur=JSON.stringify(snapshot()); }catch(err){ histCur=prev; }
+  updateUndoBtn();
+}
+document.addEventListener('raskroy:recomputed',historyNoteChange);
+$('#btn-undo').addEventListener('click',historyUndo);
+document.addEventListener('keydown',e=>{
+  if(!(e.ctrlKey||e.metaKey)||e.shiftKey||e.altKey||e.code!=='KeyZ') return;   // code — работает и в русской раскладке
+  // в текстовом/числовом поле Ctrl+Z — родная отмена набора браузером (она вызовет пересчёт,
+  // и это станет обычным шагом истории); вне полей — отмена действия в проекте
+  const t=e.target, tag=t&&t.tagName;
+  if(t&&(t.isContentEditable||tag==='TEXTAREA'||(tag==='INPUT'&&!['checkbox','radio','range','button','file'].includes(t.type)))) return;
+  e.preventDefault(); historyUndo();
+});
 
 /* ---------- DRAG проёмов на большой схеме ---------- */
 (function(){
@@ -5768,7 +5844,76 @@ window.addEventListener('beforeprint',flushScene3D);
   let realisticCache=null, realisticDirty=true;
   function markDirty(){ diagramDirty=true; realisticDirty=true; }
 
+  // ---- подсказка «что делать сейчас» над фото — вместо длинного абзаца-инструкции: одна строка
+  // под текущее состояние разметки (какой шаг, какой угол следующий, что изменилось после
+  // «Наложить»). Пересчитывается на каждую перерисовку — дёшево, только текст
+  const stepEl=$('#viz-step'), noticeEl=$('#viz-notice');
+  const CORNER_HINTS=[
+    'левый верхний угол стены — где стена сходится с потолком слева',
+    'правый верхний угол — где стена сходится с потолком справа',
+    'правый нижний угол — стык стены с полом справа',
+    'левый нижний угол — стык стены с полом слева'];
+  const samePts=(a,b)=>!!a&&!!b&&a.length===b.length&&a.every((p,i)=>Math.abs(p.x-b[i].x)<0.5&&Math.abs(p.y-b[i].y)<0.5);
+  function setStep(tag,text){
+    if(!stepEl) return;
+    stepEl.querySelector('b').textContent=tag;
+    stepEl.querySelector('span').textContent=text;
+  }
+  function updateStep(){
+    if(noticeEl){
+      noticeEl.hidden=!vizNotice;
+      if(vizNotice){
+        noticeEl.className='note viz-notice '+vizNotice.cls;
+        noticeEl.querySelector('b').textContent=vizNotice.cls==='ok'?'Проект':'Внимание';
+        noticeEl.querySelector('span').textContent=vizNotice.text;
+      }
+    }
+    if(!photoImg){
+      setStep('Шаг 1 из 3',pendingViz
+        ?'Загрузите то же фото, что размечали в этом проекте (слева, «Фото стены/комнаты») — сохранённая разметка ляжет на него сама.'
+        :'Загрузите фото стены или комнаты — слева, в разделе «Визуализация на фото», поле «Фото стены/комнаты».');
+      return;
+    }
+    const key=targetSel.value;
+    const wallName=(walls[+wallSel.value]||{}).name||'стена';
+    const layer=appliedLayers.find(l=>l.wallId===currentWallId());
+    if(key==='exclude'){
+      const n=exclusionRects.length;
+      setStep('Зоны исключения',`Тяните прямоугольник поверх мебели, розеток, выключателей — там останется фото как есть. Клик по зоне удаляет её. Отмечено зон: ${n}. Применяется сразу, «Наложить» не нужно.`);
+      return;
+    }
+    const pts=pointsByTarget[key]||[];
+    const n=pts.length;
+    if(key==='wall'){
+      if(n<4){
+        setStep('Шаг 2 из 3',`«${wallName}», точка ${n+1} из 4: кликните ${CORNER_HINTS[n]}. `+
+          (n?'Поставленные точки можно перетаскивать.':'Лупа у курсора покажет место крупно — ставьте перекрестие ровно в угол.'));
+      } else if(!layer){
+        setStep('Шаг 3 из 3','Все 4 угла отмечены. Проверьте их лупой (точки перетаскиваются) и нажмите «Наложить раскладку».');
+      } else if(!samePts(layer.wallPts,pts)){
+        setStep('Шаг 3 из 3','Точки изменены — нажмите «Наложить раскладку», чтобы обновить стену на фото.');
+      } else {
+        setStep('Готово',`«${wallName}» на фото. Дальше по желанию: откосы и зоны исключения — список «Что размечаем сейчас»; другая стена — список «Стена»; результат — кнопки «Скачать…». Ошиблись — «↶ Отменить» или Ctrl+Z.`);
+      }
+      return;
+    }
+    // грань откоса: текстура однотонная, поэтому важен только обход по контуру, а не с какого угла
+    const label=(targetSel.selectedOptions[0]||{}).textContent||'Откос';
+    const wallReady=(pointsByTarget.wall||[]).length===4;
+    const applied=layer&&layer.otkos.find(o=>o.key===key);
+    if(n<4){
+      setStep('Откос',`${label}: точка ${n+1} из 4 — обходите грань откоса по контуру, по порядку, без перехлёста. Отмечать откосы необязательно.`);
+    } else if(!wallReady){
+      setStep('Откос',`${label} отмечен. Для наложения нужна и сама стена — выберите «Стена (контур)» и отметьте её 4 угла.`);
+    } else if(!applied||!samePts(applied.pts,pts)){
+      setStep('Откос',`${label} отмечен — нажмите «Наложить раскладку», откос ляжет вместе со стеной.`);
+    } else {
+      setStep('Готово',`${label} на фото. Можно отметить следующий откос или вернуться к списку целей.`);
+    }
+  }
+
   function redraw(){
+    updateStep();
     if(!photoImg) return;
     canvas.width=dispW; canvas.height=dispH;
     // фон превью: фото, а если уже есть применённые слои — поверх ТА ЖЕ «схема для нейросети»,
@@ -5820,6 +5965,24 @@ window.addEventListener('beforeprint',flushScene3D);
         ctx.fillStyle='#fff'; ctx.font='bold 11px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
         ctx.fillText(String(i+1),p.x,p.y+.5);
       });
+      // следующая точка — у курсора: номер и «резинка» от последней поставленной (а для 4-й — и
+      // к первой, замыкая контур), чтобы было видно, какой угол сейчас ждут и как ляжет сторона.
+      // Над уже стоящей точкой не показываем — там клик её перетащит, а не добавит новую
+      const overPt=loupePt&&active.some(p=>Math.hypot(p.x-loupePt.x,p.y-loupePt.y)<14);
+      if(loupePt&&active.length<4&&dragIdx<0&&!overPt){
+        if(active.length){
+          const last=active[active.length-1];
+          ctx.beginPath(); ctx.moveTo(last.x,last.y); ctx.lineTo(loupePt.x,loupePt.y);
+          if(active.length===3) ctx.lineTo(active[0].x,active[0].y);
+          ctx.setLineDash([3,4]); ctx.strokeStyle='rgba(255,176,32,.75)'; ctx.lineWidth=1.5; ctx.stroke(); ctx.setLineDash([]);
+        }
+        const bx=Math.min(dispW-12,loupePt.x+18), by=Math.min(dispH-12,loupePt.y+18);
+        ctx.beginPath(); ctx.arc(bx,by,9,0,Math.PI*2);
+        ctx.fillStyle='rgba(20,20,20,.75)'; ctx.fill();
+        ctx.lineWidth=1.5; ctx.strokeStyle='#ffb020'; ctx.stroke();
+        ctx.fillStyle='#ffb020'; ctx.font='bold 11px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText(String(active.length+1),bx,by+.5);
+      }
     }
     drawLoupe(diagram);
   }
@@ -5889,6 +6052,14 @@ window.addEventListener('beforeprint',flushScene3D);
     requestAnimationFrame(()=>{ redrawQueued=false; redraw(); });
   }
 
+  // «сеанс» фото: уникальная метка на каждую загрузку снимка. Отмена действия возвращает разметку
+  // только если снимок в истории сделан для ЭТОГО же фото — точки с прежнего фото на новом (даже
+  // того же размера) были бы бессмыслицей
+  let photoSeq=0, photoName='';
+  // разметка из открытого файла проекта, пока фото ещё не загружено: ляжет на фото, как только
+  // его загрузят (если пропорции совпадут), а до того не теряется при повторном сохранении проекта
+  let pendingViz=null;
+  let vizNotice=null;    // {cls:'ok'|'warn', text} — разовое сообщение над фото (восстановили/не подошло)
   let photoDataUrl=null; // исходные байты загруженного фото как есть (для «Скачать всё для нейросети» — отдаём то же самое, что загрузили, а не пере-кодированную копию)
   function loadPhoto(file){
     const reader=new FileReader();
@@ -5901,7 +6072,10 @@ window.addEventListener('beforeprint',flushScene3D);
         dispW=Math.max(1,Math.round(img.naturalWidth*dispScale));
         dispH=Math.max(1,Math.round(img.naturalHeight*dispScale));
         resetLayers();
-        redraw();
+        photoSeq=Date.now()+Math.random(); photoName=file.name||''; vizNotice=null;
+        if(pendingViz){ const m=pendingViz; pendingViz=null; importMarkup(m,true); }
+        else redraw();
+        historyCommit();
       };
       img.src=ev.target.result;
     };
@@ -5929,13 +6103,65 @@ window.addEventListener('beforeprint',flushScene3D);
     pointsByTarget.wall=layer.wallPts.map(p=>({x:p.x,y:p.y}));
     layer.otkos.forEach(o=>{ pointsByTarget[o.key]=o.pts.map(p=>({x:p.x,y:p.y})); });
   }
+
+  // ---- разметка фото в файле проекта и в истории отмены (см. snapshot/applySnapshot) ----
+  // Само фото в файл не пишем (мегабайты) — только разметку, в ДОЛЯХ ширины/высоты снимка: так
+  // она ляжет и на то же фото, пересохранённое в другом размере (например, сжатое мессенджером),
+  // лишь бы совпали пропорции
+  const toFrac=p=>({x:+(p.x/dispW).toFixed(5), y:+(p.y/dispH).toFixed(5)});
+  const fromFrac=p=>({x:Math.min(dispW,Math.max(0,p.x*dispW)), y:Math.min(dispH,Math.max(0,p.y*dispH))});
+  function exportMarkup(){
+    if(!photoImg) return pendingViz;
+    const byTarget={};
+    Object.entries(pointsByTarget).forEach(([k,a])=>{ if(a&&a.length) byTarget[k]=a.map(toFrac); });
+    return {v:1, photo:{w:photoImg.naturalWidth,h:photoImg.naturalHeight,name:photoName}, seq:photoSeq,
+      layers:appliedLayers.map(l=>({wallId:l.wallId,wallPts:l.wallPts.map(toFrac),
+        otkos:l.otkos.map(o=>({key:o.key,pts:o.pts.map(toFrac)}))})),
+      draft:{wallId:currentWallId(),byTarget},
+      exclusions:exclusionRects.map(r=>{ const a=toFrac({x:r.x0,y:r.y0}), b=toFrac({x:r.x1,y:r.y1}); return {x0:a.x,y0:a.y,x1:b.x,y1:b.y}; })};
+  }
+  // fromFile=true — открыли файл проекта (или загрузили фото к уже открытому проекту);
+  // false — отмена действия: разметку трогаем, только если снимок истории — для этого же фото
+  function importMarkup(m,fromFile){
+    if(m&&(typeof m!=='object'||!Array.isArray(m.layers))) m=null;   // повреждённое/чужое — как нет
+    if(!photoImg){ pendingViz=m; if(fromFile) vizNotice=null; redraw(); return; }
+    if(!fromFile&&(!m||m.seq!==photoSeq)) return;
+    pointsByTarget={}; exclusionRects=[]; appliedLayers=[];
+    diagramCache=null; realisticCache=null; markDirty();
+    vizNotice=null;
+    const iw=photoImg.naturalWidth, ih=photoImg.naturalHeight;
+    const fits=m&&m.photo&&m.photo.w>0&&m.photo.h>0&&Math.abs((m.photo.w/m.photo.h)/(iw/ih)-1)<0.01;
+    if(m&&!fits){
+      const nm=m.photo&&m.photo.name?`«${m.photo.name}», `:'';
+      vizNotice={cls:'warn',text:`Разметка в проекте сделана для другого фото (${nm}${m.photo?m.photo.w+'×'+m.photo.h:'?'}), а загружено ${iw}×${ih} — на это фото она не ляжет. Загрузите то же фото или отметьте углы заново.`};
+    } else if(m){
+      const ids=new Set(walls.map(w=>w.id));
+      appliedLayers=m.layers.filter(l=>ids.has(l.wallId)&&Array.isArray(l.wallPts)&&l.wallPts.length===4)
+        .map(l=>({wallId:l.wallId,wallPts:l.wallPts.map(fromFrac),
+          otkos:(l.otkos||[]).filter(o=>Array.isArray(o.pts)&&o.pts.length===4).map(o=>({key:o.key,pts:o.pts.map(fromFrac)}))}));
+      exclusionRects=(m.exclusions||[]).map(r=>{ const a=fromFrac({x:r.x0,y:r.y0}), b=fromFrac({x:r.x1,y:r.y1}); return {x0:a.x,y0:a.y,x1:b.x,y1:b.y}; });
+      const d=m.draft, wi=d?walls.findIndex(w=>w.id===d.wallId):-1;
+      if(wi>=0){ wallSel.value=String(wi); renderVizTargetSelect(); }
+      if(d&&wi>=0&&d.byTarget){
+        Object.entries(d.byTarget).forEach(([k,a])=>{ if(Array.isArray(a)&&a.length) pointsByTarget[k]=a.slice(0,4).map(fromFrac); });
+      } else loadLayerPoints();
+      if(fromFile&&(appliedLayers.length||exclusionRects.length||Object.keys(pointsByTarget).length))
+        vizNotice={cls:'ok',text:'Разметка фото восстановлена из файла проекта — проверьте точки и при необходимости поправьте.'};
+    }
+    setOutputsEnabled(appliedLayers.length>0);
+    if(appliedLayers.length) refreshJsonIfShown();
+    redraw();
+  }
+  vizBridge.exportMarkup=exportMarkup;
+  vizBridge.importMarkup=importMarkup;
+  updateStep();
   // смена стены — набор целей (откосов) полностью меняется, ключи прежней стены больше не имеют
   // смысла (тот же 'otkos:0:left' у другой стены — другой проём); уже применённые слои других
   // стен остаются — на одном фото можно оформить несколько стен (угол комнаты)
-  wallSel.addEventListener('change',()=>{ loadLayerPoints(); redraw(); });
+  wallSel.addEventListener('change',()=>{ renderVizTargetSelect(); loadLayerPoints(); redraw(); historyCommit(); });
   // смена текущей цели — просто перерисовать (сделать её точки активными/редактируемыми)
   targetSel.addEventListener('change',redraw);
-  btnResetAll.addEventListener('click',()=>{ resetLayers(); redraw(); });
+  btnResetAll.addEventListener('click',()=>{ resetLayers(); pendingViz=null; vizNotice=null; redraw(); historyCommit(); });
   function clearAiOutputs(){ jsonOutput.value=''; }
   // redraw() здесь дешёвый: тяжёлая часть (ensureDiagram) кэширована и не пересчитывается на
   // каждый тик слайдера — см. объявление diagramCache/diagramDirty
@@ -5957,7 +6183,7 @@ window.addEventListener('beforeprint',flushScene3D);
     if(targetSel.value==='exclude'){
       // клик ВНУТРИ уже отмеченной зоны — убрать её (тот же жест, без отдельной кнопки-урны)
       const hitIdx=exclusionRects.findIndex(r=>pt.x>=r.x0&&pt.x<=r.x1&&pt.y>=r.y0&&pt.y<=r.y1);
-      if(hitIdx>=0){ exclusionRects.splice(hitIdx,1); markDirty(); redraw(); return; }
+      if(hitIdx>=0){ exclusionRects.splice(hitIdx,1); markDirty(); redraw(); historyCommit(); return; }
       exclDraft={x0:pt.x,y0:pt.y,x1:pt.x,y1:pt.y};
       canvas.setPointerCapture(ev.pointerId);
       return;
@@ -5969,7 +6195,7 @@ window.addEventListener('beforeprint',flushScene3D);
         dragKey=key; dragIdx=i; canvas.setPointerCapture(ev.pointerId); return;
       }
     }
-    if(pts.length<4){ pts.push(pt); redraw(); }
+    if(pts.length<4){ pts.push(pt); vizNotice=null; redraw(); historyCommit(); }
   });
   canvas.addEventListener('pointermove',ev=>{
     if(!photoImg) return;
@@ -5989,12 +6215,16 @@ window.addEventListener('beforeprint',flushScene3D);
       const x0=Math.min(exclDraft.x0,exclDraft.x1), y0=Math.min(exclDraft.y0,exclDraft.y1);
       const x1=Math.max(exclDraft.x0,exclDraft.x1), y1=Math.max(exclDraft.y0,exclDraft.y1);
       exclDraft=null;
-      if(x1-x0>4&&y1-y0>4){ exclusionRects.push({x0,y0,x1,y1}); markDirty(); } // отсекаем случайный клик без реального перетаскивания
+      const added=x1-x0>4&&y1-y0>4;   // отсекаем случайный клик без реального перетаскивания
+      if(added){ exclusionRects.push({x0,y0,x1,y1}); markDirty(); }
       if(ev&&ev.pointerType==='touch') loupePt=null;
       redraw();
+      if(added) historyCommit();
       return;
     }
+    const dragged=dragIdx>=0;
     dragIdx=-1; dragKey=null;
+    if(dragged){ scheduleRedraw(); historyCommit(); }
     // палец убрали — «наведения» на тачскрине нет, лупу прячем; мышь остаётся над канвой — лупа тоже
     if(ev&&ev.pointerType==='touch'){ loupePt=null; scheduleRedraw(); }
   };
@@ -6005,6 +6235,7 @@ window.addEventListener('beforeprint',flushScene3D);
     if(targetSel.value==='exclude'){ exclusionRects=[]; markDirty(); }
     else delete pointsByTarget[targetSel.value];
     redraw();
+    historyCommit();
   });
 
   // ---- проверки на некорректный четырёхугольник — до того, как считать сам композит ----
@@ -6279,6 +6510,7 @@ window.addEventListener('beforeprint',flushScene3D);
       redraw();
       setOutputsEnabled(true);
       refreshJsonIfShown();
+      historyCommit();
     });
   });
   function ensureRealistic(){
@@ -6538,6 +6770,7 @@ window.addEventListener('beforeprint',flushScene3D);
     }).observe(canvas);
   } else previewVisible=true;
   document.addEventListener('raskroy:recomputed',()=>{
+    updateStep();   // имена стен/список откосов могли поменяться
     if(!appliedLayers.length) return;
     appliedLayers=appliedLayers.filter(l=>walls.some(w=>w.id===l.wallId));
     markDirty();
@@ -6665,6 +6898,7 @@ wallToForm();
 addOpening();
 renderWallCompass();
 run();
+historyCommit();   // стартовое состояние — точка, к которой можно вернуться отменой первой правки
 </script>
 </body>
 </html>
