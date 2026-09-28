@@ -149,6 +149,11 @@ tbody tr:hover td{background:var(--surface)}
 .viz-more summary{cursor:pointer;color:var(--alu);margin-top:6px}
 .viz-more summary:hover{color:var(--paper)}
 .viz-notice[hidden]{display:none}
+.viz-photos{margin:4px 0 6px}
+.viz-ph{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);padding:3px 0;border-bottom:1px solid var(--line)}
+.viz-ph span{flex:1;min-width:0;overflow-wrap:anywhere}
+.viz-ph.cur{color:var(--paper)}
+.viz-ph .btn-mini{padding:2px 7px}
 /* печатная замена живого 3D-канваса — статичный PNG-снимок с собственным (изометрическим) ракурсом
    камеры, отрисованный отдельно от интерактивного вида (см. renderScene3DSnapshot): WebGL-канвас
    не переживает печать, а слепок «как на экране» зависел бы от того, куда пользователь довернул
@@ -370,9 +375,13 @@ tbody tr:hover td{background:var(--surface)}
     <div class="sect-b">
       <div class="row row-1"><div class="f"><label>Стена</label><select id="viz-wall"></select></div></div>
       <div class="row row-1"><div class="f"><label>Фото стены/комнаты</label><input type="file" id="viz-photo" accept="image/*"></div></div>
+      <div id="viz-photos" class="viz-photos"></div>
       <div class="row row-1"><div class="f"><label>Что размечаем сейчас</label><select id="viz-target"></select></div></div>
       <div class="row row-1"><div class="f"><label class="chk"><input type="checkbox" id="viz-loupe" checked> Лупа при разметке</label></div></div>
-      <p class="hint">Что делать на каждом шаге — подсказка прямо над фото.</p>
+      <div class="row row-1"><div class="f"><label class="chk"><input type="checkbox" id="viz-margin"> Углы за краем фото (серое поле вокруг снимка)</label></div></div>
+      <p class="hint">Что делать на каждом шаге — подсказка прямо над фото. Стена не влезла в кадр
+        целиком — включите «Углы за краем фото» и поставьте невидимый угол в поле вокруг снимка, по
+        продолжению линий стены.</p>
       <details class="hint viz-more"><summary>Подробнее о разметке</summary>
       <p class="hint">Отметьте на фото 4 угла текущей цели кликами по порядку (в один обход, без
         перехлёста сторон) — она ляжет на фото с учётом перспективы и освещения. Точки можно
@@ -386,14 +395,17 @@ tbody tr:hover td{background:var(--surface)}
         «Зоны исключения» — тянуть прямоугольником поверх мебели/розеток/выключателей на фото,
         чтобы туда ничего не легло (эти места останутся как на фото); клик по уже отмеченной зоне
         удаляет её. Разметка (точки, откосы, зоны) сохраняется вместе с проектом — само фото нет:
-        откройте проект и загрузите то же фото, разметка ляжет на место. Ошиблись — «↶ Отменить»
+        откройте проект и загрузите то же фото, разметка ляжет на место. Фото в проекте может быть
+        несколько (комнату снимают с разных точек) — у каждого своя разметка, фото узнаётся по имени
+        файла; переименованное (например, после мессенджера) сопоставьте кнопкой «Применить» в
+        списке «Фото проекта». Ошиблись — «↶ Отменить»
         вверху или Ctrl+Z. Работает целиком в браузере, без отправки фото куда-либо.</p>
       </details>
       <div class="viz-actions">
         <button type="button" class="btn btn-mini" id="viz-reset">Сбросить точки цели</button>
         <button type="button" class="btn btn-key" id="viz-apply">Наложить раскладку</button>
         <button type="button" class="btn btn-mini" id="viz-download" disabled>Скачать PNG</button>
-        <button type="button" class="btn btn-mini btn-del" id="viz-reset-all">Сбросить всё, начать заново</button>
+        <button type="button" class="btn btn-mini btn-del" id="viz-reset-all">Сбросить разметку этого фото</button>
       </div>
       <label class="sub-l" style="margin-top:18px">Для генерации в нейросети</label>
       <p class="hint">Вместо готового (плоского) рендера — полупрозрачная схема поверх исходного
@@ -5819,10 +5831,25 @@ document.addEventListener('keydown',e=>{
   const opacityInp=$('#viz-guide-opacity'), opacityVal=$('#viz-guide-opacity-val');
   const btnGuideDownload=$('#viz-guide-download'), btnJsonCopy=$('#viz-json-copy'), jsonOutput=$('#viz-json-output');
   const btnDownloadAll=$('#viz-guide-download-all'), includeIsoChk=$('#viz-guide-include-iso');
-  const loupeChk=$('#viz-loupe');
+  const loupeChk=$('#viz-loupe'), marginChk=$('#viz-margin');
   const MAXW=900, MAXH=620;         // размер интерактивного превью (сама подгонка точек)
   let photoImg=null;                // Image в полном разрешении оригинала — неизменный эталон
   let dispScale=1, dispW=0, dispH=0;// коэффициент полное->превью и размер превью
+  // ---- поле «за кадром»: стена часто не влезает в снимок целиком (ближний край за краем кадра),
+  // а угол, которого нет на фото, иначе не поставить — точка упиралась в край. Включается галочкой:
+  // канва расширяется на поле со всех сторон, фото рисуется со сдвигом на ширину поля. Координаты
+  // точек при этом НЕ меняются (всё так же от левого верхнего угла фото, просто могут быть <0 или
+  // >dispW/dispH) — поэтому уже сохранённая разметка, варп, схема и JSON работают как раньше, а
+  // выключенное поле даёт ровно прежнюю картинку. Варп сам обрезает результат по границам фото
+  let marginOn=false;
+  const marginFull=()=>Math.round(0.15*Math.max(dispW,dispH));   // ширина поля, px превью
+  const frameM=()=>marginOn?marginFull():0;
+  const isOutside=p=>p.x<0||p.y<0||p.x>dispW||p.y>dispH;
+  function anyPointOutside(){
+    const lists=Object.values(pointsByTarget)
+      .concat(appliedLayers.flatMap(l=>[l.wallPts].concat(l.otkos.map(o=>o.pts))));
+    return lists.some(a=>a&&a.some(isOutside));
+  }
   // точки в системе координат ПРЕВЬЮ (0..dispW,0..dispH), СВОИ на каждую цель разметки (стена
   // и по желанию — каждая видимая грань откоса, см. renderVizTargetSelect/wallOtkosTargets):
   // {[targetKey]: [{x,y}, ...до 4]}
@@ -5878,13 +5905,15 @@ document.addEventListener('keydown',e=>{
       noticeEl.hidden=!vizNotice;
       if(vizNotice){
         noticeEl.className='note viz-notice '+vizNotice.cls;
-        noticeEl.querySelector('b').textContent=vizNotice.cls==='ok'?'Проект':'Внимание';
+        noticeEl.querySelector('b').textContent=vizNotice.cls==='ok'?'Проект':vizNotice.cls==='info'?'Фото':'Внимание';
         noticeEl.querySelector('span').textContent=vizNotice.text;
       }
     }
+    renderPhotoList();
     if(!photoImg){
-      setStep('Шаг 1 из 3',pendingViz
-        ?'Загрузите то же фото, что размечали в этом проекте (слева, «Фото стены/комнаты») — сохранённая разметка ляжет на него сама.'
+      const names=photoLib.filter(recordHasMarkup).map(r=>`«${r.photo.name||'без имени'}»`);
+      setStep('Шаг 1 из 3',names.length
+        ?`Загрузите одно из размеченных фото проекта (${names.join(', ')}) — слева, «Фото стены/комнаты»; его разметка ляжет сама. Или новое фото — разметить с нуля.`
         :'Загрузите фото стены или комнаты — слева, в разделе «Визуализация на фото», поле «Фото стены/комнаты».');
       return;
     }
@@ -5901,7 +5930,8 @@ document.addEventListener('keydown',e=>{
     if(key==='wall'){
       if(n<4){
         setStep('Шаг 2 из 3',`«${wallName}», точка ${n+1} из 4: кликните ${CORNER_HINTS[n]}. `+
-          (n?'Поставленные точки можно перетаскивать.':'Лупа у курсора покажет место крупно — ставьте перекрестие ровно в угол.'));
+          (n?'Поставленные точки можно перетаскивать.':'Лупа у курсора покажет место крупно — ставьте перекрестие ровно в угол.')+
+          (marginOn?' Угла не видно на фото — ставьте его в серое поле, по продолжению линий стены.':''));
       } else if(!layer){
         setStep('Шаг 3 из 3','Все 4 угла отмечены. Проверьте их лупой (точки перетаскиваются) и нажмите «Наложить раскладку».');
       } else if(!samePts(layer.wallPts,pts)){
@@ -5929,7 +5959,20 @@ document.addEventListener('keydown',e=>{
   function redraw(){
     updateStep();
     if(!photoImg) return;
-    canvas.width=dispW; canvas.height=dispH;
+    const M=frameM();
+    canvas.width=dispW+2*M; canvas.height=dispH+2*M;
+    if(M){
+      // поле за кадром: тёмная штриховка, граница фото пунктиром и подпись — чтобы было видно, где
+      // кончается снимок и что сюда можно ставить угол
+      ctx.fillStyle='#26282b'; ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.strokeStyle='rgba(255,255,255,.06)'; ctx.lineWidth=1; ctx.beginPath();
+      for(let d=-canvas.height;d<canvas.width;d+=14){ ctx.moveTo(d,0); ctx.lineTo(d+canvas.height,canvas.height); }
+      ctx.stroke();
+      ctx.fillStyle='rgba(255,255,255,.45)'; ctx.font='11px sans-serif'; ctx.textAlign='left'; ctx.textBaseline='top';
+      ctx.fillText('за кадром — сюда можно поставить угол, которого не видно на фото',8,6);
+    }
+    ctx.save();
+    ctx.translate(M,M);
     // фон превью: фото, а если уже есть применённые слои — поверх ТА ЖЕ «схема для нейросети»,
     // что скачивает «Скачать схему», с ТЕМ ЖЕ процентом прозрачности (ползунок работает вживую)
     ctx.drawImage(photoImg,0,0,dispW,dispH);
@@ -5990,7 +6033,7 @@ document.addEventListener('keydown',e=>{
           if(active.length===3) ctx.lineTo(active[0].x,active[0].y);
           ctx.setLineDash([3,4]); ctx.strokeStyle='rgba(255,176,32,.75)'; ctx.lineWidth=1.5; ctx.stroke(); ctx.setLineDash([]);
         }
-        const bx=Math.min(dispW-12,loupePt.x+18), by=Math.min(dispH-12,loupePt.y+18);
+        const bx=Math.min(dispW+frameM()-12,loupePt.x+18), by=Math.min(dispH+frameM()-12,loupePt.y+18);
         ctx.beginPath(); ctx.arc(bx,by,9,0,Math.PI*2);
         ctx.fillStyle='rgba(20,20,20,.75)'; ctx.fill();
         ctx.lineWidth=1.5; ctx.strokeStyle='#ffb020'; ctx.stroke();
@@ -5999,6 +6042,8 @@ document.addEventListener('keydown',e=>{
       }
     }
     drawLoupe(diagram);
+    if(M){ ctx.setLineDash([5,4]); ctx.strokeStyle='rgba(255,255,255,.55)'; ctx.lineWidth=1; ctx.strokeRect(-.5,-.5,dispW+1,dispH+1); ctx.setLineDash([]); }
+    ctx.restore();
   }
 
   // ---- лупа у курсора: главная ошибка ручной разметки — угол, кликнутый на 5–10 пикселей мимо
@@ -6011,11 +6056,11 @@ document.addEventListener('keydown',e=>{
   let loupePt=null;
   function drawLoupe(diagram){
     if(!loupePt||!photoImg||!loupeChk||!loupeChk.checked) return;
-    const R=LOUPE_R, gap=26;
+    const R=LOUPE_R, gap=26, M=frameM();   // координаты — от угла фото; канва шире на поле M
     let lx=loupePt.x-R-gap, ly=loupePt.y-R-gap;
-    if(lx-R<0) lx=loupePt.x+R+gap;
-    if(ly-R<0) ly=loupePt.y+R+gap;
-    lx=Math.min(dispW-R-2,Math.max(R+2,lx)); ly=Math.min(dispH-R-2,Math.max(R+2,ly));
+    if(lx-R<-M) lx=loupePt.x+R+gap;
+    if(ly-R<-M) ly=loupePt.y+R+gap;
+    lx=Math.min(dispW+M-R-2,Math.max(R+2-M,lx)); ly=Math.min(dispH+M-R-2,Math.max(R+2-M,ly));
     const half=R/LOUPE_ZOOM/dispScale;           // полуразмер области в пикселях полного фото
     const sx=loupePt.x/dispScale-half, sy=loupePt.y/dispScale-half;
     // превью-координаты → координаты внутри лупы
@@ -6070,16 +6115,20 @@ document.addEventListener('keydown',e=>{
   // только если снимок в истории сделан для ЭТОГО же фото — точки с прежнего фото на новом (даже
   // того же размера) были бы бессмыслицей
   let photoSeq=0, photoName='';
-  // разметка из открытого файла проекта, пока фото ещё не загружено: ляжет на фото, как только
-  // его загрузят (если пропорции совпадут), а до того не теряется при повторном сохранении проекта
-  let pendingViz=null;
-  let vizNotice=null;    // {cls:'ok'|'warn', text} — разовое сообщение над фото (восстановили/не подошло)
+  // ---- несколько фото в одном проекте: комнату обычно снимают с 2-3 точек, по снимку на пару
+  // стен. Загружено всегда одно фото (его разметка — «живая»: pointsByTarget, appliedLayers…),
+  // а разметка остальных фото проекта лежит здесь записями того же вида, что пишутся в файл:
+  // {photo:{w,h,name}, seq, layers, draft, exclusions, opacity, margin}. Загрузили другое фото —
+  // разметка прежнего уходит сюда, а разметка нового (если она есть в проекте) достаётся отсюда
+  let photoLib=[];
+  let vizNotice=null;    // {cls:'ok'|'info'|'warn', text} — разовое сообщение над фото (восстановили/не нашли)
   let photoDataUrl=null; // исходные байты загруженного фото как есть (для «Скачать всё для нейросети» — отдаём то же самое, что загрузили, а не пере-кодированную копию)
   function loadPhoto(file){
     const reader=new FileReader();
     reader.onload=ev=>{
       const img=new Image();
       img.onload=()=>{
+        stashLive();   // разметка прежнего фото — в список фото проекта (ДО смены размеров превью)
         photoImg=img;
         photoDataUrl=ev.target.result;
         dispScale=Math.min(1,MAXW/img.naturalWidth,MAXH/img.naturalHeight);
@@ -6087,8 +6136,8 @@ document.addEventListener('keydown',e=>{
         dispH=Math.max(1,Math.round(img.naturalHeight*dispScale));
         resetLayers();
         photoSeq=Date.now()+Math.random(); photoName=file.name||''; vizNotice=null;
-        if(pendingViz){ const m=pendingViz; pendingViz=null; importMarkup(m,true); }
-        else redraw();
+        setMargin(false);
+        matchLoadedPhoto();
         historyCommit();
       };
       img.src=ev.target.result;
@@ -6123,51 +6172,145 @@ document.addEventListener('keydown',e=>{
   // она ляжет и на то же фото, пересохранённое в другом размере (например, сжатое мессенджером),
   // лишь бы совпали пропорции
   const toFrac=p=>({x:+(p.x/dispW).toFixed(5), y:+(p.y/dispH).toFixed(5)});
-  const fromFrac=p=>({x:Math.min(dispW,Math.max(0,p.x*dispW)), y:Math.min(dispH,Math.max(0,p.y*dispH))});
-  function exportMarkup(){
-    if(!photoImg) return pendingViz;
+  const fromFrac=p=>{ const M=marginFull(); return {x:Math.min(dispW+M,Math.max(-M,p.x*dispW)), y:Math.min(dispH+M,Math.max(-M,p.y*dispH))}; };
+  const recordHasMarkup=r=>!!r&&((r.layers||[]).length>0||(r.exclusions||[]).length>0||
+    Object.keys((r.draft&&r.draft.byTarget)||{}).length>0);
+  // запись — о загруженном сейчас фото (то же имя и размер): её место — живая разметка, не список
+  const isLoadedPhoto=r=>!!photoImg&&r.photo.name===photoName&&r.photo.w===photoImg.naturalWidth&&r.photo.h===photoImg.naturalHeight;
+  const sameIdentity=(a,b)=>!!a&&!!b&&a.photo.name===b.photo.name&&a.photo.w===b.photo.w&&a.photo.h===b.photo.h;
+  const fitsPhoto=r=>!!photoImg&&r.photo&&r.photo.w>0&&r.photo.h>0&&
+    Math.abs((r.photo.w/r.photo.h)/(photoImg.naturalWidth/photoImg.naturalHeight)-1)<0.01;
+  // разметка загруженного сейчас фото — запись того же вида, что и в списке/файле
+  function liveRecord(){
+    if(!photoImg) return null;
     const byTarget={};
     Object.entries(pointsByTarget).forEach(([k,a])=>{ if(a&&a.length) byTarget[k]=a.map(toFrac); });
-    return {v:1, photo:{w:photoImg.naturalWidth,h:photoImg.naturalHeight,name:photoName}, seq:photoSeq,
+    return {photo:{w:photoImg.naturalWidth,h:photoImg.naturalHeight,name:photoName}, seq:photoSeq,
       layers:appliedLayers.map(l=>({wallId:l.wallId,wallPts:l.wallPts.map(toFrac),
         otkos:l.otkos.map(o=>({key:o.key,pts:o.pts.map(toFrac)}))})),
-      draft:{wallId:currentWallId(),byTarget}, opacity:+opacityInp.value,
+      draft:{wallId:currentWallId(),byTarget}, opacity:+opacityInp.value, margin:marginOn,
       exclusions:exclusionRects.map(r=>{ const a=toFrac({x:r.x0,y:r.y0}), b=toFrac({x:r.x1,y:r.y1}); return {x0:a.x,y0:a.y,x1:b.x,y1:b.y}; })};
   }
-  // fromFile=true — открыли файл проекта (или загрузили фото к уже открытому проекту);
-  // false — отмена действия: разметку трогаем, только если снимок истории — для этого же фото
-  function importMarkup(m,fromFile){
-    if(m&&(typeof m!=='object'||!Array.isArray(m.layers))) m=null;   // повреждённое/чужое — как нет
-    if(!photoImg){ pendingViz=m; if(fromFile) vizNotice=null; redraw(); return; }
-    if(!fromFile&&(!m||m.seq!==photoSeq)) return;
+  function stashLive(){
+    const r=liveRecord(); if(!r) return;
+    photoLib=photoLib.filter(x=>!sameIdentity(x,r));
+    if(recordHasMarkup(r)) photoLib.push(r);
+  }
+  // в файл/историю: загруженное фото (всегда — даже пустое, чтобы отмена могла вернуть его к
+  // пустой разметке) + разметка остальных фото проекта. Устаревшую запись того же фото из списка
+  // не дублируем
+  function exportMarkup(){
+    const live=liveRecord();
+    const others=photoLib.filter(r=>!sameIdentity(r,live));
+    return {v:2, photos:live?[live].concat(others):others};
+  }
+  // формат v1 (одно фото, до этой версии) — одна запись без обёртки
+  function recordsOf(m){
+    if(!m||typeof m!=='object') return [];
+    const list=Array.isArray(m.photos)?m.photos:(Array.isArray(m.layers)?[m]:[]);
+    return list.filter(r=>r&&typeof r==='object'&&r.photo&&Array.isArray(r.layers));
+  }
+  // запись → живая разметка загруженного фото (пропорции уже проверены вызывающей стороной)
+  function applyRecord(r,fromFile){
     pointsByTarget={}; exclusionRects=[]; appliedLayers=[];
     diagramCache=null; realisticCache=null; markDirty();
-    vizNotice=null;
-    const iw=photoImg.naturalWidth, ih=photoImg.naturalHeight;
-    const fits=m&&m.photo&&m.photo.w>0&&m.photo.h>0&&Math.abs((m.photo.w/m.photo.h)/(iw/ih)-1)<0.01;
-    if(m&&!fits){
-      const nm=m.photo&&m.photo.name?`«${m.photo.name}», `:'';
-      vizNotice={cls:'warn',text:`Разметка в проекте сделана для другого фото (${nm}${m.photo?m.photo.w+'×'+m.photo.h:'?'}), а загружено ${iw}×${ih} — на это фото она не ляжет. Загрузите то же фото или отметьте углы заново.`};
-    } else if(m){
-      const ids=new Set(walls.map(w=>w.id));
-      appliedLayers=m.layers.filter(l=>ids.has(l.wallId)&&Array.isArray(l.wallPts)&&l.wallPts.length===4)
-        .map(l=>({wallId:l.wallId,wallPts:l.wallPts.map(fromFrac),
-          otkos:(l.otkos||[]).filter(o=>Array.isArray(o.pts)&&o.pts.length===4).map(o=>({key:o.key,pts:o.pts.map(fromFrac)}))}));
-      // % схемы — только при открытии файла: при отмене действия ползунок не «прыгает» назад
-      if(fromFile&&m.opacity>=+opacityInp.min&&m.opacity<=+opacityInp.max){ opacityInp.value=m.opacity; opacityVal.textContent=m.opacity+'%'; }
-      exclusionRects=(m.exclusions||[]).map(r=>{ const a=fromFrac({x:r.x0,y:r.y0}), b=fromFrac({x:r.x1,y:r.y1}); return {x0:a.x,y0:a.y,x1:b.x,y1:b.y}; });
-      const d=m.draft, wi=d?walls.findIndex(w=>w.id===d.wallId):-1;
-      if(wi>=0){ wallSel.value=String(wi); renderVizTargetSelect(); }
-      if(d&&wi>=0&&d.byTarget){
-        Object.entries(d.byTarget).forEach(([k,a])=>{ if(Array.isArray(a)&&a.length) pointsByTarget[k]=a.slice(0,4).map(fromFrac); });
-      } else loadLayerPoints();
-      if(fromFile&&(appliedLayers.length||exclusionRects.length||Object.keys(pointsByTarget).length))
-        vizNotice={cls:'ok',text:'Разметка фото восстановлена из файла проекта — проверьте точки и при необходимости поправьте.'};
-    }
+    const ids=new Set(walls.map(w=>w.id));
+    appliedLayers=r.layers.filter(l=>ids.has(l.wallId)&&Array.isArray(l.wallPts)&&l.wallPts.length===4)
+      .map(l=>({wallId:l.wallId,wallPts:l.wallPts.map(fromFrac),
+        otkos:(l.otkos||[]).filter(o=>Array.isArray(o.pts)&&o.pts.length===4).map(o=>({key:o.key,pts:o.pts.map(fromFrac)}))}));
+    // % схемы — только при открытии файла/подстановке фото: при отмене действия ползунок не «прыгает»
+    if(fromFile&&r.opacity>=+opacityInp.min&&r.opacity<=+opacityInp.max){ opacityInp.value=r.opacity; opacityVal.textContent=r.opacity+'%'; }
+    exclusionRects=(r.exclusions||[]).map(z=>{ const a=fromFrac({x:z.x0,y:z.y0}), b=fromFrac({x:z.x1,y:z.y1}); return {x0:a.x,y0:a.y,x1:b.x,y1:b.y}; });
+    const d=r.draft, wi=d?walls.findIndex(w=>w.id===d.wallId):-1;
+    if(wi>=0){ wallSel.value=String(wi); renderVizTargetSelect(); }
+    if(d&&wi>=0&&d.byTarget){
+      Object.entries(d.byTarget).forEach(([k,a])=>{ if(Array.isArray(a)&&a.length) pointsByTarget[k]=a.slice(0,4).map(fromFrac); });
+    } else loadLayerPoints();
+    // поле за кадром — как было при разметке; и в любом случае, если точки стоят за краем фото
+    setMargin(!!r.margin||anyPointOutside());
     setOutputsEnabled(appliedLayers.length>0);
     if(appliedLayers.length) refreshJsonIfShown();
+  }
+  // только что загруженное фото (или открыт проект при загруженном фото): ищем его разметку в
+  // проекте. Узнаём ТОЛЬКО по имени файла: у фото с одного телефона пропорции почти всегда
+  // одинаковые (4:3), и подстановка «по пропорциям» положила бы разметку одной стены на снимок
+  // совсем другой. Переименованное фото (мессенджер) пользователь сопоставляет сам — «Применить»
+  function matchLoadedPhoto(){
+    vizNotice=null;
+    const idx=photoLib.findIndex(r=>r.photo.name&&r.photo.name===photoName);
+    const others=()=>photoLib.filter(recordHasMarkup).map(r=>`«${r.photo.name||'без имени'}»`).join(', ');
+    if(idx>=0&&fitsPhoto(photoLib[idx])){
+      const r=photoLib.splice(idx,1)[0];
+      applyRecord(r,true);
+      if(recordHasMarkup(r)) vizNotice={cls:'ok',text:'Разметка этого фото восстановлена из проекта — проверьте точки и при необходимости поправьте.'};
+    } else if(idx>=0){
+      const r=photoLib[idx];
+      vizNotice={cls:'warn',text:`В проекте есть разметка для фото с тем же именем «${photoName}», но других пропорций (${r.photo.w}×${r.photo.h}, а загружено ${photoImg.naturalWidth}×${photoImg.naturalHeight}) — на это фото она не ляжет. Похоже, снимок обрезали; загрузите исходный или разметьте заново.`};
+    } else if(photoLib.some(recordHasMarkup)){
+      vizNotice={cls:'info',text:`Это фото в проекте ещё не размечено — размечайте с нуля. Разметка других фото проекта сохранена (${others()}). Если это одно из них, только переименованное (например, после мессенджера), — нажмите «Применить» у него в списке «Фото проекта» слева.`};
+    }
     redraw();
   }
+  // fromFile=true — открыли файл проекта: список фото — из файла, загруженное фото ищем в нём.
+  // false — отмена действия: список фото — как в снимке; живую разметку трогаем, только если в
+  // снимке есть запись именно этого сеанса фото (иначе снимок сделан до его загрузки)
+  function importMarkup(m,fromFile){
+    const recs=recordsOf(m);
+    if(!fromFile){
+      const liveRec=photoImg?recs.find(r=>r.seq===photoSeq):null;
+      // снимок мог быть сделан до загрузки этого фото — тогда его старая запись (если фото уже
+      // размечали раньше) лежит в списке; актуальна живая разметка, дубль в список не берём
+      photoLib=recs.filter(r=>r!==liveRec&&!isLoadedPhoto(r));
+      if(liveRec&&fitsPhoto(liveRec)) applyRecord(liveRec,false);
+      redraw();
+      return;
+    }
+    photoLib=recs; vizNotice=null;
+    if(!photoImg){ redraw(); return; }
+    // другой проект — разметка загруженного фото от прежнего проекта к нему отношения не имеет
+    resetLayers();
+    setMargin(false);
+    matchLoadedPhoto();
+  }
+  // список «Фото проекта» в левой панели: какие ещё фото размечены, подставить разметку к
+  // загруженному (переименованное фото), удалить ненужную. Перерисовываем только при изменении
+  const photosEl=$('#viz-photos');
+  let photosHtml='';
+  function renderPhotoList(){
+    if(!photosEl) return;
+    const desc=r=>{
+      const n=(r.layers||[]).length, z=(r.exclusions||[]).length;
+      return (n?`стен: ${n}`:'разметка начата')+(z?`, зон: ${z}`:'');
+    };
+    const rows=[];
+    if(photoImg&&photoLib.length){
+      const live=liveRecord();
+      rows.push(`<div class="viz-ph cur"><span>● ${esc(photoName||'без имени')} · ${live.photo.w}×${live.photo.h} · ${recordHasMarkup(live)?desc(live):'не размечено'} — <b>загружено</b></span></div>`);
+    }
+    photoLib.forEach((r,i)=>{
+      const canApply=photoImg&&fitsPhoto(r);
+      rows.push(`<div class="viz-ph"><span>${esc(r.photo.name||'без имени')} · ${r.photo.w}×${r.photo.h} · ${desc(r)}</span>`+
+        `<button type="button" class="btn btn-mini" data-ph-apply="${i}"${canApply?'':' disabled'} title="${canApply
+          ?'Положить эту разметку на загруженное фото (если это то же фото, только переименованное)'
+          :photoImg?'Пропорции не совпадают с загруженным фото':'Сначала загрузите фото'}">Применить</button>`+
+        `<button type="button" class="btn btn-mini btn-del" data-ph-del="${i}" title="Удалить разметку этого фото из проекта">×</button></div>`);
+    });
+    const html=rows.length?`<label class="sub-l">Фото проекта</label>${rows.join('')}`:'';
+    if(html!==photosHtml){ photosHtml=html; photosEl.innerHTML=html; }
+  }
+  if(photosEl) photosEl.addEventListener('click',ev=>{
+    const btn=ev.target.closest('button'); if(!btn) return;
+    if(btn.dataset.phDel!=null){
+      photoLib.splice(+btn.dataset.phDel,1);
+      redraw(); historyCommit();
+    } else if(btn.dataset.phApply!=null){
+      const r=photoLib[+btn.dataset.phApply]; if(!r||!fitsPhoto(r)) return;
+      photoLib.splice(+btn.dataset.phApply,1);
+      applyRecord(r,true);
+      vizNotice={cls:'ok',text:`Разметка фото «${r.photo.name||'без имени'}» положена на загруженное фото — проверьте точки.`};
+      redraw(); historyCommit();
+    }
+  });
   vizBridge.exportMarkup=exportMarkup;
   vizBridge.importMarkup=importMarkup;
   updateStep();
@@ -6177,7 +6320,8 @@ document.addEventListener('keydown',e=>{
   wallSel.addEventListener('change',()=>{ renderVizTargetSelect(); loadLayerPoints(); redraw(); historyCommit(); });
   // смена текущей цели — просто перерисовать (сделать её точки активными/редактируемыми)
   targetSel.addEventListener('change',redraw);
-  btnResetAll.addEventListener('click',()=>{ resetLayers(); pendingViz=null; vizNotice=null; redraw(); historyCommit(); });
+  // только разметка ЗАГРУЖЕННОГО фото — разметка других фото проекта остаётся (её удаляют в списке)
+  btnResetAll.addEventListener('click',()=>{ resetLayers(); vizNotice=null; redraw(); historyCommit(); });
   function clearAiOutputs(){ jsonOutput.value=''; }
   // redraw() здесь дешёвый: тяжёлая часть (ensureDiagram) кэширована и не пересчитывается на
   // каждый тик слайдера — см. объявление diagramCache/diagramDirty
@@ -6189,8 +6333,9 @@ document.addEventListener('keydown',e=>{
     // зажимаем в границы канвы — иначе точку, утянутую пальцем/мышью за край во время
     // перетаскивания (setPointerCapture позволяет двигать курсор куда угодно), не видно
     // на экране, хотя логически она продолжает существовать где-то за пределами фото
-    const x=(ev.clientX-r.left)*sx, y=(ev.clientY-r.top)*sy;
-    return {x:Math.min(dispW,Math.max(0,x)), y:Math.min(dispH,Math.max(0,y))};
+    const M=frameM();
+    const x=(ev.clientX-r.left)*sx-M, y=(ev.clientY-r.top)*sy-M;
+    return {x:Math.min(dispW+M,Math.max(-M,x)), y:Math.min(dispH+M,Math.max(-M,y))};
   }
   canvas.addEventListener('pointerdown',ev=>{
     if(!photoImg) return;
@@ -6230,10 +6375,21 @@ document.addEventListener('keydown',e=>{
     loupePt=null; scheduleRedraw();
   });
   loupeChk.addEventListener('change',()=>scheduleRedraw());
+  function setMargin(on){ marginOn=!!on; marginChk.checked=marginOn; }
+  marginChk.addEventListener('change',()=>{
+    // точки за краем фото без поля не видно и не достать — убрать поле можно, только когда их нет
+    if(!marginChk.checked&&photoImg&&anyPointOutside()){
+      marginChk.checked=true;
+      alert('Часть точек стоит за краем фото — пока они там, поле не убрать. Перетащите их на фото или сбросьте точки цели.');
+      return;
+    }
+    marginOn=marginChk.checked; loupePt=null; redraw(); historyCommit();
+  });
   const endDrag=ev=>{
     if(exclDraft){
-      const x0=Math.min(exclDraft.x0,exclDraft.x1), y0=Math.min(exclDraft.y0,exclDraft.y1);
-      const x1=Math.max(exclDraft.x0,exclDraft.x1), y1=Math.max(exclDraft.y0,exclDraft.y1);
+      // зона исключения имеет смысл только на самом фото — часть, вытянутую в поле за кадром, обрезаем
+      const x0=Math.max(0,Math.min(exclDraft.x0,exclDraft.x1)), y0=Math.max(0,Math.min(exclDraft.y0,exclDraft.y1));
+      const x1=Math.min(dispW,Math.max(exclDraft.x0,exclDraft.x1)), y1=Math.min(dispH,Math.max(exclDraft.y0,exclDraft.y1));
       exclDraft=null;
       const added=x1-x0>4&&y1-y0>4;   // отсекаем случайный клик без реального перетаскивания
       if(added){ exclusionRects.push({x0,y0,x1,y1}); markDirty(); }
@@ -6531,6 +6687,7 @@ document.addEventListener('keydown',e=>{
     }
     withBusy(btnApply,()=>{
       if(!applyLayer()){ alert('Не получилось наложить раскладку — проверьте выбранную стену и точки.'); return; }
+      if(vizNotice&&vizNotice.cls==='info') vizNotice=null;   // «фото ещё не размечено» — уже неправда
       redraw();
       setOutputsEnabled(true);
       refreshJsonIfShown();
@@ -6621,6 +6778,12 @@ document.addEventListener('keydown',e=>{
         if(!(opIdx in opLabelByIdx)) opLabelByIdx[opIdx]=t.label.split(' — ')[0];
       });
       const openingsWithoutMarkedReveal=Object.keys(opLabelByIdx).filter(idx=>!markedOps.has(idx)).map(idx=>opLabelByIdx[idx]);
+      // угол(ы) стены поставлены в поле за кадром — на фото видна не вся стена. Без оговорки
+      // генератор, получив размеры и стыки ВСЕЙ стены, норовит «уместить» её целиком — сжать
+      // раскладку или раздвинуть кадр
+      const wp=layer.wallPts, beyond=[];
+      if(wp.some(p=>p.x<0)) beyond.push('слева'); if(wp.some(p=>p.x>dispW)) beyond.push('справа');
+      if(wp.some(p=>p.y<0)) beyond.push('сверху'); if(wp.some(p=>p.y>dispH)) beyond.push('снизу');
       const seams=uniq(m.seams.map(sg=>({
         position:sg.el==='edge'?edgeSideRu[sg.side]:`${seamKindRu(sg)} ${linePos(sg)}`,
         type:seamTypeRu[sg.mode]||sg.mode
@@ -6651,7 +6814,10 @@ document.addEventListener('keydown',e=>{
           material_color_hex:(o.matId&&m.hexOf(o.matId))||m.color,
           material_name:o.matId?(PRESETS.find(p=>p.id===o.matId)||{}).name||o.matId:m.matName
         })),
-        openings_without_marked_reveal:openingsWithoutMarkedReveal.length?openingsWithoutMarkedReveal:undefined
+        openings_without_marked_reveal:openingsWithoutMarkedReveal.length?openingsWithoutMarkedReveal:undefined,
+        extends_beyond_frame:beyond.length?`стена продолжается за край кадра (${beyond.join(', ')}): на фото видна только её часть. `+
+          'Размеры, полосы и стыки выше — для всей стены; на результате покажи только то, что попадает в кадр, '+
+          'по схеме — не сжимай раскладку, не расширяй и не меняй кадрирование':undefined
       };
     });
     if(!walls_.length) return null;
