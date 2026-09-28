@@ -144,6 +144,7 @@ tbody tr:hover td{background:var(--surface)}
 #viz-canvas{display:block;max-width:100%;border-radius:calc(var(--r) - 2px);cursor:crosshair;touch-action:none;background:var(--surface-2)}
 .viz-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 .viz-step,.viz-notice{margin:0 0 8px;font-size:13px;line-height:1.45}
+.viz-step{min-height:calc(2*1.45em + 14px);box-sizing:border-box}
 .viz-step b,.viz-notice b{white-space:nowrap}
 .viz-more summary{cursor:pointer;color:var(--alu);margin-top:6px}
 .viz-more summary:hover{color:var(--paper)}
@@ -5154,9 +5155,12 @@ function snapshot(){
 $('#btn-save').addEventListener('click',()=>{
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([JSON.stringify(snapshot(),null,2)],{type:'application/json'}));
-  const nm=($('#i-client').value.trim()||'проект').replace(/[^\wа-яА-ЯёЁ -]/g,'');
+  const nm=$('#i-client').value.replace(/[^\wа-яА-ЯёЁ -]/g,'').replace(/\s+/g,' ').trim()||'проект';
   a.download=`${nm} ${new Date().toISOString().slice(0,10)}.json`;
-  a.click(); URL.revokeObjectURL(a.href);
+  // ссылка в документе и отзыв blob с задержкой — скачивание стартует асинхронно; немедленный
+  // revokeObjectURL и «висящая» вне документа ссылка ломают его в части браузеров (Firefox)
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),10000);
 });
 $('#btn-load').addEventListener('click',()=>$('#file-load').click());
 // восстановить проект из снимка snapshot(): и при открытии файла (fromFile=true), и при отмене
@@ -5824,6 +5828,10 @@ document.addEventListener('keydown',e=>{
   // {[targetKey]: [{x,y}, ...до 4]}
   let pointsByTarget={};
   let dragKey=null, dragIdx=-1;
+  // нажали рядом с уже стоящей точкой: это либо перетаскивание (курсор поехал), либо новая точка
+  // вплотную к ней (отпустили на месте) — узкая грань откоса на фото бывает шириной ~10 px превью,
+  // и её второй угол неизбежно ставится в «радиусе захвата» первого
+  let dragDown=null, dragMoved=false;
   // зоны исключения — НЕ привязаны к конкретной цели/стене (мебель и розетка на фото остаются на
   // месте независимо от того, какую стену сейчас размечаем), поэтому отдельный список, а не запись
   // в pointsByTarget; прямоугольники в координатах ПРЕВЬЮ, {x0,y0,x1,y1}, x0<x1, y0<y1
@@ -5854,10 +5862,16 @@ document.addEventListener('keydown',e=>{
     'правый нижний угол — стык стены с полом справа',
     'левый нижний угол — стык стены с полом слева'];
   const samePts=(a,b)=>!!a&&!!b&&a.length===b.length&&a.every((p,i)=>Math.abs(p.x-b[i].x)<0.5&&Math.abs(p.y-b[i].y)<0.5);
+  // высота строки только растёт: подсказка меняется между кликами (другой угол, откос), и если бы
+  // она то вытягивалась в лишнюю строку, то сжималась, фото под курсором прыгало бы вверх-вниз
+  // прямо во время разметки — следующий клик попадал бы не туда, куда целились
+  let stepMinH=0;
   function setStep(tag,text){
     if(!stepEl) return;
     stepEl.querySelector('b').textContent=tag;
     stepEl.querySelector('span').textContent=text;
+    const h=stepEl.offsetHeight;
+    if(h>stepMinH){ stepMinH=h; stepEl.style.minHeight=h+'px'; }
   }
   function updateStep(){
     if(noticeEl){
@@ -6117,7 +6131,7 @@ document.addEventListener('keydown',e=>{
     return {v:1, photo:{w:photoImg.naturalWidth,h:photoImg.naturalHeight,name:photoName}, seq:photoSeq,
       layers:appliedLayers.map(l=>({wallId:l.wallId,wallPts:l.wallPts.map(toFrac),
         otkos:l.otkos.map(o=>({key:o.key,pts:o.pts.map(toFrac)}))})),
-      draft:{wallId:currentWallId(),byTarget},
+      draft:{wallId:currentWallId(),byTarget}, opacity:+opacityInp.value,
       exclusions:exclusionRects.map(r=>{ const a=toFrac({x:r.x0,y:r.y0}), b=toFrac({x:r.x1,y:r.y1}); return {x0:a.x,y0:a.y,x1:b.x,y1:b.y}; })};
   }
   // fromFile=true — открыли файл проекта (или загрузили фото к уже открытому проекту);
@@ -6139,6 +6153,8 @@ document.addEventListener('keydown',e=>{
       appliedLayers=m.layers.filter(l=>ids.has(l.wallId)&&Array.isArray(l.wallPts)&&l.wallPts.length===4)
         .map(l=>({wallId:l.wallId,wallPts:l.wallPts.map(fromFrac),
           otkos:(l.otkos||[]).filter(o=>Array.isArray(o.pts)&&o.pts.length===4).map(o=>({key:o.key,pts:o.pts.map(fromFrac)}))}));
+      // % схемы — только при открытии файла: при отмене действия ползунок не «прыгает» назад
+      if(fromFile&&m.opacity>=+opacityInp.min&&m.opacity<=+opacityInp.max){ opacityInp.value=m.opacity; opacityVal.textContent=m.opacity+'%'; }
       exclusionRects=(m.exclusions||[]).map(r=>{ const a=fromFrac({x:r.x0,y:r.y0}), b=fromFrac({x:r.x1,y:r.y1}); return {x0:a.x,y0:a.y,x1:b.x,y1:b.y}; });
       const d=m.draft, wi=d?walls.findIndex(w=>w.id===d.wallId):-1;
       if(wi>=0){ wallSel.value=String(wi); renderVizTargetSelect(); }
@@ -6192,17 +6208,21 @@ document.addEventListener('keydown',e=>{
     const pts=pointsByTarget[key]||(pointsByTarget[key]=[]);
     for(let i=0;i<pts.length;i++){
       if(Math.hypot(pts[i].x-pt.x,pts[i].y-pt.y)<14){
-        dragKey=key; dragIdx=i; canvas.setPointerCapture(ev.pointerId); return;
+        dragKey=key; dragIdx=i; dragDown=pt; dragMoved=false; canvas.setPointerCapture(ev.pointerId); return;
       }
     }
-    if(pts.length<4){ pts.push(pt); vizNotice=null; redraw(); historyCommit(); }
+    if(pts.length<4){ pts.push(pt); redraw(); historyCommit(); }
   });
   canvas.addEventListener('pointermove',ev=>{
     if(!photoImg) return;
     const pt=ptFromEvent(ev);
     loupePt=pt;   // лупа нужна и при наведении — прицелиться ДО клика, а не только при перетаскивании
     if(exclDraft){ exclDraft.x1=pt.x; exclDraft.y1=pt.y; }
-    else if(dragIdx>=0) pointsByTarget[dragKey][dragIdx]=pt;
+    else if(dragIdx>=0){
+      // дрожь руки при клике — не перетаскивание: сдвигаем точку, только когда курсор реально поехал
+      if(!dragMoved&&Math.hypot(pt.x-dragDown.x,pt.y-dragDown.y)>3) dragMoved=true;
+      if(dragMoved) pointsByTarget[dragKey][dragIdx]=pt;
+    }
     scheduleRedraw();
   });
   canvas.addEventListener('pointerleave',()=>{
@@ -6222,9 +6242,13 @@ document.addEventListener('keydown',e=>{
       if(added) historyCommit();
       return;
     }
-    const dragged=dragIdx>=0;
-    dragIdx=-1; dragKey=null;
-    if(dragged){ scheduleRedraw(); historyCommit(); }
+    const wasDrag=dragIdx>=0, key=dragKey, down=dragDown, moved=dragMoved;
+    dragIdx=-1; dragKey=null; dragDown=null; dragMoved=false;
+    if(wasDrag&&!moved){
+      // клик на месте рядом с точкой — ставим новую, если контур ещё не замкнут
+      const pts=pointsByTarget[key]||(pointsByTarget[key]=[]);
+      if(pts.length<4){ pts.push(down); redraw(); historyCommit(); }
+    } else if(wasDrag){ scheduleRedraw(); historyCommit(); }
     // палец убрали — «наведения» на тачскрине нет, лупу прячем; мышь остаётся над канвой — лупа тоже
     if(ev&&ev.pointerType==='touch'){ loupePt=null; scheduleRedraw(); }
   };
