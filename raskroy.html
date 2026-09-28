@@ -420,17 +420,19 @@ tbody tr:hover td{background:var(--surface)}
       </div>
       <textarea id="viz-json-output" readonly rows="6" style="width:100%;margin-top:8px;font-family:var(--mono);font-size:10.5px;background:var(--void);border:1px solid var(--line);border-radius:var(--r);padding:8px;color:var(--muted);resize:vertical" placeholder="Появится здесь после первого «Наложить» — нажмите «Скопировать JSON-описание»"></textarea>
       <div class="row row-1" style="margin-top:10px"><div class="f">
-        <label class="chk"><input type="checkbox" id="viz-guide-include-iso"> Добавить 3D-изометрию макета (только для общего контекста формы комнаты — другой ракурс, не для копирования)</label>
+        <label class="chk"><input type="checkbox" id="viz-guide-include-iso" checked> Добавить 3D-изометрию макета (только для общего контекста формы комнаты — другой ракурс, не для копирования)</label>
       </div></div>
       <div class="viz-actions">
         <button type="button" class="btn btn-key" id="viz-guide-download-all" disabled>Скачать всё для нейросети (архивом)</button>
       </div>
       <p class="hint">Скачает один zip-архив (имя — сегодняшняя дата, повторное скачивание в
-        тот же день не перезапишет предыдущее — браузер сам добавит «(2)», «(3)» и т.д.) с
-        исходным фото, схемой-оверлеем, JSON-описанием (.txt) и, если отмечено выше,
-        3D-изометрией. Откройте архив (двойной клик — на Windows и Mac открывается как обычная
-        папка, распаковывать вручную не нужно) и перетащите файлы оттуда в чат нейросети вместе
-        с просьбой сгенерировать результат по приложенному описанию.</p>
+        тот же день не перезапишет предыдущее — браузер сам добавит «(2)», «(3)» и т.д.). Внутри —
+        папка на каждое размеченное фото проекта («1 — …», «2 — …»): исходное фото, то же фото со
+        схемой (все стыки и LED — чёткими линиями), описание-задание (.txt) и, если отмечено выше,
+        3D-изометрия. Одна папка = один запрос к нейросети; порядок — в файле «как-отправлять.txt».
+        Откройте архив (двойной клик — на Windows и Mac открывается как обычная папка) и
+        перетащите файлы папки в чат нейросети. В архив попадают фото, загруженные на странице за
+        этот сеанс; остальные размеченные фото проекта программа назовёт — загрузите их ещё раз.</p>
     </div>
   </section>
 </aside>
@@ -5977,11 +5979,7 @@ document.addEventListener('keydown',e=>{
     // что скачивает «Скачать схему», с ТЕМ ЖЕ процентом прозрачности (ползунок работает вживую)
     ctx.drawImage(photoImg,0,0,dispW,dispH);
     const diagram=ensureDiagram();
-    if(diagram){
-      ctx.globalAlpha=Math.max(0,Math.min(1,+opacityInp.value/100));
-      ctx.drawImage(diagram,0,0,dispW,dispH);
-      ctx.globalAlpha=1;
-    }
+    if(diagram) paintDiagram(ctx,diagram,+opacityInp.value/100,0,0,photoImg.naturalWidth,photoImg.naturalHeight,0,0,dispW,dispH);
     // зоны исключения — глобальные, видны при разметке любой цели (не только когда выбрана сама
     // цель «Зоны исключения»), полупрозрачной красной штриховкой поверх фото/уже применённого
     exclusionRects.forEach(r=>{
@@ -6077,11 +6075,7 @@ document.addEventListener('keydown',e=>{
       const k=R/half;                              // пикселей лупы на пиксель полного фото
       const dx=lx-R+(cx0-sx)*k, dy=ly-R+(cy0-sy)*k, dw=(cx1-cx0)*k, dh=(cy1-cy0)*k;
       ctx.drawImage(photoImg,cx0,cy0,cx1-cx0,cy1-cy0,dx,dy,dw,dh);
-      if(diagram){
-        ctx.globalAlpha=Math.max(0,Math.min(1,+opacityInp.value/100));
-        ctx.drawImage(diagram,cx0,cy0,cx1-cx0,cy1-cy0,dx,dy,dw,dh);
-        ctx.globalAlpha=1;
-      }
+      if(diagram) paintDiagram(ctx,diagram,+opacityInp.value/100,cx0,cy0,cx1-cx0,cy1-cy0,dx,dy,dw,dh);
     }
     const key=targetSel.value;
     const pts=key!=='exclude'?(pointsByTarget[key]||[]):[];
@@ -6121,6 +6115,11 @@ document.addEventListener('keydown',e=>{
   // {photo:{w,h,name}, seq, layers, draft, exclusions, opacity, margin}. Загрузили другое фото —
   // разметка прежнего уходит сюда, а разметка нового (если она есть в проекте) достаётся отсюда
   let photoLib=[];
+  // сами снимки (не только разметка), загруженные за этот сеанс работы со страницей — чтобы архив
+  // для нейросети собрался сразу по всем размеченным фото, а не только по загруженному сейчас.
+  // В файл проекта не пишутся (мегабайты); ключ — имя+размер, как у записей разметки
+  const sessionPhotos=new Map();   // key → {img, dataUrl}
+  const photoKey=(name,w,h)=>`${name}|${w}|${h}`;
   let vizNotice=null;    // {cls:'ok'|'info'|'warn', text} — разовое сообщение над фото (восстановили/не нашли)
   let photoDataUrl=null; // исходные байты загруженного фото как есть (для «Скачать всё для нейросети» — отдаём то же самое, что загрузили, а не пере-кодированную копию)
   function loadPhoto(file){
@@ -6136,7 +6135,12 @@ document.addEventListener('keydown',e=>{
         dispH=Math.max(1,Math.round(img.naturalHeight*dispScale));
         resetLayers();
         photoSeq=Date.now()+Math.random(); photoName=file.name||''; vizNotice=null;
+        const pk=photoKey(photoName,img.naturalWidth,img.naturalHeight);
+        sessionPhotos.delete(pk); sessionPhotos.set(pk,{img,dataUrl:photoDataUrl});
         setMargin(false);
+        // новое фото размечают со стены: цель от прошлого фото (например, откос) здесь только
+        // сбивает — клики молча уходили бы в неё
+        targetSel.value='wall';
         matchLoadedPhoto();
         historyCommit();
       };
@@ -6153,8 +6157,15 @@ document.addEventListener('keydown',e=>{
     diagramCache=null; realisticCache=null; markDirty();
     setOutputsEnabled(false);
   }
+  function updateDownloadAll(){
+    btnDownloadAll.disabled=!(photoImg&&(appliedLayers.length||photoLib.some(r=>(r.layers||[]).length&&
+      sessionPhotos.has(photoKey(r.photo.name,r.photo.w,r.photo.h)))));
+  }
   function setOutputsEnabled(on){
-    btnDownload.disabled=!on; btnGuideDownload.disabled=!on; btnJsonCopy.disabled=!on; btnDownloadAll.disabled=!on;
+    // «Скачать всё» — не только про загруженное фото (архив собирает все размеченные фото сеанса),
+    // его доступность считает updateDownloadAll
+    btnDownload.disabled=!on; btnGuideDownload.disabled=!on; btnJsonCopy.disabled=!on;
+    updateDownloadAll();
     if(!on) jsonOutput.value='';
   }
   const currentWallId=()=>{ const w=walls[+wallSel.value]; return w?w.id:null; };
@@ -6277,6 +6288,7 @@ document.addEventListener('keydown',e=>{
   const photosEl=$('#viz-photos');
   let photosHtml='';
   function renderPhotoList(){
+    updateDownloadAll();
     if(!photosEl) return;
     const desc=r=>{
       const n=(r.layers||[]).length, z=(r.exclusions||[]).length;
@@ -6503,8 +6515,9 @@ document.addEventListener('keydown',e=>{
     m.fills.forEach(r=>{
       const [x,y,w,h]=rect(r);
       cx.fillStyle=r.color; cx.fillRect(x,y,w,h);
-      // полосы материала внутри зашитого проёма — как на схеме раскладки
-      if(r.bandW>0){
+      // полосы материала внутри зашитого проёма — как на схеме раскладки (в схеме для нейросети —
+      // отдельным непрозрачным слоем линий, см. drawGuideLines)
+      if(r.bandW>0&&!guide){
         cx.strokeStyle=guide?'rgba(15,15,15,.55)':'rgba(0,0,0,.18)'; cx.lineWidth=Math.max(1,cw/1400);
         for(let bx=r.x+r.bandW;bx<r.x+r.w-1;bx+=r.bandW){
           cx.beginPath(); cx.moveTo(bx*px,y); cx.lineTo(bx*px,y+h); cx.stroke();
@@ -6512,6 +6525,9 @@ document.addEventListener('keydown',e=>{
       }
     });
     m.holes.forEach(r=>{ const [x,y,w,h]=rect(r); cx.clearRect(x-0.5,y-0.5,w+1,h+1); });
+    // схема для нейросети: здесь только заливка — стыки и LED рисует drawGuideLines прямо в
+    // координатах фото, непрозрачными и одной толщины по всей стене
+    if(guide) return {canvas:c,W:m.W,H:m.H};
     // линия по краю стены стоит ровно на границе канвы — половина её толщины ушла бы за край,
     // поэтому концы прижимаем внутрь на полтолщины
     const stroke=(s,lw,color,dash)=>{
@@ -6522,13 +6538,13 @@ document.addEventListener('keydown',e=>{
       cx.lineTo(cl(s.x1*px,cw),cl((m.H-s.y1)*px,ch));
       cx.stroke(); cx.restore();
     };
-    const seamW=guide?Math.max(3,cw/600):Math.max(1.5,cw/1100);
+    const seamW=Math.max(1.5,cw/1100);
     m.seams.forEach(s=>{
-      if(s.mode==='butt') stroke(s,Math.max(1.5,seamW*0.5),guide?'rgba(15,15,15,.6)':'rgba(0,0,0,.14)',guide?[seamW*3,seamW*2]:null);
-      else stroke(s,seamW,guide?'rgba(15,15,15,.85)':'rgba(0,0,0,.32)');
+      if(s.mode==='butt') stroke(s,Math.max(1.5,seamW*0.5),'rgba(0,0,0,.14)');
+      else stroke(s,seamW,'rgba(0,0,0,.32)');
     });
-    const ledW=guide?Math.max(5,cw/350):Math.max(3,cw/450);
-    m.ledLines.forEach(s=>stroke(s,ledW,guide?'#00e5ff':(s.kind==='none'?'#d7ffe0':'#fff1c2')));
+    const ledW=Math.max(3,cw/450);
+    m.ledLines.forEach(s=>stroke(s,ledW,s.kind==='none'?'#d7ffe0':'#fff1c2'));
     return {canvas:c,W:m.W,H:m.H};
   }
 
@@ -6538,7 +6554,7 @@ document.addEventListener('keydown',e=>{
   // что в раскрое (см. wallOtkosTargets/buildOtkosParts), но т.к. заливка сплошная и без внутренней
   // структуры, ориентация текстуры (что считать «верхом») не важна — важен только порядок обхода
   // 4 точек на фото при разметке (см. quadProblem)
-  function otkosTextureCanvas(len,dep,matId,fallbackColor){
+  function otkosTextureCanvas(len,dep,matId,fallbackColor,noBorder){
     const px=Math.min(4,900/Math.max(len,dep,1));
     const cw=Math.max(1,Math.round(dep*px)), ch=Math.max(1,Math.round(len*px));
     const c=document.createElement('canvas'); c.width=cw; c.height=ch;
@@ -6546,8 +6562,10 @@ document.addEventListener('keydown',e=>{
     const cs=getComputedStyle(document.documentElement);
     const color=(matId&&cs.getPropertyValue('--mat-'+matId).trim())||fallbackColor;
     cx.fillStyle=color; cx.fillRect(0,0,cw,ch);
-    cx.strokeStyle='rgba(0,0,0,.25)'; cx.lineWidth=Math.max(1,px*0.8);
-    cx.strokeRect(cx.lineWidth/2,cx.lineWidth/2,cw-cx.lineWidth,ch-cx.lineWidth);
+    if(!noBorder){
+      cx.strokeStyle='rgba(0,0,0,.25)'; cx.lineWidth=Math.max(1,px*0.8);
+      cx.strokeRect(cx.lineWidth/2,cx.lineWidth/2,cw-cx.lineWidth,ch-cx.lineWidth);
+    }
     return {canvas:c,W:dep,H:len};
   }
 
@@ -6642,8 +6660,72 @@ document.addEventListener('keydown',e=>{
     const exclFull=exclusionRects.map(r=>({x0:r.x0/dispScale,y0:r.y0/dispScale,x1:r.x1/dispScale,y1:r.y1/dispScale}));
     resolveLayers().forEach(({layer,m,otkos})=>{
       warpTextureOnto(fctx,W,H,faceTextureCanvas(m,guide?'guide':'real'),layer.wallPts,exclFull,guide);
-      otkos.forEach(o=>warpTextureOnto(fctx,W,H,otkosTextureCanvas(o.len,o.dep,o.matId,m.color),o.pts,exclFull,guide));
+      otkos.forEach(o=>warpTextureOnto(fctx,W,H,otkosTextureCanvas(o.len,o.dep,o.matId,m.color,guide),o.pts,exclFull,guide));
     });
+  }
+  // ---- слой линий схемы для нейросети: стыки, LED, полосы в зашитых проёмах, контуры граней
+  // откоса. Раньше они были нарисованы на текстуре стены и вместе с ней (а) растягивались варпом —
+  // толщина зависела от размера стены на фото (на реальном фото стык выходил ~1.5 px) и (б)
+  // становились полупрозрачными вместе с заливкой (при 45% — едва видно). Теперь концы каждого
+  // отрезка переводятся в координаты фото той же гомографией, что и заливка (прямая переходит в
+  // прямую), и линия рисуется поверх непрозрачной, одной толщины в пикселях фото, со светлой/
+  // тёмной подложкой — читается и на светлой, и на тёмной стене
+  function drawGuideLines(lctx,W,H){
+    const U=Math.max(2,Math.max(W,H)/480);          // базовая толщина, px полного фото
+    const full=pts=>pts.map(p=>({x:p.x/dispScale,y:p.y/dispScale}));
+    const line=(a,b,width,color,dash)=>{
+      lctx.setLineDash(dash||[]); lctx.lineWidth=width; lctx.strokeStyle=color;
+      lctx.beginPath(); lctx.moveTo(a[0],a[1]); lctx.lineTo(b[0],b[1]); lctx.stroke();
+    };
+    lctx.lineCap='round'; lctx.lineJoin='round';
+    resolveLayers().forEach(({layer,m,otkos})=>{
+      const q=full(layer.wallPts);
+      const M=squareToQuad(q[0].x,q[0].y,q[1].x,q[1].y,q[2].x,q[2].y,q[3].x,q[3].y);
+      const P=(x,y)=>mat3Apply(M,x/m.W,(m.H-y)/m.H);   // мм стены (y от пола) → px фото
+      lctx.save();
+      // только внутри контура стены: линия по краю стены не вылезает на потолок/соседнюю стену
+      lctx.beginPath(); q.forEach((p,i)=>i?lctx.lineTo(p.x,p.y):lctx.moveTo(p.x,p.y)); lctx.closePath(); lctx.clip();
+      m.fills.forEach(r=>{
+        if(!(r.bandW>0)) return;
+        for(let bx=r.x+r.bandW;bx<r.x+r.w-1;bx+=r.bandW){
+          const a=P(bx,r.y), b=P(bx,r.y+r.h);
+          line(a,b,U*1.6,'rgba(255,255,255,.6)'); line(a,b,U*0.7,'rgba(10,10,10,.9)');
+        }
+      });
+      // стык с профилем-заглушкой — сплошная тёмная линия на светлой подложке; встык без
+      // профиля — тёмный пунктир на светлой подложке: различимы с первого взгляда
+      m.seams.forEach(sg=>{
+        const a=P(sg.x0,sg.y0), b=P(sg.x1,sg.y1);
+        if(sg.mode==='butt'){ line(a,b,U*1.9,'rgba(255,255,255,.75)'); line(a,b,U*0.9,'rgba(10,10,10,.95)',[U*3.5,U*2.5]); }
+        else { line(a,b,U*2.4,'rgba(255,255,255,.8)'); line(a,b,U*1.1,'rgba(10,10,10,.95)'); }
+      });
+      // LED — ярко-бирюзовая линия с тёмной обводкой, поверх стыков
+      m.ledLines.forEach(sg=>{
+        const a=P(sg.x0,sg.y0), b=P(sg.x1,sg.y1);
+        line(a,b,U*2.8,'rgba(0,0,0,.55)'); line(a,b,U*1.7,'#00e5ff');
+      });
+      lctx.restore();
+      // грань откоса — тонкий контур (её 4 точки на фото и есть углы грани)
+      otkos.forEach(o=>{
+        const r=full(o.pts);
+        lctx.setLineDash([]);
+        [[U*1.6,'rgba(255,255,255,.6)'],[U*0.7,'rgba(10,10,10,.9)']].forEach(([w,c])=>{
+          lctx.lineWidth=w; lctx.strokeStyle=c;
+          lctx.beginPath(); r.forEach((p,i)=>i?lctx.lineTo(p.x,p.y):lctx.moveTo(p.x,p.y)); lctx.closePath(); lctx.stroke();
+        });
+      });
+    });
+    lctx.setLineDash([]);
+    // зоны исключения (мебель, розетки) — и линий там нет, как нет заливки
+    exclusionRects.forEach(r=>lctx.clearRect(r.x0/dispScale,r.y0/dispScale,(r.x1-r.x0)/dispScale,(r.y1-r.y0)/dispScale));
+  }
+  // схема (два слоя) поверх уже нарисованного: заливка — с прозрачностью ползунка, линии — всегда
+  // непрозрачные. Аргументы src/dst — как у drawImage (кусок полного фото → место на холсте)
+  function paintDiagram(c2,d,alpha,sx,sy,sw,sh,dx,dy,dw,dh){
+    c2.globalAlpha=Math.max(0,Math.min(1,alpha));
+    c2.drawImage(d.fill,sx,sy,sw,sh,dx,dy,dw,dh);
+    c2.globalAlpha=1;
+    c2.drawImage(d.lines,sx,sy,sw,sh,dx,dy,dw,dh);
   }
   // «Наложить»: снимок разметки текущей стены (точки копируются — pointsByTarget меняется при
   // смене стены). Слой той же стены заменяется, а не добавляется вторым поверх первого
@@ -6719,11 +6801,13 @@ document.addEventListener('keydown',e=>{
   function ensureDiagram(){
     if(!photoImg||!LAST||!LAST.R||!appliedLayers.length){ diagramCache=null; return null; }
     if(!diagramDirty&&diagramCache) return diagramCache;
-    const diagram=document.createElement('canvas');
-    diagram.width=photoImg.naturalWidth; diagram.height=photoImg.naturalHeight;
-    renderLayersOnto(diagram.getContext('2d'),diagram.width,diagram.height,true); // холст изначально прозрачный
-    diagramCache=diagram; diagramDirty=false;
-    return diagram;
+    const W=photoImg.naturalWidth, H=photoImg.naturalHeight;
+    const fill=document.createElement('canvas'); fill.width=W; fill.height=H;
+    renderLayersOnto(fill.getContext('2d'),W,H,true); // холст изначально прозрачный
+    const lines=document.createElement('canvas'); lines.width=W; lines.height=H;
+    drawGuideLines(lines.getContext('2d'),W,H);
+    diagramCache={fill,lines}; diagramDirty=false;
+    return diagramCache;
   }
   function computeGuideOverlay(opacityFrac){
     const diagram=ensureDiagram();
@@ -6732,9 +6816,7 @@ document.addEventListener('keydown',e=>{
     out.width=photoImg.naturalWidth; out.height=photoImg.naturalHeight;
     const octx=out.getContext('2d');
     octx.drawImage(photoImg,0,0);
-    octx.globalAlpha=Math.max(0,Math.min(1,opacityFrac));
-    octx.drawImage(diagram,0,0);
-    octx.globalAlpha=1;
+    paintDiagram(octx,diagram,opacityFrac,0,0,out.width,out.height,0,0,out.width,out.height);
     return out;
   }
   btnGuideDownload.addEventListener('click',()=>{
@@ -6751,7 +6833,9 @@ document.addEventListener('keydown',e=>{
   // «что менять нельзя» (геометрия/цвета/положение стыков и LED — берём с приложенной схемы как
   // истину) и «что нужно дорисовать самому» (фотореалистичная текстура/свет/тени) — иначе модель
   // с равной вероятностью либо перерисует всё по-своему, либо тупо скопирует плоскую схему как есть
-  function buildAiPromptObject(includeIso){
+  // pack — для архива: {files:{photo,schema,iso}, index, total} — какие файлы лежат в папке рядом с
+  // описанием и какое это фото по счёту из скольких фото комнаты
+  function buildAiPromptObject(includeIso,pack){
     if(!LAST||!LAST.R||!appliedLayers.length) return null;
     const R=LAST.R;
     const sideRu={left:'слева',right:'справа',top:'сверху',bottom:'снизу'};
@@ -6847,10 +6931,12 @@ document.addEventListener('keydown',e=>{
       short_prompt:shortPrompt+' (короткая версия задачи ниже — используйте её, если инструмент плохо '+
         'работает с длинным JSON; полная версия ниже точнее и с ней результат стабильнее)',
       reference_image_legend:'Полупрозрачная заливка = панель, её цвет = цвет материала (wall.material.color_hex; '+
-        'другой цвет на части стены — см. wall.other_material_pieces). Тёмная сплошная линия = стык с '+
-        'профилем-заглушкой, тонкая тёмная пунктирная = стык встык без профиля (см. wall.seams и '+
-        'seam_types_glossary). Ярко-бирюзовая линия — это НЕ материал, а место LED-подсветки '+
-        '(wall.led_lines, led). Проём, залитый цветом материала, зашит панелью (wall.filled_openings). '+
+        'другой цвет на части стены — см. wall.other_material_pieces). Линии нарисованы непрозрачными '+
+        'поверх заливки: тёмная сплошная линия на светлой подложке = стык с профилем-заглушкой, тёмный '+
+        'пунктир на светлой подложке = стык встык без профиля (см. wall.seams и seam_types_glossary); '+
+        'светлая подложка — только чтобы линию было видно на фото, это НЕ белая деталь. Ярко-бирюзовая '+
+        'линия с тёмной обводкой — это НЕ материал, а место LED-подсветки (wall.led_lines, led). Тонкий '+
+        'тёмный контур — край грани откоса. Проём, залитый цветом материала, зашит панелью (wall.filled_openings). '+
         'Участки внутри контура без заливки (видно исходное фото) — это проём (окно/дверь) либо зона '+
         'исключения (мебель, розетка, выключатель) — их трогать нельзя.',
       material_reference_note:'Если вместе с этим описанием приложены ОТДЕЛЬНЫЕ референсные фото '+
@@ -6912,6 +6998,18 @@ document.addEventListener('keydown',e=>{
         'общий контекст формы/планировки комнаты (сколько стен, как они стыкуются), НЕ как образец '+
         'для копирования ракурса, освещения или стиля — целевой ракурс и стиль задаёт именно '+
         'фото+схема.' : undefined,
+      // в папке архива не одна картинка — перечисляем файлы и роль каждого, иначе генератор сам
+      // решает, какая из них «основная» (чистое фото или фото со схемой)
+      attached_files:pack?Object.assign({
+        [pack.files.photo]:'исходное фото БЕЗ схемы — это кадр, который нужно получить на выходе (ракурс, свет, все предметы); по нему видно, как выглядит комната на самом деле',
+        [pack.files.schema]:'ТО ЖЕ САМОЕ фото с полупрозрачной схемой — только отсюда бери, где панели, стыки, LED и откосы (см. reference_image_legend)'
+      },pack.files.iso?{[pack.files.iso]:'3D-изометрия макета — только общий контекст формы комнаты (см. isometric_reference)'}:{}):undefined,
+      series:pack&&pack.total>1?`Это фото ${pack.index} из ${pack.total} одной и той же комнаты (разные ракурсы); остальные генерируются отдельными запросами.`:undefined,
+      previous_render_reference:pack&&pack.total>1?'Если к запросу дополнительно приложен ГОТОВЫЙ результат генерации этой же комнаты с другого '+
+        'ракурса (картинка без схемы, панели уже установлены) — это образец только ВНЕШНЕГО ВИДА: повтори с него '+
+        'текстуру, тон и масштаб рисунка панелей, вид стыков и профилей, цвет и яркость LED, чтобы разные ракурсы '+
+        'выглядели одной и той же отделкой. Ракурс, кадр, расположение панелей/стыков/LED бери ТОЛЬКО с фото и схемы '+
+        'этого запроса; саму приложенную картинку не копируй и не смешивай с этим фото.':undefined,
       output:{style:'photorealistic interior photography, natural lighting, high detail material texture, no watermark, single image, no text overlay', aspect_ratio:'как у приложенного фото, без обрезки и без полей', resolution:'как у приложенного фото или выше'},
       final_reminder:'Итог одним предложением: та же комната и тот же ракурс, что на фото, но там, где '+
         'на схеме есть заливка — там теперь физически установлены панели точно этого цвета и с точно '+
@@ -7036,7 +7134,8 @@ document.addEventListener('keydown',e=>{
       ch.setUint16(8,0x0800,true); ch.setUint16(10,0,true); ch.setUint16(12,dosTime,true);
       ch.setUint16(14,dosDate,true); ch.setUint32(16,crc,true); ch.setUint32(20,data.length,true);
       ch.setUint32(24,data.length,true); ch.setUint16(28,nameBytes.length,true); ch.setUint16(30,0,true);
-      ch.setUint16(32,0,true); ch.setUint16(34,0,true); ch.setUint16(36,0,true); ch.setUint32(38,0,true);
+      ch.setUint16(32,0,true); ch.setUint16(34,0,true); ch.setUint16(36,0,true);
+      ch.setUint32(38,f.name.endsWith('/')?0x10:0,true);   // атрибут «папка» (MS-DOS) у записи папки
       ch.setUint32(42,localOffset,true);
       centralParts.push(new Uint8Array(ch.buffer),nameBytes);
     });
@@ -7055,29 +7154,99 @@ document.addEventListener('keydown',e=>{
     const pad=n=>String(n).padStart(2,'0');
     return `${pad(d.getDate())}${pad(d.getMonth()+1)}${String(d.getFullYear()).slice(-2)}.zip`;
   }
+  // ---- сборка материалов по НЕ загруженному сейчас фото: вся отрисовка (варп, линии, JSON)
+  // читает состояние модуля — фото, масштаб превью, слои, зоны исключения. Временно подставляем
+  // состояние нужного фото из его записи разметки, считаем, и в finally возвращаем как было.
+  // Всё синхронно — между подменой и возвратом ни перерисовка, ни клик вклиниться не могут
+  function withPhotoState(rec,img,fn){
+    const saved={photoImg,dispScale,dispW,dispH,appliedLayers,exclusionRects,diagramCache,diagramDirty,realisticCache,realisticDirty};
+    try{
+      photoImg=img;
+      dispScale=Math.min(1,MAXW/img.naturalWidth,MAXH/img.naturalHeight);
+      dispW=Math.max(1,Math.round(img.naturalWidth*dispScale));
+      dispH=Math.max(1,Math.round(img.naturalHeight*dispScale));
+      const ids=new Set(walls.map(w=>w.id));
+      appliedLayers=rec.layers.filter(l=>ids.has(l.wallId)&&Array.isArray(l.wallPts)&&l.wallPts.length===4)
+        .map(l=>({wallId:l.wallId,wallPts:l.wallPts.map(fromFrac),
+          otkos:(l.otkos||[]).filter(o=>Array.isArray(o.pts)&&o.pts.length===4).map(o=>({key:o.key,pts:o.pts.map(fromFrac)}))}));
+      exclusionRects=(rec.exclusions||[]).map(z=>{ const a=fromFrac({x:z.x0,y:z.y0}), b=fromFrac({x:z.x1,y:z.y1}); return {x0:a.x,y0:a.y,x1:b.x,y1:b.y}; });
+      diagramCache=null; diagramDirty=true; realisticCache=null; realisticDirty=true;
+      return fn();
+    } finally {
+      ({photoImg,dispScale,dispW,dispH,appliedLayers,exclusionRects,diagramCache,diagramDirty,realisticCache,realisticDirty}=saved);
+    }
+  }
+  const safeName=n=>String(n||'фото').replace(/\.[^.]+$/,'').replace(/[\\/:*?"<>|\u0000-\u001f]+/g,'_').trim().slice(0,60)||'фото';
+  // ---- «Скачать всё для нейросети»: один архив, внутри — папка на каждое размеченное фото проекта
+  // («1 — IMG_1234», «2 — …»), в каждой всё для ОДНОГО запроса к нейросети: исходное фото, то же
+  // фото со схемой, описание (промпт) и, по галочке, 3D-изометрия. Единица — именно фото, а не стена:
+  // на одном фото бывает две стены (угол комнаты), и нейросеть должна нарисовать их одной картинкой
   btnDownloadAll.addEventListener('click',()=>{
-    if(!photoDataUrl){ alert('Сначала загрузите фото стены/комнаты.'); return; }
+    if(!photoImg){ alert('Сначала загрузите фото стены/комнаты.'); return; }
+    if(!appliedLayers.length&&!photoLib.some(r=>(r.layers||[]).length)){ alert('Сначала хотя бы раз нажмите «Наложить раскладку».'); return; }
     const includeIso=includeIsoChk.checked;
-    const obj=buildAiPromptObject(includeIso);
-    if(!obj){ alert('Сначала хотя бы раз нажмите «Наложить раскладку».'); return; }
-    const guide=computeGuideOverlay(+opacityInp.value/100);
-    if(!guide){ alert('Не получилось собрать схему — попробуйте ещё раз.'); return; }
-    let isoUrl=null;
+    let isoBytes=null;
     if(includeIso){
       const isoImg=document.querySelector('#scene3d-print img');
-      isoUrl=isoImg&&isoImg.src;
-      if(!isoUrl){ alert('3D-изометрия ещё не построена (нет стен/проекта) — снимите галочку «Добавить 3D-изометрию» или подождите пересчёта.'); return; }
+      if(!(isoImg&&isoImg.src)){ alert('3D-изометрия ещё не построена (нет стен/проекта) — снимите галочку «Добавить 3D-изометрию» или подождите пересчёта.'); return; }
+      isoBytes=dataUrlToBytes(isoImg.src);
     }
-    const files=[
-      {name:'фото.'+extFromDataUrl(photoDataUrl), data:dataUrlToBytes(photoDataUrl)},
-      {name:'схема-для-нейросети.png', data:dataUrlToBytes(guide.toDataURL('image/png'))},
-      {name:'описание-проекта.txt', data:new TextEncoder().encode(JSON.stringify(obj,null,2))}
-    ];
-    if(isoUrl) files.push({name:'3d-изометрия.png', data:dataUrlToBytes(isoUrl)});
-    const zipBlob=buildZipBlob(files);
-    const zipUrl=URL.createObjectURL(zipBlob);
-    triggerDownload(zipUrl,zipFilenameForToday());
-    setTimeout(()=>URL.revokeObjectURL(zipUrl),10000);
+    // по порядку загрузки за сеанс; загруженное сейчас фото — со своим живым состоянием
+    const live=liveRecord();
+    const recs=[live].concat(photoLib.filter(r=>!sameIdentity(r,live))).filter(r=>(r.layers||[]).length);
+    const keyOf=r=>photoKey(r.photo.name,r.photo.w,r.photo.h);
+    const order=[...sessionPhotos.keys()];
+    const available=recs.filter(r=>r===live||sessionPhotos.has(keyOf(r)))
+      .sort((a,b)=>order.indexOf(keyOf(a))-order.indexOf(keyOf(b)));
+    const missing=recs.filter(r=>!available.includes(r));
+    if(!available.length){ alert('Сначала хотя бы раз нажмите «Наложить раскладку».'); return; }
+    if(missing.length&&!confirm('Эти размеченные фото проекта сейчас не загружены на странице, их снимков нет — в архив они не попадут:\n'+
+      missing.map(r=>'• '+(r.photo.name||'без имени')).join('\n')+
+      '\n\nЧтобы добавить их — загрузите эти фото по очереди (разметка подставится сама) и скачайте архив снова.\n\nСкачать архив без них?')) return;
+    withBusy(btnDownloadAll,()=>{
+      const enc=new TextEncoder(), files=[], total=available.length, folders=[];
+      available.forEach((r,i)=>{
+        const isLive=r===live;
+        const sp=isLive?{img:photoImg,dataUrl:photoDataUrl}:sessionPhotos.get(keyOf(r));
+        const dir=`${i+1} — ${safeName(r.photo.name)}`;
+        const names={photo:'фото.'+extFromDataUrl(sp.dataUrl), schema:'схема-для-нейросети.png', iso:isoBytes?'3d-изометрия.png':null};
+        const build=()=>{
+          const opacity=(isLive?+opacityInp.value:(r.opacity>=15&&r.opacity<=80?r.opacity:+opacityInp.value))/100;
+          const guide=computeGuideOverlay(opacity);
+          const obj=buildAiPromptObject(!!isoBytes,{files:names,index:i+1,total});
+          return guide&&obj?{guide,obj}:null;
+        };
+        const res=isLive?build():withPhotoState(r,sp.img,build);
+        if(!res) return;
+        folders.push(dir);
+        files.push({name:`${dir}/${names.photo}`, data:dataUrlToBytes(sp.dataUrl)});
+        files.push({name:`${dir}/${names.schema}`, data:dataUrlToBytes(res.guide.toDataURL('image/png'))});
+        files.push({name:`${dir}/описание-проекта.txt`, data:enc.encode(JSON.stringify(res.obj,null,2))});
+        if(isoBytes) files.push({name:`${dir}/${names.iso}`, data:isoBytes});
+      });
+      if(!folders.length){ alert('Не получилось собрать схему — попробуйте ещё раз.'); return; }
+      const memo=['Как отправлять в нейросеть',
+        '',
+        folders.length===1?'В архиве одна папка — всё для одного запроса к нейросети.'
+          :`В архиве ${folders.length} папки — по одной на каждое фото комнаты. Одна папка = один запрос.`,
+        '',
+        '1. Откройте новый чат с нейросетью. Перетащите в него ВСЕ файлы из папки «'+folders[0]+'» и отправьте.',
+        '   Описание-проекта.txt — это и есть задание (промпт): если чат не принимает .txt, скопируйте его текст в сообщение.',
+        '2. Если результат не устроил — попросите сгенерировать ещё раз в этом же чате.']
+        .concat(folders.length>1?[
+        '3. Удачный результат сохраните.',
+        '4. Дальше по порядку, В ТОМ ЖЕ ЧАТЕ: все файлы из папки «'+folders[1]+'» + первый удачный результат',
+        '   (как образец внешнего вида панелей — описание в папке это учитывает). Так все ракурсы',
+        '   комнаты получатся одной и той же отделкой.',
+        '5. Так же с остальными папками.']:[])
+        .concat(missing.length?['','Не вошли (на странице не были загружены снимки): '+missing.map(r=>r.photo.name||'без имени').join(', ')]:[]);
+      files.push({name:'как-отправлять.txt', data:enc.encode(memo.join('\r\n'))});
+      // явные записи папок — не все архиваторы создают папку по одному лишь пути файла
+      folders.slice().reverse().forEach(d=>files.unshift({name:d+'/', data:new Uint8Array(0)}));
+      const zipUrl=URL.createObjectURL(buildZipBlob(files));
+      triggerDownload(zipUrl,zipFilenameForToday());
+      setTimeout(()=>URL.revokeObjectURL(zipUrl),10000);
+    });
   });
 })();
 
