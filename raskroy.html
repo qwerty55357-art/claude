@@ -364,14 +364,16 @@ tbody tr:hover td{background:var(--surface)}
       <div class="row row-1"><div class="f"><label>Стена</label><select id="viz-wall"></select></div></div>
       <div class="row row-1"><div class="f"><label>Фото стены/комнаты</label><input type="file" id="viz-photo" accept="image/*"></div></div>
       <div class="row row-1"><div class="f"><label>Что размечаем сейчас</label><select id="viz-target"></select></div></div>
+      <div class="row row-1"><div class="f"><label class="chk"><input type="checkbox" id="viz-loupe" checked> Лупа при разметке</label></div></div>
       <p class="hint">Отметьте на фото 4 угла текущей цели кликами по порядку (в один обход, без
         перехлёста сторон) — она ляжет на фото с учётом перспективы и освещения. Точки можно
-        перетаскивать, чтобы подогнать точнее. Стена — обязательная цель; если у её проёмов есть
-        откосы, ниже в списке появится отдельная цель на каждую видимую грань откоса — отмечать их
-        необязательно, неотмеченные грани останутся на фото как есть (видно сквозь проём). Каждое
-        нажатие «Наложить» добавляет текущую стену (и её откосы) поверх уже полученного результата —
-        так можно последовательно оформить несколько стен на одном фото (угол комнаты): отметили и
-        наложили одну стену, переключили стену в списке выше, отметили и наложили вторую. Цель
+        перетаскивать, чтобы подогнать точнее; лупа у курсора показывает место в полном разрешении
+        фото — ставьте точку ровно в угол, где сходятся стены/потолок/пол. Стена — обязательная
+        цель; если у её проёмов есть откосы, ниже в списке появится отдельная цель на каждую видимую
+        грань откоса — отмечать их необязательно, неотмеченные грани останутся на фото как есть
+        (видно сквозь проём). На одном фото можно оформить несколько стен (угол комнаты): отметили и
+        наложили одну стену, переключили стену в списке выше, отметили и наложили вторую. Вернулись
+        к уже наложенной стене — её точки снова можно двигать, повторное «Наложить» заменит её. Цель
         «Зоны исключения» — тянуть прямоугольником поверх мебели/розеток/выключателей на фото,
         чтобы туда ничего не легло (эти места останутся как на фото); клик по уже отмеченной зоне
         удаляет её. Работает целиком в браузере, без отправки фото куда-либо.</p>
@@ -5737,6 +5739,7 @@ window.addEventListener('beforeprint',flushScene3D);
   const opacityInp=$('#viz-guide-opacity'), opacityVal=$('#viz-guide-opacity-val');
   const btnGuideDownload=$('#viz-guide-download'), btnJsonCopy=$('#viz-json-copy'), jsonOutput=$('#viz-json-output');
   const btnDownloadAll=$('#viz-guide-download-all'), includeIsoChk=$('#viz-guide-include-iso');
+  const loupeChk=$('#viz-loupe');
   const MAXW=900, MAXH=620;         // размер интерактивного превью (сама подгонка точек)
   let photoImg=null;                // Image в полном разрешении оригинала — неизменный эталон
   let dispScale=1, dispW=0, dispH=0;// коэффициент полное->превью и размер превью
@@ -5818,6 +5821,72 @@ window.addEventListener('beforeprint',flushScene3D);
         ctx.fillText(String(i+1),p.x,p.y+.5);
       });
     }
+    drawLoupe(diagram);
+  }
+
+  // ---- лупа у курсора: главная ошибка ручной разметки — угол, кликнутый на 5–10 пикселей мимо
+  // (на реальном тесте так верх стены «залез» на потолок). Превью уменьшено до ~900px, настоящий
+  // угол там не разглядеть — поэтому в лупе фрагмент ИСХОДНОГО фото в полном разрешении (а не
+  // растянутое превью), поверх — схема с тем же % прозрачности, линии и точки текущей цели и
+  // перекрестие ровно в точке, куда встанет/где стоит точка. Лупа отодвинута от курсора, чтобы не
+  // закрывать место, куда целишься (на телефоне — палец), и прижимается к краю канвы, не вылезая
+  const LOUPE_R=72, LOUPE_ZOOM=4;   // радиус в px превью; зум относительно превью
+  let loupePt=null;
+  function drawLoupe(diagram){
+    if(!loupePt||!photoImg||!loupeChk||!loupeChk.checked) return;
+    const R=LOUPE_R, gap=26;
+    let lx=loupePt.x-R-gap, ly=loupePt.y-R-gap;
+    if(lx-R<0) lx=loupePt.x+R+gap;
+    if(ly-R<0) ly=loupePt.y+R+gap;
+    lx=Math.min(dispW-R-2,Math.max(R+2,lx)); ly=Math.min(dispH-R-2,Math.max(R+2,ly));
+    const half=R/LOUPE_ZOOM/dispScale;           // полуразмер области в пикселях полного фото
+    const sx=loupePt.x/dispScale-half, sy=loupePt.y/dispScale-half;
+    // превью-координаты → координаты внутри лупы
+    const toL=p=>({x:lx+(p.x-loupePt.x)*LOUPE_ZOOM, y:ly+(p.y-loupePt.y)*LOUPE_ZOOM});
+    ctx.save();
+    ctx.beginPath(); ctx.arc(lx,ly,R,0,Math.PI*2); ctx.clip();
+    ctx.fillStyle='#111'; ctx.fillRect(lx-R,ly-R,R*2,R*2);   // фон за краем фото
+    ctx.imageSmoothingEnabled=true;
+    // область у края фото частично вне картинки — рисуем только пересечение, со сдвигом, иначе
+    // браузеры по-разному масштабируют «обрезанный» источник и картинка в лупе съезжает
+    const iw=photoImg.naturalWidth, ih=photoImg.naturalHeight;
+    const cx0=Math.max(0,sx), cy0=Math.max(0,sy), cx1=Math.min(iw,sx+2*half), cy1=Math.min(ih,sy+2*half);
+    if(cx1>cx0&&cy1>cy0){
+      const k=R/half;                              // пикселей лупы на пиксель полного фото
+      const dx=lx-R+(cx0-sx)*k, dy=ly-R+(cy0-sy)*k, dw=(cx1-cx0)*k, dh=(cy1-cy0)*k;
+      ctx.drawImage(photoImg,cx0,cy0,cx1-cx0,cy1-cy0,dx,dy,dw,dh);
+      if(diagram){
+        ctx.globalAlpha=Math.max(0,Math.min(1,+opacityInp.value/100));
+        ctx.drawImage(diagram,cx0,cy0,cx1-cx0,cy1-cy0,dx,dy,dw,dh);
+        ctx.globalAlpha=1;
+      }
+    }
+    const key=targetSel.value;
+    const pts=key!=='exclude'?(pointsByTarget[key]||[]):[];
+    if(pts.length>1){
+      ctx.beginPath();
+      pts.forEach((p,i)=>{ const q=toL(p); if(i) ctx.lineTo(q.x,q.y); else ctx.moveTo(q.x,q.y); });
+      if(pts.length===4) ctx.closePath();
+      ctx.setLineDash([6,4]); ctx.strokeStyle='#ffb020'; ctx.lineWidth=1.5; ctx.stroke(); ctx.setLineDash([]);
+    }
+    pts.forEach(p=>{ const q=toL(p); ctx.beginPath(); ctx.arc(q.x,q.y,4,0,Math.PI*2); ctx.strokeStyle='#ffb020'; ctx.lineWidth=2; ctx.stroke(); });
+    // перекрестие — двойная линия (тёмная + светлая), чтобы читалось и на белой стене, и на тёмной
+    [['rgba(0,0,0,.75)',3],['#fff',1]].forEach(([c,w])=>{
+      ctx.strokeStyle=c; ctx.lineWidth=w; ctx.beginPath();
+      ctx.moveTo(lx-R,ly); ctx.lineTo(lx-5,ly); ctx.moveTo(lx+5,ly); ctx.lineTo(lx+R,ly);
+      ctx.moveTo(lx,ly-R); ctx.lineTo(lx,ly-5); ctx.moveTo(lx,ly+5); ctx.lineTo(lx,ly+R);
+      ctx.stroke();
+    });
+    ctx.restore();
+    ctx.beginPath(); ctx.arc(lx,ly,R,0,Math.PI*2);
+    ctx.lineWidth=3; ctx.strokeStyle='#ffb020'; ctx.stroke();
+  }
+  // перерисовка на каждое движение мыши — не чаще кадра
+  let redrawQueued=false;
+  function scheduleRedraw(){
+    if(redrawQueued) return;
+    redrawQueued=true;
+    requestAnimationFrame(()=>{ redrawQueued=false; redraw(); });
   }
 
   let photoDataUrl=null; // исходные байты загруженного фото как есть (для «Скачать всё для нейросети» — отдаём то же самое, что загрузили, а не пере-кодированную копию)
@@ -5884,6 +5953,7 @@ window.addEventListener('beforeprint',flushScene3D);
   canvas.addEventListener('pointerdown',ev=>{
     if(!photoImg) return;
     const pt=ptFromEvent(ev);
+    loupePt=pt;
     if(targetSel.value==='exclude'){
       // клик ВНУТРИ уже отмеченной зоны — убрать её (тот же жест, без отдельной кнопки-урны)
       const hitIdx=exclusionRects.findIndex(r=>pt.x>=r.x0&&pt.x<=r.x1&&pt.y>=r.y0&&pt.y<=r.y1);
@@ -5902,20 +5972,31 @@ window.addEventListener('beforeprint',flushScene3D);
     if(pts.length<4){ pts.push(pt); redraw(); }
   });
   canvas.addEventListener('pointermove',ev=>{
-    if(exclDraft){ const pt=ptFromEvent(ev); exclDraft.x1=pt.x; exclDraft.y1=pt.y; redraw(); return; }
-    if(dragIdx<0) return;
-    pointsByTarget[dragKey][dragIdx]=ptFromEvent(ev); redraw();
+    if(!photoImg) return;
+    const pt=ptFromEvent(ev);
+    loupePt=pt;   // лупа нужна и при наведении — прицелиться ДО клика, а не только при перетаскивании
+    if(exclDraft){ exclDraft.x1=pt.x; exclDraft.y1=pt.y; }
+    else if(dragIdx>=0) pointsByTarget[dragKey][dragIdx]=pt;
+    scheduleRedraw();
   });
+  canvas.addEventListener('pointerleave',()=>{
+    if(dragIdx>=0||exclDraft) return;   // во время перетаскивания (pointer capture) лупу не прячем
+    loupePt=null; scheduleRedraw();
+  });
+  loupeChk.addEventListener('change',()=>scheduleRedraw());
   const endDrag=ev=>{
     if(exclDraft){
       const x0=Math.min(exclDraft.x0,exclDraft.x1), y0=Math.min(exclDraft.y0,exclDraft.y1);
       const x1=Math.max(exclDraft.x0,exclDraft.x1), y1=Math.max(exclDraft.y0,exclDraft.y1);
       exclDraft=null;
       if(x1-x0>4&&y1-y0>4){ exclusionRects.push({x0,y0,x1,y1}); markDirty(); } // отсекаем случайный клик без реального перетаскивания
+      if(ev&&ev.pointerType==='touch') loupePt=null;
       redraw();
       return;
     }
     dragIdx=-1; dragKey=null;
+    // палец убрали — «наведения» на тачскрине нет, лупу прячем; мышь остаётся над канвой — лупа тоже
+    if(ev&&ev.pointerType==='touch'){ loupePt=null; scheduleRedraw(); }
   };
   canvas.addEventListener('pointerup',endDrag);
   canvas.addEventListener('pointercancel',endDrag);
