@@ -40,6 +40,12 @@ function mkWall(r){
     w.vfree=true;
     for(let k=1;k<=3;k++){ const pos=Math.round(W*k/4/10)*10; if(!w.vseamsU.some(sm=>Math.abs(sm.pos-pos)<5)) w.vseamsU.push({id:100+k,pos}); }
   }
+  // свободная расстановка горизонтальных стыков (w.hfree): у четверти стен — детерминированно по размерам;
+  // добавляем ручные стыки, часть из них действует только на чётные/нечётные полосы
+  if(((W/10+H/10)%4)===1){
+    w.hfree=true; w.seamsU=w.seamsU||[];
+    [[0.3,null],[0.6,'even'],[0.8,'odd']].forEach(([k,sc],i)=>{ const pos=Math.round(H*k/10)*10; if(!w.seamsU.some(sm=>Math.abs(sm.pos-pos)<5)) w.seamsU.push(Object.assign({id:200+i,pos},sc?{scope:sc}:{})); });
+  }
   return w;
 }
 const N=12000; const rand=rnd(20260816); let crashed=0;
@@ -135,6 +141,25 @@ for(let t=0;t<N;t++){
       }
       chk('V3',arr.length===want,`${id} стена ${wi} участок ${ri}: полос ${arr.length}, ожидалось ${want} при ручных стыках ${cuts.join(',')}`);
       cuts.forEach(pos=>chk('V4',arr.some(st=>Math.abs(st.end-pos)<0.6),`${id} стена ${wi}: ручной стык ${pos} не стал границей полос`));
+    });
+  });
+  // H1–H2: поперечные стыки при свободной расстановке (w.hfree) — только ручные + деление участков длиннее листа
+  wallsArr.forEach((w,wi)=>{
+    const L=R.layouts[wi];
+    L.pieces.forEach(p=>chk('H1',p.len<=G.pl+0.5,`${id} стена ${wi}: деталь ${p.label} длиннее листа (${p.len} > ${G.pl})`));
+    if(!w.hfree) return;
+    // каждый ручной стык (в своей области действия) внутри сегмента полосы обязан стать границей куска
+    (w.seamsU||[]).forEach(sm=>{
+      L.strips.forEach(st=>{
+        const inScope=!sm.scope||(sm.scope==='even'?st.i%2===0:sm.scope==='odd'?st.i%2===1:sm.scope.includes(st.i));
+        if(!inScope) return;
+        st.segs.forEach(sg=>{
+          if(!(sm.pos>sg[0]+0.5&&sm.pos<sg[1]-0.5)) return;
+          const mine=L.pieces.filter(p=>p.strip===st.i&&p.from>=sg[0]-8&&p.to<=sg[1]+8);
+          chk('H2',mine.some(p=>Math.abs(p.from-sm.pos)<9||Math.abs(p.to-sm.pos)<9),
+            `${id} стена ${wi} полоса ${st.i}: ручной стык ${sm.pos} (scope ${sm.scope||'все'}) не стал границей куска`);
+        });
+      });
     });
   });
   // L1: деталь внутри листа

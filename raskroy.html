@@ -281,9 +281,15 @@ tbody tr:hover td{background:var(--surface)}
         <div class="f"><label>Высота потолка</label><input type="number" id="i-ceil" value="2700"><span class="unit">мм</span></div>
       </div>
       <label class="sub-l">Горизонтальные стыки активной стены</label>
+      <label class="chk"><input type="checkbox" id="i-hfree"><span>Свободная расстановка стыков — любой стык можно двигать</span></label>
       <div id="seams-list"></div>
+      <div class="row" id="hseam-fill" style="grid-template-columns:1fr 1fr auto;align-items:end;margin-bottom:6px">
+        <div class="f"><label>Высота куска</label><input type="number" id="hseam-step" value="1000" min="50"><span class="unit">мм</span></div>
+        <div class="f"><label>Считать</label><select id="hseam-from"><option value="l">снизу вверх</option><option value="r">сверху вниз</option></select></div>
+        <button class="btn btn-mini" id="btn-hseam-fill" title="Заменяет стыки стены стыками через равную длину куска">расставить</button>
+      </div>
       <button class="btn btn-mini" id="btn-add-seam" style="margin-bottom:4px">+ добавить горизонтальный стык</button>
-      <p class="hint">Дизайнерские швы в точных отметках от пола. Стык можно перетаскивать прямо на схеме; перетаскивание автоматического стыка превращает его в ручной. Профиль на стыке (соединитель / встык / LED) — клик по линии на схеме, либо в разделе «LED».</p>
+      <p class="hint">Дизайнерские швы в точных отметках от пола. Стык можно перетаскивать прямо на схеме. С галочкой «свободная расстановка» автоматических стыков (шаг листа, «кирпичик») нет: каждый можно задать цифрой («от пола» или «от предыдущего стыка») либо перетащить; «расставить» делает стыки через равную длину куска. Кусок длиннее листа делится автоматически (строка «авто», можно закрепить). Профиль на стыке (соединитель / встык / LED) — клик по линии на схеме, либо в разделе «LED».</p>
       <label class="sub-l">Вертикальные стыки активной стены</label>
       <label class="chk"><input type="checkbox" id="i-vfree"><span>Свободная расстановка стыков — любой стык можно двигать</span></label>
       <div id="vseams-list"></div>
@@ -1027,6 +1033,7 @@ function wallToForm(){
   $('#i-w').value=w.W; $('#i-h').value=w.H; $('#i-ceil').value=w.ceil;
   $('#i-e-top').value=edgeMode(w.edges.top); $('#i-e-bot').value=edgeMode(w.edges.bot);
   $('#i-e-left').value=edgeMode(w.edges.left); $('#i-e-right').value=edgeMode(w.edges.right);
+  $('#i-hfree').checked=!!w.hfree;
   $('#i-vfree').checked=!!w.vfree;   // только здесь: renderVSeams вызывается и из пересчёта, прямо во время клика по галочке
   renderSeams(); renderVSeams();
 }
@@ -1036,42 +1043,155 @@ function formToWall(){
   w.W=num('#i-w'); w.H=num('#i-h'); w.ceil=num('#i-ceil');
   w.edges={top:$('#i-e-top').value,bot:$('#i-e-bot').value,left:$('#i-e-left').value,right:$('#i-e-right').value};
 }
-const WALL_FIELDS=['i-wname','i-w','i-h','i-ceil','i-e-top','i-e-bot','i-e-left','i-e-right','i-vfree'];
+const WALL_FIELDS=['i-wname','i-w','i-h','i-ceil','i-e-top','i-e-bot','i-e-left','i-e-right','i-vfree','i-hfree'];
 $('#i-wname').addEventListener('input',()=>{ AW().name=$('#i-wname').value.trim()||AW().name; AW().autoName=false; renderWallCompass(); });
 // [ОТРИСОВКА]
+// Горизонтальные (поперечные) стыки — свободная расстановка, по аналогии с вертикальными (см. ниже).
+// Стык — {id,pos,scope?}: scope ограничивает его чётными/нечётными полосами или списком номеров
+// (так «кирпичная» раскладка переживает включение свободной расстановки без единого изменения шва)
+const fmtIn=v=>Math.round(v*10)/10;
+// все поперечные стыки по последнему расчёту: позиция → полосы, где она режет
+function hSeamGroups(){
+  const L=LAST&&LAST.R&&LAST.R.layouts&&LAST.R.layouts[active]; if(!L) return null;
+  const map=new Map();
+  L.seams.forEach(sm=>{ const k=Math.round(sm.pos); if(!map.has(k)) map.set(k,{pos:sm.pos,strips:new Set()}); map.get(k).strips.add(sm.strip); });
+  return {L,groups:[...map.values()].sort((x,y)=>x.pos-y.pos)};
+}
+// область действия стыка, который режет заданные полосы (null — все, где он вообще попадает в кусок)
+function hScopeFor(L,pos,strips){
+  const A=L.strips.filter(st=>st.segs.some(sg=>pos>sg[0]+0.5&&pos<sg[1]-0.5)).map(st=>st.i);
+  const S=[...strips].sort((x,y)=>x-y), eq=(x,y)=>x.length===y.length&&x.every(v=>y.includes(v));
+  if(eq(S,A)) return null;
+  if(eq(S,A.filter(i=>i%2===0))) return 'even';
+  if(eq(S,A.filter(i=>i%2===1))) return 'odd';
+  return S;
+}
+const scopeText=sc=>!sc?'':sc==='even'?'только чётные полосы (2, 4…)':sc==='odd'?'только нечётные полосы (1, 3…)':'полосы '+sc.map(i=>i+1).join(', ');
+function hSeamRows(){
+  const w=AW(), info=hSeamGroups(), seams=(w.seamsU||[]).slice().sort((a,b)=>a.pos-b.pos);
+  const rows=seams.map(sm=>({pos:sm.pos,sm}));
+  if(w.hfree&&info) info.groups.forEach(g=>{
+    if(!seams.some(sm=>Math.abs(sm.pos-g.pos)<1.5)) rows.push({pos:g.pos,sm:null,strips:g.strips});
+  });
+  rows.sort((x,y)=>x.pos-y.pos);
+  rows.forEach((r,i)=>{ r.prev=i?rows[i-1].pos:0; });
+  return rows;
+}
+// двигаем ручной стык: тип стыка (jointModes) и привязки LED-контуров едут вместе с ним
+function moveHSeam(w,sm,newPos){
+  const o=Math.round(sm.pos), n=Math.round(newPos);
+  if(o!==n){
+    const jm=w.jointModes||{}, po='h|'+o+'|';
+    Object.keys(jm).filter(k=>k.startsWith(po)).forEach(k=>{ jm['h|'+n+'|'+k.slice(po.length)]=jm[k]; delete jm[k]; });
+    ledCircuits.forEach(c=>c.legs.forEach(l=>{ if(+l.wall===w.id&&l.el==='jointH'&&Math.round(l.pos)===o) l.pos=n; }));
+  }
+  sm.pos=newPos;
+}
+function addUserHSeam(w,pos,scope){
+  w.seamsU=w.seamsU||[]; w.seamSeq=(w.seamSeq||0)+1;
+  const sm={id:w.seamSeq,pos:fmtIn(pos)}; if(scope) sm.scope=scope; w.seamsU.push(sm); return sm;
+}
+// свободная расстановка: все естественные поперечные стыки (шаг листа, rowH, «кирпичик») становятся
+// ручными — позиции те же, раскладка не меняется
+function enableHFree(w){
+  if(w.hfree) return;
+  const info=hSeamGroups(); w.seamsU=w.seamsU||[];
+  if(info) info.groups.forEach(g=>{
+    if(!w.seamsU.some(sm=>Math.abs(sm.pos-g.pos)<1.5)) addUserHSeam(w,g.pos,hScopeFor(info.L,g.pos,g.strips));
+  });
+  w.hfree=true;
+  const cb=$('#i-hfree'); if(cb) cb.checked=true;
+}
 function renderSeams(){
-  const w=AW();
-  $('#seams-list').innerHTML=(w.seamsU||[]).map(sm=>`
-    <div class="row" data-seamrow="${sm.id}" style="align-items:center;margin-bottom:4px">
-      <div class="f"><label>Отметка от пола</label><input type="number" data-seampos value="${Math.round(sm.pos)}"><span class="unit">мм</span></div>
-      <div class="f" style="display:flex;gap:8px;align-items:center;margin-top:14px">
-        <span class="hint" style="margin:0">профиль — клик по линии на схеме</span>
-        <button class="btn btn-del btn-mini" data-seamdel="${sm.id}">удалить</button>
-      </div>
+  const w=AW(); const horiz=(($('#i-orient')||{}).value)==='h';
+  const L1=horiz?'от левого края':'от пола', L2='от предыдущего стыка';
+  const grid='grid-template-columns:1fr 1fr auto;align-items:end;margin-bottom:4px';
+  const rows=hSeamRows();
+  $('#seams-list').innerHTML=rows.map((r,i)=>r.sm?`
+    <div class="row" data-seamrow="${r.sm.id}" style="${grid}">
+      <div class="f"><label>Стык ${i+1} · ${L1}</label><input type="number" step="any" data-seampos value="${fmtIn(r.sm.pos)}"><span class="unit">мм</span>${r.sm.scope?`<span class="hint" style="margin:0">${scopeText(r.sm.scope)}</span>`:''}</div>
+      <div class="f"><label>${L2}</label><input type="number" step="any" data-seamgap value="${fmtIn(r.pos-r.prev)}"><span class="unit">мм</span></div>
+      <button class="btn btn-del btn-mini" data-seamdel="${r.sm.id}">удалить</button>
+    </div>`:`
+    <div class="row" data-seamauto="${fmtIn(r.pos)}" style="${grid}">
+      <div class="f"><label>Стык ${i+1} · ${L1} · авто</label><input type="number" disabled value="${fmtIn(r.pos)}"><span class="unit">мм</span></div>
+      <div class="f"><label>${L2}</label><input type="number" disabled value="${fmtIn(r.pos-r.prev)}"><span class="unit">мм</span></div>
+      <button class="btn btn-mini" data-seamfix="${fmtIn(r.pos)}" title="Автоматический стык (кусок длиннее листа) — закрепить, чтобы двигать">закрепить</button>
     </div>`).join('');
 }
+function updateSeamsInPlace(){
+  const box=$('#seams-list'); if(!box) return;
+  const rows=hSeamRows();
+  if(rows.length!==box.querySelectorAll('[data-seamrow],[data-seamauto]').length){ renderSeams(); return; }
+  rows.forEach(r=>{
+    if(!r.sm) return;
+    const row=box.querySelector(`[data-seamrow="${r.sm.id}"]`); if(!row) return;
+    const pi=row.querySelector('[data-seampos]'), gi=row.querySelector('[data-seamgap]');
+    if(pi&&pi!==document.activeElement) pi.value=fmtIn(r.sm.pos);
+    if(gi&&gi!==document.activeElement) gi.value=fmtIn(r.pos-r.prev);
+  });
+}
+let hsListTimer=null;
+document.addEventListener('raskroy:recomputed',()=>{
+  clearTimeout(hsListTimer);
+  hsListTimer=setTimeout(()=>{
+    const box=$('#seams-list'); if(!box) return;
+    if(box.contains(document.activeElement)) updateSeamsInPlace(); else renderSeams();
+  },0);
+});
 $('#seams-list').addEventListener('input',e=>{
   const row=e.target.closest('[data-seamrow]'); if(!row) return;
   const w=AW(); const sm=(w.seamsU||[]).find(x=>x.id==row.dataset.seamrow); if(!sm) return;
-  if(e.target.hasAttribute('data-seampos')) sm.pos=parseFloat(e.target.value)||0;
-  else return;
+  const v=parseFloat(e.target.value), val=isFinite(v)?v:0;
+  if(e.target.hasAttribute('data-seampos')) moveHSeam(w,sm,val);
+  else if(e.target.hasAttribute('data-seamgap')){
+    const me=hSeamRows().find(r=>r.sm===sm);
+    moveHSeam(w,sm,(me?me.prev:0)+val);
+    const pi=row.querySelector('[data-seampos]'); if(pi) pi.value=fmtIn(sm.pos);
+  } else return;
   run();
 });
+$('#seams-list').addEventListener('focusout',()=>setTimeout(()=>{ if(!$('#seams-list').contains(document.activeElement)) renderSeams(); },0));
+$('#seams-list').addEventListener('keydown',e=>{ if(e.key==='Enter'&&e.target.tagName==='INPUT') e.target.blur(); });
 $('#seams-list').addEventListener('click',e=>{
-  const id=e.target.dataset.seamdel; if(!id) return;
-  const w=AW(); w.seamsU=(w.seamsU||[]).filter(x=>x.id!=id);
+  const w=AW();
+  if(e.target.dataset.seamdel){ w.seamsU=(w.seamsU||[]).filter(x=>x.id!=e.target.dataset.seamdel); renderSeams(); run(); return; }
+  if(e.target.dataset.seamfix!==undefined){
+    const pos=+e.target.dataset.seamfix, info=hSeamGroups();
+    const g=info&&info.groups.find(x=>Math.abs(x.pos-pos)<1.5);
+    addUserHSeam(w,pos,g?hScopeFor(info.L,g.pos,g.strips):null); renderSeams(); run();
+  }
+});
+$('#i-hfree').addEventListener('change',()=>{
+  const w=AW();
+  if($('#i-hfree').checked) enableHFree(w); else w.hfree=false;
+  renderSeams(); run();
+});
+// «расставить»: стыки через равную длину куска по всей высоте (при горизонтальной раскладке — ширине) стены;
+// прежние ручные стыки заменяются, свободная расстановка включается сама
+$('#btn-hseam-fill').addEventListener('click',()=>{
+  const w=AW(), step=parseFloat($('#hseam-step').value);
+  if(!(step>=50)) return;
+  const total=(($('#i-orient')||{}).value)==='h'?w.W:w.H, fromTop=$('#hseam-from').value==='r';
+  w.hfree=true; $('#i-hfree').checked=true; w.seamsU=[];
+  for(let k=1;;k++){
+    const pos=fromTop?total-k*step:k*step;
+    if(fromTop?pos<=1:pos>=total-1) break;
+    addUserHSeam(w,pos);
+  }
+  w.seamsU.sort((x,y)=>x.pos-y.pos);
   renderSeams(); run();
 });
 $('#btn-add-seam').addEventListener('click',()=>{
-  const w=AW(); w.seamsU=w.seamsU||[]; w.seamSeq=(w.seamSeq||0)+1;
+  const w=AW(); w.seamsU=w.seamsU||[];
   // новая отметка — посередине, не совпадая с существующими
-  let pos=Math.round(w.H/2/10)*10;
+  const total=(($('#i-orient')||{}).value)==='h'?w.W:w.H;
+  let pos=Math.round(total/2/10)*10;
   while(w.seamsU.some(x=>Math.abs(x.pos-pos)<20)) pos+=100;
-  w.seamsU.push({id:w.seamSeq,pos});
+  addUserHSeam(w,pos);
   renderSeams(); run();
 });
 // [ОТРИСОВКА]
-const fmtIn=v=>Math.round(v*10)/10;
 // Границы полос активной стены по последнему расчёту, в координатах ВВОДА (до среза радиусным
 // углом, как и w.vseamsU): участки (между проёмами во всю высоту) и стыки внутри них
 function vSeamBounds(){
@@ -2267,8 +2387,13 @@ function buildLayout(S){
     // нулевой фазы, чтобы дотянуть от начала сегмента
     const anchor=(rowH+(S.brick&&forcesCut&&(stI%2===1)?S.pl/2:0))%S.pl;
     let pts=[];
-    if(anchor>0){ let q=anchor; while(q<=a+0.5) q+=S.pl; for(;q<b-0.5;q+=S.pl) pts.push(q); }
-    (S.userSeams||[]).forEach(us=>{ if(us>a+0.5 && us<b-0.5) pts.push(us); });
+    // свободная расстановка горизонтальных стыков (S.hfree): периодических отметок (шаг листа, rowH,
+    // «кирпичик») нет — режут только ручные стыки, а участок длиннее листа делится ниже, как и раньше
+    if(!S.hfree && anchor>0){ let q=anchor; while(q<=a+0.5) q+=S.pl; for(;q<b-0.5;q+=S.pl) pts.push(q); }
+    // ручной стык может действовать не на все полосы (scope: 'even'|'odd'|список номеров) — так при
+    // включении свободной расстановки на «кирпичной» раскладке сохраняется ровно та же раскладка
+    const inScope=sc=>!sc||(sc==='even'?stI%2===0:sc==='odd'?stI%2===1:sc.includes(stI));
+    (S.userSeamsX||(S.userSeams||[]).map(pos=>({pos,scope:null}))).forEach(us=>{ if(inScope(us.scope) && us.pos>a+0.5 && us.pos<b-0.5) pts.push(us.pos); });
     (bendExtraPts[stI]||[]).forEach(v=>{ if(v>a+0.5 && v<b-0.5) pts.push(v); });
     pts=[...new Set(pts.map(v=>Math.round(v)))].sort((x,y)=>x-y);
     const out=[]; let prev=a;
@@ -3074,7 +3199,7 @@ function wallCutView(w,cuts){
 }
 function wallS(G,w){
   return Object.assign({},G,{W:w.W,H:w.H,ceil:w.ceil,rowH:w.rowH||0,
-    userSeams:(w.seamsU||[]).map(x=>x.pos),userVSeams:(w.vseamsU||[]).map(x=>x.pos),vfree:!!w.vfree,ops:w.ops,
+    userSeams:(w.seamsU||[]).map(x=>x.pos),userSeamsX:(w.seamsU||[]).map(x=>({pos:x.pos,scope:x.scope||null})),hfree:!!w.hfree,userVSeams:(w.vseamsU||[]).map(x=>x.pos),vfree:!!w.vfree,ops:w.ops,
     edges:w.edges,cout:w.cout,cin:w.cin,
     // резолверы типа стыка для геометрии (LED-соединитель физически шире, см. LED_GAP в buildLayout) —
     // те же jointSegMode/jointSegKey, что использует и остальной проект для сметы/подсветки линий
@@ -5886,14 +6011,27 @@ document.addEventListener('keydown',e=>{
     const w=AW();
     if(drag.mode==='seam'){
       let sm=drag.seamId!=null?(w.seamsU||[]).find(x=>x.id===drag.seamId):null;
-      if(!sm){ w.seamSeq=(w.seamSeq||0)+1; sm={id:w.seamSeq,pos:drag.startPos}; w.seamsU=w.seamsU||[]; w.seamsU.push(sm); drag.seamId=sm.id; }
+      if(!sm){
+        // естественный стык (шаг листа, rowH, «кирпичик») — включаем свободную расстановку: он становится
+        // ручным и двигается сам; если стык уже «авто» (кусок длиннее листа) — закрепляем его как ручной
+        if(!w.hfree){ enableHFree(w); sm=(w.seamsU||[]).find(x=>Math.abs(x.pos-drag.startPos)<1.5); }
+        if(!sm){
+          const info=hSeamGroups(), g=info&&info.groups.find(x=>Math.abs(x.pos-drag.startPos)<1.5);
+          sm=addUserHSeam(w,drag.startPos,g?hScopeFor(info.L,g.pos,g.strips):null);
+        }
+        drag.seamId=sm.id;
+      }
       const pt=svgPoint(ev); if(!pt) return;
-      const G0=collect(); const vert=G0.orient==='v';
+      const G0=collect(); const vert=G0.orient==='v'; const total=vert?w.H:w.W;
       let pos=vert ? w.H-pt.y : pt.x;
       pos=Math.round(pos/10)*10;
-      pos=Math.min(Math.max(pos,50),(vert?w.H:w.W)-50);
-      sm.pos=pos;
-      run();
+      pos=Math.min(Math.max(pos,50),total-50);
+      if(w.hfree){      // не перетаскиваем через соседние стыки (минимум 50 мм куска)
+        let lo=0, hi=total;
+        hSeamRows().forEach(r=>{ if(r.sm===sm) return; if(r.pos<sm.pos-0.5&&r.pos>lo) lo=r.pos; if(r.pos>sm.pos+0.5&&r.pos<hi) hi=r.pos; });
+        pos=Math.min(Math.max(pos,lo+50),hi-50);
+      }
+      if(pos!==sm.pos){ moveHSeam(w,sm,pos); run(); }
       return;
     }
     if(drag.mode==='vseam'){
@@ -5997,6 +6135,11 @@ document.addEventListener('keydown',e=>{
       delete (w.jointModes||{})[key];
       closeMatMenu(); renderSeams(); run();
     },true);
+    else menuBtn(menu,w.hfree?'Закрепить стык (чтобы двигать)':'Сделать все стыки перемещаемыми',false,()=>{
+      if(w.hfree){ const info=hSeamGroups(), g=info&&info.groups.find(x=>Math.abs(x.pos-pos)<2); addUserHSeam(w,pos,g?hScopeFor(info.L,g.pos,g.strips):null); }
+      else enableHFree(w);
+      closeMatMenu(); renderSeams(); run();
+    });
   }
   function showJointMenu(ev,pos,segStart){
     const w=AW(); const G=collect();
