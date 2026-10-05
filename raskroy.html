@@ -230,6 +230,24 @@ tbody tr:hover td{background:var(--surface)}
   .stage{padding:20px 16px 70px}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none !important;animation:none !important}}
+/* пикер расцветок (matPickerInto) и кнопки выбора материала */
+.mp-tabs{display:flex;flex-wrap:wrap;gap:4px;padding:4px 2px 6px}
+.mp-tab{background:transparent;border:1px solid var(--line-2);border-radius:var(--r);padding:3px 8px;cursor:pointer;font-family:var(--mono);font-size:10.5px;color:var(--paper)}
+.mp-tab:hover{border-color:var(--straw)}
+.mp-tab.on{background:var(--straw);color:var(--void);border-color:var(--straw)}
+.mp-search{width:100%;margin:0 0 6px;padding:5px 8px;background:var(--void);border:1px solid var(--line-2);border-radius:var(--r);color:var(--paper);font-size:12px}
+.mp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:6px;max-height:46vh;overflow:auto;padding:2px}
+.mp-tile{display:flex;flex-direction:column;align-items:stretch;gap:3px;background:var(--void);border:1px solid var(--line-2);border-radius:var(--r);padding:3px;cursor:pointer;color:var(--paper);font-family:var(--mono);font-size:10.5px;text-align:center}
+.mp-tile:hover{border-color:var(--straw)}
+.mp-tile.on{border-color:var(--straw);outline:2px solid var(--straw-deep)}
+.mp-tile img,.mp-tile .mp-plain{display:block;width:100%;aspect-ratio:1;object-fit:cover;border-radius:2px}
+.mp-tile .mp-plain{display:flex;align-items:center;justify-content:center;color:var(--ink-face);font-size:10px;line-height:1.15;padding:3px}
+.mp-tile span.mp-a{overflow-wrap:anywhere;line-height:1.15}
+.mp-none{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:none;border:none;color:var(--paper);padding:6px 8px;cursor:pointer;border-radius:6px;font-size:12px}
+.mp-none:hover{background:var(--void)}
+.mp-count{font-family:var(--mono);font-size:10px;color:var(--muted);padding:5px 2px 0}
+.mat-pick-btn{display:inline-flex;align-items:center;gap:8px;width:100%;text-align:left;text-transform:none;letter-spacing:0;font-family:var(--sans);font-size:12.5px}
+.mat-pick-btn img,.mat-pick-btn i{flex:none;width:22px;height:22px;border-radius:3px;object-fit:cover;border:1px solid var(--line-2);display:inline-block}
 </style>
 </head>
 <body>
@@ -280,6 +298,7 @@ tbody tr:hover td{background:var(--surface)}
     <div class="sect-b">
       <div class="row row-1"><div class="f"><label>Материал</label><select id="i-preset"></select></div></div>
       <input type="hidden" id="i-colorway" value="">
+      <div class="row row-1" id="row-colorway"><div class="f"><label>Расцветка (артикул)</label><span id="i-cw-btn"></span></div></div>
       <div class="row">
         <div class="f"><label>Длина листа</label><input type="number" id="i-pl" value="2900"><span class="unit">мм</span></div>
         <div class="f"><label>Ширина листа</label><input type="number" id="i-pw" value="1150"><span class="unit">мм</span></div>
@@ -771,6 +790,21 @@ function curMatId(){
 }
 // тип материала по id: расцветка → её тип, иначе сам id
 const matType=id=>{ const cw=CAT_BY_ID.get(id); return cw?cw.type:id; };
+// кнопка выбора материала: миниатюра (у расцветки) или цветной квадрат + название; клик открывает matPickerInto
+function matPickBtnHtml(id,noneLabel,attrs){
+  const m=id&&findMat(id);
+  const sw=!m?'<i style="border-style:dashed"></i>'
+    :(CATALOG_IMG[id]?`<img src="${CATALOG_IMG[id]}" alt="">`:`<i style="background:${condHex(id)}"></i>`);
+  return `<button type="button" class="btn mat-pick-btn" ${attrs}>${sw}<span>${esc(m?m.name:noneLabel)}</span></button>`;
+}
+// строка «Расцветка» раздела «Панель»: у скал и «своего размера» расцветок нет — строка скрыта
+function syncColorwayUI(){
+  const row=$('#row-colorway'); if(!row) return;
+  const t=$('#i-preset').value, has=!!((CATALOG.types[t]||{}).items||[]).length;
+  row.style.display=has?'':'none';       // .row — grid, атрибут hidden его не скрывает
+  const cw=$('#i-colorway').value;
+  $('#i-cw-btn').innerHTML=matPickBtnHtml(cw&&matType(cw)===t?cw:null,'— без расцветки (цвет типа) —','data-cwpick="1"');
+}
 // collect() (внутри ЯДРА, читает форму) знает только тип из #i-preset — подставляем в название
 // материала расцветку (артикул), не трогая текст ядра
 { const collectBase=collect;
@@ -1071,6 +1105,52 @@ function menuDivider(menu,label){
 }
 function closeOnOutside(e){ const m=document.getElementById('mat-menu'); if(m&&!m.contains(e.target)) closeMatMenu(); }
 function closeMatMenu(){ const m=document.getElementById('mat-menu'); if(m){m.remove(); document.removeEventListener('pointerdown',closeOnOutside,{capture:true});} }
+// Выбор материала: вкладки типов → сетка миниатюр расцветок (подпись — артикул) с поиском. Встраивается
+// в menuShell. opts: cur — текущий id (тип или расцветка) | null; noneLabel — пункт «без выбора»
+// (null — не показывать); types — какие типы показывать (по умолчанию все, кроме «своего размера»);
+// onPick(id|null). Типы без расцветок (скалы) — одна плитка с рельефным образцом.
+function matPickerInto(menu,opts){
+  const types=(opts.types||PRESET_TYPES.filter(x=>x.id!=='custom').map(x=>x.id));
+  let tab=opts.cur?matType(opts.cur):types[0]; if(!types.includes(tab)) tab=types[0];
+  menu.style.minWidth='350px'; menu.style.maxWidth='min(96vw,420px)'; menu.style.maxHeight='86vh'; menu.style.overflow='auto';
+  if(opts.noneLabel){
+    const nb=document.createElement('button'); nb.type='button'; nb.className='mp-none';
+    nb.innerHTML=`<span style="width:12px;height:12px;border-radius:3px;flex:none;border:1px dashed var(--line-2)"></span><span>${esc(opts.noneLabel)}</span>`+(opts.cur?'':' <span style="margin-left:auto">✓</span>');
+    nb.onclick=()=>opts.onPick(null); menu.appendChild(nb);
+  }
+  const tabs=document.createElement('div'); tabs.className='mp-tabs'; menu.appendChild(tabs);
+  const q=document.createElement('input'); q.type='search'; q.className='mp-search'; q.placeholder='Поиск по артикулу'; menu.appendChild(q);
+  const grid=document.createElement('div'); grid.className='mp-grid'; menu.appendChild(grid);
+  const cnt=document.createElement('div'); cnt.className='mp-count'; menu.appendChild(cnt);
+  const shortName={bamboo29:'Бамбук',slat:'Рейка',marble:'Мрамор',rockL:'Скала бол.',rockS:'Скала мал.'};
+  const tile=(id,label,imgSrc,plainColor)=>{
+    const b=document.createElement('button'); b.type='button'; b.className='mp-tile'+(opts.cur===id?' on':''); b.title=label;
+    b.innerHTML=(imgSrc?`<img src="${imgSrc}" alt="" decoding="async">`:`<div class="mp-plain" style="background:${plainColor}">без расцветки</div>`)+`<span class="mp-a">${esc(label)}</span>`;
+    b.onclick=()=>opts.onPick(id); return b;
+  };
+  const draw=()=>{
+    tabs.innerHTML=''; types.forEach(t=>{
+      const b=document.createElement('button'); b.type='button'; b.className='mp-tab'+(t===tab?' on':''); b.textContent=shortName[t]||(findMat(t)||{}).name||t;
+      b.onclick=()=>{ tab=t; q.value=''; draw(); }; tabs.appendChild(b);
+    });
+    grid.innerHTML=''; const items=(CATALOG.types[tab]||{}).items||[];
+    const needle=q.value.trim().toLowerCase();
+    if(!items.length){                     // скалы: плитка типа с рельефным образцом
+      const ref=CATALOG.refs[tab]; grid.appendChild(tile(tab,ref?ref.name:(findMat(tab)||{}).name,CATALOG_IMG[tab]||'',condHex(tab)));
+      q.style.display='none'; cnt.textContent=''; return;
+    }
+    q.style.display='';
+    if(!needle) grid.appendChild(tile(tab,'базовый',null,condHex(tab)));
+    const shown=items.filter(it=>!needle||it.a.toLowerCase().includes(needle));
+    shown.forEach(it=>grid.appendChild(tile(it.id,it.a,CATALOG_IMG[it.id],'')));
+    cnt.textContent=shown.length?`${shown.length} из ${items.length} расцветок`:'ничего не найдено';
+  };
+  q.oninput=draw; draw();
+  // длинное меню не должно уезжать за экран
+  requestAnimationFrame(()=>{ const r=menu.getBoundingClientRect();
+    menu.style.left=Math.max(6,Math.min(r.left,window.innerWidth-r.width-6))+'px';
+    menu.style.top=Math.max(6,Math.min(r.top,window.innerHeight-r.height-6))+'px'; });
+}
 
 /* ---- сводка LED по проекту (раздел LED) ---- */
 // [ОТРИСОВКА]
@@ -1506,10 +1586,7 @@ function renderOpenings(){
         <div class="f"><label>Низ — отметка от пола</label><input type="number" data-k="ylow" value="${Math.round(o.y)}"><span class="unit">мм</span></div>
         <div class="f"><label>Верх — отметка от пола</label><input type="number" data-k="yhigh" value="${Math.round(o.y+o.h)}"><span class="unit">мм</span></div>
       </div>
-      <div class="row row-1"><div class="f"><label>Заполнение проёма материалом</label><select data-k="fillMat">
-        <option value="">— без заполнения —</option>
-        ${PRESET_TYPES.filter(pp=>pp.id!=='custom').map(pp=>`<option value="${pp.id}"${o.fillMat===pp.id?' selected':''}>${pp.name}</option>`).join('')}
-      </select></div></div>
+      <div class="row row-1"><div class="f"><label>Заполнение проёма материалом</label>${matPickBtnHtml(o.fillMat,'— без заполнения —',`data-fillpick="${o.id}"`)}</div></div>
       <label class="chk"><input type="checkbox" data-k="otkos"${o.otkos?' checked':''}><span>Отделывать откосы</span></label>
       <div class="row" ${o.otkos?'':'hidden'}>
         <div class="f"><label>Глубина откоса</label><input type="number" data-k="depth" value="${o.depth}"><span class="unit">мм</span></div>
@@ -1605,6 +1682,13 @@ $('#openings').addEventListener('input', e=>{
 });
 $('#openings').addEventListener('click', e=>{
   const wa=AW();
+  const fb=e.target.closest('[data-fillpick]');
+  if(fb){
+    const o=wa.ops.find(x=>x.id==fb.dataset.fillpick); if(!o) return;
+    const menu=menuShell(e,'Заполнение проёма',350);
+    matPickerInto(menu,{cur:o.fillMat||null,noneLabel:'— без заполнения —',onPick:id=>{ o.fillMat=id; closeMatMenu(); renderOpenings(); run(); }});
+    return;
+  }
   if(e.target.dataset.rm){ wa.ops=wa.ops.filter(o=>o.id!=e.target.dataset.rm); renderOpenings(); run(); return; }
   if(e.target.dataset.dup){
     const src=wa.ops.find(o=>o.id==e.target.dataset.dup); if(!src) return;
@@ -5343,9 +5427,18 @@ function renderVizTargetSelect(){
   if([...targetSel.options].some(o=>o.value===prev)) targetSel.value=prev;
 }
 $('#i-preset').innerHTML=PRESET_TYPES.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+$('#i-cw-btn').addEventListener('click',e=>{
+  if(!e.target.closest('[data-cwpick]')) return;
+  const t=$('#i-preset').value, cur=curMatId();
+  const menu=menuShell(e,'Расцветка · '+((PRESET_TYPES.find(x=>x.id===t)||{}).name||t),350);
+  matPickerInto(menu,{cur:cur===t?null:cur,types:[t],onPick:id=>{
+    $('#i-colorway').value=(id&&id!==t)?id:''; closeMatMenu(); syncColorwayUI(); run();
+  }});
+});
 $('#i-ledtemp').innerHTML=LED_TEMPS.map(t=>`<option value="${t.k}"${t.k===4000?' selected':''}>${t.name}</option>`).join('');
+syncColorwayUI();
 $('#i-preset').addEventListener('change',()=>{
-  $('#i-colorway').value='';                  // расцветка принадлежит типу — при смене типа сбрасывается
+  $('#i-colorway').value=''; syncColorwayUI();   // расцветка принадлежит типу — при смене типа сбрасывается
   const p=PRESETS.find(x=>x.id===$('#i-preset').value);
   if(p&&p.id!=='custom'){ $('#i-pl').value=p.pl; $('#i-pw').value=p.pw; $('#p-panel').value=p.price; $('#i-glue').value=p.tubesPerSheet; }
   run();
@@ -5459,6 +5552,7 @@ function applySnapshot(o,fromFile){
     ledCircuitSeq=Math.max(0,...ledCircuits.map(c=>c.id||0));
     freeLegSeq=Math.max(0,...ledCircuits.flatMap(c=>c.legs).filter(l=>l.el==='free').map(l=>l.id||0));
   }
+  syncColorwayUI();
   wallToForm(); renderOpenings(); renderWallCompass(); run();
   // разметка фото — после run(): ей нужны пересчитанные стены/откосы и список стен в селекте
   vizBridge.importMarkup(o.viz||null,fromFile);
@@ -5717,33 +5811,19 @@ document.addEventListener('keydown',e=>{
     if(cur==='corner'||cur==='butt'||cur==='protrude'){
       menuDivider(menu,'Материал этой стороны откоса');
       const curMat=(o.otkosMat&&o.otkosMat[side])||null;
-      const mk=(id,name)=>{
-        const b=menuBtn(menu,name,curMat===(id||null),()=>{
-          o.otkosMat=o.otkosMat||{};
-          if(id) o.otkosMat[side]=id; else delete o.otkosMat[side];
-          closeMatMenu(); run();
-        });
-        const sw=document.createElement('span');
-        sw.style.cssText=`width:12px;height:12px;border-radius:3px;flex:none;margin-right:8px;${id?`background:${matColor(id)}`:'border:1px dashed var(--line-2)'}`;
-        b.insertBefore(sw,b.firstChild);
-      };
-      mk(null,'— материал стены (по умолчанию) —');
-      PRESET_TYPES.filter(pp=>pp.id!=='custom').forEach(pp=>mk(pp.id,pp.name));
+      matPickerInto(menu,{cur:curMat,noneLabel:'— материал стены (по умолчанию) —',onPick:id=>{
+        o.otkosMat=o.otkosMat||{};
+        if(id) o.otkosMat[side]=id; else delete o.otkosMat[side];
+        closeMatMenu(); run();
+      }});
     }
   }
   function showMatMenu(ev,opId){
     const w=AW(); const o=w.ops.find(x=>x.id==opId); if(!o) return;
     const menu=menuShell(ev,'Заполнение проёма',230);
-    const mk=(id,name)=>{
-      const b=menuBtn(menu,name,(o.fillMat||null)===(id||null),()=>{
-        o.fillMat=id; closeMatMenu(); renderOpenings(); run();
-      });
-      const sw=document.createElement('span');
-      sw.style.cssText=`width:12px;height:12px;border-radius:3px;flex:none;margin-right:8px;${id?`background:${matColor(id)}`:'border:1px dashed var(--line-2)'}`;
-      b.insertBefore(sw,b.firstChild);
-    };
-    mk(null,'— без заполнения —');
-    PRESET_TYPES.filter(pp=>pp.id!=='custom').forEach(pp=>mk(pp.id,pp.name));
+    matPickerInto(menu,{cur:o.fillMat||null,noneLabel:'— без заполнения —',onPick:id=>{
+      o.fillMat=id; closeMatMenu(); renderOpenings(); run();
+    }});
   }
   // индивидуальный материал отдельной детали стены — та же механика, что у заполнения проёма;
   // если у выбранного материала листы меньше самой детали, она соберётся из нескольких — это
@@ -5752,18 +5832,11 @@ document.addEventListener('keydown',e=>{
     const w=AW();
     const menu=menuShell(ev,`Материал детали · ${label||pk}`,230);
     const cur=(w.pieceMats&&w.pieceMats[pk])||null;
-    const mk=(id,name)=>{
-      const b=menuBtn(menu,name,cur===(id||null),()=>{
-        w.pieceMats=w.pieceMats||{};
-        if(id) w.pieceMats[pk]=id; else delete w.pieceMats[pk];
-        closeMatMenu(); run();
-      });
-      const sw=document.createElement('span');
-      sw.style.cssText=`width:12px;height:12px;border-radius:3px;flex:none;margin-right:8px;${id?`background:${matColor(id)}`:'border:1px dashed var(--line-2)'}`;
-      b.insertBefore(sw,b.firstChild);
-    };
-    mk(null,'— материал стены (по умолчанию) —');
-    PRESET_TYPES.filter(pp=>pp.id!=='custom').forEach(pp=>mk(pp.id,pp.name));
+    matPickerInto(menu,{cur,noneLabel:'— материал стены (по умолчанию) —',onPick:id=>{
+      w.pieceMats=w.pieceMats||{};
+      if(id) w.pieceMats[pk]=id; else delete w.pieceMats[pk];
+      closeMatMenu(); run();
+    }});
   }
 })();
 // touch-action, чтобы палец не скроллил страницу при перетаскивании

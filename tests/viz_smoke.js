@@ -35,6 +35,7 @@ const WALL=[[100,60],[420,100],[420,400],[100,450]];
   ok(saved.viz&&saved.viz.photos[0].notes==='пол — тёмный ламинат'&&saved.viz.photos[0].layers.length===1,'проект содержит разметку и пояснение');
   const zip=path.join(tmp,'a.zip'); const zn=await dl(A,'#viz-guide-download-all',zip);
   ok(/^\d{6}\.zip$/.test(zn),'имя архива — дата: '+zn);
+  const z=fs.readFileSync(zip);
   ok(z.includes(Buffer.from('схема-для-нейросети.png','utf8'))&&z.includes(Buffer.from('описание-проекта.txt','utf8'))&&z.includes(Buffer.from('как-отправлять.txt','utf8')),'в архиве схема, описание и памятка');
   await A.close();
   const B=await open('B'); await B.locator('#file-load').setInputFiles(proj); await B.waitForTimeout(500); await load(B);
