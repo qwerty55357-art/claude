@@ -122,6 +122,42 @@ function readZip(buf){
     ok(/только color_hex/.test(json.reference_image_legend)&&/без real_color_hex/.test(json.hard_constraints.join(' ')),'легенда и требования оговаривают материал без образца');
     await p.close();
   }
+  // ---- 6. цвет профилей: по умолчанию как раньше, золото — в глоссарии, жёстких требованиях и поле profiles ----
+  {
+    const base=await scenario('prof-default',{preset:'bamboo29',walls:[baseWall([win(1),win(2)])]});
+    ok(!base.json.profiles&&/матового алюминия светло-серого/.test(JSON.stringify(base.json.seam_types_glossary)),'по умолчанию — обычный алюминий: прежнее описание, поля profiles нет');
+    await base.p.close();
+    const p=await browser.newPage({viewport:{width:1500,height:1300},acceptDownloads:true});
+    p.on('pageerror',e=>errors.push('prof: '+String(e).slice(0,200)));
+    await p.goto(HTML); await p.waitForTimeout(400);
+    ok(await p.locator('#i-profcolor option').count()===8&&await p.inputValue('#i-profcolor')==='alu','в списке 8 цветов профилей, по умолчанию «Обычный алюминий»');
+    await p.close();
+    const g=await (async()=>{
+      const pp=await browser.newPage({viewport:{width:1500,height:1300},acceptDownloads:true});
+      pp.on('pageerror',e=>errors.push('prof2: '+String(e).slice(0,200))); await pp.goto(HTML); await pp.waitForTimeout(400);
+      await pp.selectOption('#i-profcolor','gold');
+      await pp.evaluate(w=>{ walls.length=0; walls.push(w); active=0; wallToForm(); renderOpenings(); run(); },baseWall([win(1),win(2)]));
+      const png=Buffer.from((await pp.evaluate(()=>{ const c=document.createElement('canvas'); c.width=1920; c.height=1280; const x=c.getContext('2d'); x.fillStyle='#8a8278'; x.fillRect(0,0,1920,1280); return c.toDataURL('image/png'); })).split(',')[1],'base64');
+      await pp.locator('.sect-h',{hasText:'Визуализация на фото'}).click();
+      await pp.locator('#viz-photo').setInputFiles({name:'room.png',mimeType:'image/png',buffer:png});
+      await pp.waitForFunction(()=>document.querySelector('#viz-canvas').width>100); await pp.waitForTimeout(700);
+      await pp.locator('#viz-canvas').scrollIntoViewIfNeeded(); const box=await pp.locator('#viz-canvas').boundingBox();
+      for(const [x,y] of WALL){ await pp.mouse.click(box.x+x,box.y+y); await pp.waitForTimeout(40); }
+      await pp.mouse.move(5,5); await pp.locator('#viz-apply').click(); await pp.waitForTimeout(2000);
+      await pp.locator('#viz-json-copy').click(); await pp.waitForTimeout(250);
+      const json=JSON.parse(await pp.inputValue('#viz-json-output'));
+      const snap=await pp.evaluate(()=>JSON.parse(JSON.stringify(snapshot())));
+      const back=await pp.evaluate(sn=>{ document.querySelector('#i-profcolor').value='white'; applySnapshot(sn,true); return document.querySelector('#i-profcolor').value; },snap);
+      const old=JSON.parse(JSON.stringify(snap)); delete old.fields['i-profcolor'];
+      const reset=await pp.evaluate(sn=>{ document.querySelector('#i-profcolor').value='gold'; applySnapshot(sn,true); return document.querySelector('#i-profcolor').value; },old);
+      await pp.close(); return {json,saved:snap.fields['i-profcolor'],back,reset};
+    })();
+    ok(g.json.profiles&&g.json.profiles.color==='Золото'&&/золотист/.test(g.json.profiles.description),'поле profiles: цвет «Золото»');
+    ok(/золотист/.test(JSON.stringify(g.json.seam_types_glossary))&&!/светло-серого/.test(JSON.stringify(g.json.seam_types_glossary)),'глоссарий заглушки описывает золотистый профиль, а не светло-серый');
+    ok(g.json.hard_constraints.some(r=>/Профили/.test(r)&&/Золото/.test(r)),'жёсткое требование про цвет профилей');
+    ok(g.saved==='gold'&&g.back==='gold','цвет профилей сохраняется в проект и возвращается при открытии');
+    ok(g.reset==='alu','файл без цвета профилей сбрасывает его на «обычный алюминий»');
+  }
   ok(!errors.length,'ошибок страницы нет '+errors.join(' | '));
   await browser.close();
   console.log(fails?`ПРОВАЛЕНО: ${fails}`:'все проверки пройдены'); process.exit(fails?1:0);

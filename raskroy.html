@@ -299,6 +299,7 @@ tbody tr:hover td{background:var(--surface)}
       <div class="row row-1"><div class="f"><label>Материал</label><select id="i-preset"></select></div></div>
       <input type="hidden" id="i-colorway" value="">
       <div class="row row-1" id="row-colorway"><div class="f"><label>Расцветка (артикул)</label><span id="i-cw-btn"></span></div></div>
+      <div class="row row-1"><div class="f"><label>Цвет профилей</label><select id="i-profcolor"></select></div></div>
       <div class="row">
         <div class="f"><label>Длина листа</label><input type="number" id="i-pl" value="2900"><span class="unit">мм</span></div>
         <div class="f"><label>Ширина листа</label><input type="number" id="i-pw" value="1150"><span class="unit">мм</span></div>
@@ -763,6 +764,20 @@ const PRESETS = [
 ];
 // цвет заливки материала на схеме — значения живут в CSS-переменных --mat-* (см. :root)
 const MATCOLORS={bamboo29:'var(--mat-bamboo29)',marble:'var(--mat-marble)',slat:'var(--mat-slat)',rockL:'var(--mat-rockL)',rockS:'var(--mat-rockS)',custom:'var(--mat-custom)'};
+// Цвет профилей (заглушки, соединители, угловые) — один на проект; влияет только на описание в JSON-промпте.
+// 'alu' — по умолчанию: текст описания тот же, что был до появления параметра. Список — по каталогам
+// «Панда Декор» (линейка для 3 мм и бамбуковая): белый, золото, чёрный, серебро, розовое золото, шампань
+const PROFILE_COLORS=[
+  {k:'alu',name:'Обычный алюминий',look:'матового алюминия светло-серого/сатинового тона'},
+  {k:'white',name:'Белый',look:'окрашенного в белый алюминия'},
+  {k:'gold',name:'Золото',look:'золотистого (цвет «золото») анодированного алюминия'},
+  {k:'silver',name:'Серебро',look:'серебристого алюминия (цвет «серебро»)'},
+  {k:'black_matt',name:'Чёрный матовый',look:'алюминия чёрного матового цвета'},
+  {k:'black_gloss',name:'Чёрный глянцевый',look:'алюминия чёрного глянцевого цвета'},
+  {k:'rosegold',name:'Розовое золото',look:'алюминия цвета «розовое золото» (розово-медный металлик)'},
+  {k:'champagne',name:'Шампань',look:'алюминия цвета «шампань» (светлый тёплый золотистый)'}
+];
+const profColor=()=>PROFILE_COLORS.find(x=>x.k===($('#i-profcolor')||{}).value)||PROFILE_COLORS[0];
 // ---- расцветки каталога (блок CATALOG выше по файлу генерирует tools/build_catalog.py) ----
 // Материал в проекте = id пресета-ТИПА ('bamboo29') ИЛИ id расцветки '<тип>:<слаг артикула>'
 // ('bamboo29:8190'): расцветка наследует размеры/цену/клей типа и получает свой пул листов
@@ -791,11 +806,11 @@ function curMatId(){
 // тип материала по id: расцветка → её тип, иначе сам id
 const matType=id=>{ const cw=CAT_BY_ID.get(id); return cw?cw.type:id; };
 // кнопка выбора материала: миниатюра (у расцветки) или цветной квадрат + название; клик открывает matPickerInto
-function matPickBtnHtml(id,noneLabel,attrs){
+function matPickBtnHtml(id,noneLabel,attrs,short){
   const m=id&&findMat(id);
   const sw=!m?'<i style="border-style:dashed"></i>'
     :(CATALOG_IMG[id]?`<img src="${CATALOG_IMG[id]}" alt="">`:`<i style="background:${condHex(id)}"></i>`);
-  return `<button type="button" class="btn mat-pick-btn" ${attrs}>${sw}<span>${esc(m?m.name:noneLabel)}</span></button>`;
+  return `<button type="button" class="btn mat-pick-btn" ${attrs}>${sw}<span>${esc(m?(short&&m.article?m.article:m.name):noneLabel)}</span></button>`;
 }
 // строка «Расцветка» раздела «Панель»: у скал и «своего размера» расцветок нет — строка скрыта
 function syncColorwayUI(){
@@ -803,7 +818,7 @@ function syncColorwayUI(){
   const t=$('#i-preset').value, has=!!((CATALOG.types[t]||{}).items||[]).length;
   row.style.display=has?'':'none';       // .row — grid, атрибут hidden его не скрывает
   const cw=$('#i-colorway').value;
-  $('#i-cw-btn').innerHTML=matPickBtnHtml(cw&&matType(cw)===t?cw:null,'— без расцветки (цвет типа) —','data-cwpick="1"');
+  $('#i-cw-btn').innerHTML=matPickBtnHtml(cw&&matType(cw)===t?cw:null,'— без расцветки (цвет типа) —','data-cwpick="1"',true);
 }
 // Образец материала для промпта и архива: у расцветки — каталожные цвет/описание/фото; у скал — рельефный
 // образец типа (цвет скалы — белый гипс, а не цвет фото); у старых id без расцветки (тип) образца нет
@@ -5484,6 +5499,7 @@ $('#i-cw-btn').addEventListener('click',e=>{
     $('#i-colorway').value=(id&&id!==t)?id:''; closeMatMenu(); syncColorwayUI(); run();
   }});
 });
+$('#i-profcolor').innerHTML=PROFILE_COLORS.map(c=>`<option value="${c.k}">${c.name}${c.k==='alu'?' (по умолчанию)':''}</option>`).join('');
 $('#i-ledtemp').innerHTML=LED_TEMPS.map(t=>`<option value="${t.k}"${t.k===4000?' selected':''}>${t.name}</option>`).join('');
 syncColorwayUI();
 $('#i-preset').addEventListener('change',()=>{
@@ -5539,6 +5555,7 @@ function applySnapshot(o,fromFile){
   // считаются нечитаемыми (см. catch в обработчике файла), как и любой другой повреждённый JSON
   if(!(o.v===3 && Array.isArray(o.walls) && o.walls.length)) throw new Error('неподдерживаемый формат файла');
   $('#i-colorway').value='';                                // старые файлы поля расцветки не знали
+  $('#i-profcolor').value='alu';                            // и цвета профилей — по умолчанию обычный алюминий
   Object.entries(o.fields||{}).forEach(([id,v])=>{
     if(WALL_FIELDS.includes(id)) return;                    // стеновые поля берём из walls
     if(id.startsWith('viz-')) return;                       // старые файлы писали сюда и поля фото-раздела
@@ -7417,8 +7434,10 @@ document.addEventListener('keydown',e=>{
 
     // ---- глоссарий стыков — только по типам, которые есть на схеме ----
     const glossary={};
+    const pc=profColor();
+    const profNote=pc.k!=='alu'&&(F.cap||F.corners);       // цвет профилей упоминаем, только если он задан и профили на схеме есть
     if(F.cap) glossary[seamTypeRu.cap]='отдельная физическая деталь — тонкий (примерно 8–15 мм) профиль-заглушка из '+
-      'матового алюминия светло-серого/сатинового тона, слегка выступающий над плоскостью панели, '+
+      pc.look+', слегка выступающий над плоскостью панели, '+
       'с еле заметным бликом на свету — а НЕ плоская тёмная линия или тень.';
     if(F.butt) glossary[seamTypeRu.butt]='панели стыкуются впритык без видимой рейки — на стыке лишь едва заметная '+
       'тонкая тень/шов, никакого выступающего профиля.';
@@ -7450,6 +7469,7 @@ document.addEventListener('keydown',e=>{
       F.led&&`Бирюзовые линии на схеме — обязательно светящаяся LED-лента на финальном изображении (цвет свечения: ${ledInfo.description}; см. led), а не текстурный профиль и не обычный шов.`,
       (F.cap&&F.butt)&&'Тип каждого стыка (wall.seams[].type) рисуй согласно seam_types_glossary — не изображай все стыки одинаковой плоской линией.',
       (F.seams&&!(F.cap&&F.butt))&&'Вид стыков (wall.seams) — по seam_types_glossary.',
+      profNote&&`Профили (заглушки на краях и стыках${F.corners?', угловые профили':''}) — цвета «${pc.name}»: рисуй их именно этого цвета (см. profiles), не светло-серыми и не цветом панели.`,
       F.seams&&'Стыки панелей — тонкая деталь в единицы миллиметров. НЕ рисуй их как широкую блестящую металлическую полосу, декоративную рейку или двойную линию через всю высоту/ширину стены, даже если на схеме маркер стыка выглядит толстым и контрастным — это сделано только чтобы линию было видно на схеме, не пропорция реального шва.',
       F.revealsMarked&&'Откосы из wall.otkos отделай указанным там материалом и цветом: на схеме эта грань откоса закрашена и обведена тонким контуром — это именно та деталь (глубина — depth_mm). Остальные поверхности проёма (рама, стекло, подоконник) оставь как на фото.',
       F.revealsUnmarked&&'Если у стены указан openings_without_marked_reveal — откосы (боковины/верх/низ) перечисленных там проёмов НЕ размечены отдельно: оставь их ТОЧНО как на исходном фото — без своей отделки, цвета или подсветки, даже если рядом уже установлены панели.',
@@ -7506,6 +7526,7 @@ document.addEventListener('keydown',e=>{
       materials,
       material_rules:matRules.length?matRules:undefined,
       seam_types_glossary:Object.keys(glossary).length?glossary:undefined,
+      profiles:profNote?{color:pc.name,description:'профили (заглушки, соединители, угловые) — из '+pc.look+'; один цвет на весь проект'}:undefined,
       hard_constraints:hard,
       avoid,
       render_freely:free,
