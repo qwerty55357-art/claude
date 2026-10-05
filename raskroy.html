@@ -279,6 +279,7 @@ tbody tr:hover td{background:var(--surface)}
     <div class="sect-h"><span class="sect-n">02</span><span class="sect-t">Панель</span><span class="sect-arrow">▾</span></div>
     <div class="sect-b">
       <div class="row row-1"><div class="f"><label>Материал</label><select id="i-preset"></select></div></div>
+      <input type="hidden" id="i-colorway" value="">
       <div class="row">
         <div class="f"><label>Длина листа</label><input type="number" id="i-pl" value="2900"><span class="unit">мм</span></div>
         <div class="f"><label>Ширина листа</label><input type="number" id="i-pw" value="1150"><span class="unit">мм</span></div>
@@ -743,7 +744,47 @@ const PRESETS = [
 ];
 // цвет заливки материала на схеме — значения живут в CSS-переменных --mat-* (см. :root)
 const MATCOLORS={bamboo29:'var(--mat-bamboo29)',marble:'var(--mat-marble)',slat:'var(--mat-slat)',rockL:'var(--mat-rockL)',rockS:'var(--mat-rockS)',custom:'var(--mat-custom)'};
-const matColor=id=>MATCOLORS[id]||'var(--mat-custom)';
+// ---- расцветки каталога (блок CATALOG выше по файлу генерирует tools/build_catalog.py) ----
+// Материал в проекте = id пресета-ТИПА ('bamboo29') ИЛИ id расцветки '<тип>:<слаг артикула>'
+// ('bamboo29:8190'): расцветка наследует размеры/цену/клей типа и получает свой пул листов
+// (листы разных расцветок из одного листа не режутся). Старые проекты хранят только id типа —
+// для них ничего не меняется (цвет типа = «расцветка по умолчанию»).
+// Цвет СХЕМЫ у расцветки условный (it.k, различимый между расцветками одного типа); реальный цвет
+// образца (it.c) и миниатюра идут только в JSON-промпт и в архив для нейросети
+const CAT_BY_ID=new Map();
+Object.entries(CATALOG.types).forEach(([t,tt])=>tt.items.forEach(it=>CAT_BY_ID.set(it.id,Object.assign({type:t},it))));
+const catOf=id=>CAT_BY_ID.get(id)||null;
+// Расцветки дописаны в PRESETS (флаг cw) — так их понимает и ядро расчёта (PRESETS.find по id),
+// не зная про каталог; списки типов для интерфейса берутся из PRESET_TYPES
+const PRESET_TYPES=PRESETS.slice();
+CAT_BY_ID.forEach(cw=>{
+  const tp=PRESET_TYPES.find(x=>x.id===cw.type);
+  PRESETS.push(Object.assign({},tp,{id:cw.id,type:cw.type,article:cw.a,cw:true,name:tp.name+' · '+cw.a}));
+});
+// материал по id — и тип, и расцветка; undefined, если такого нет
+const findMat=id=>PRESETS.find(x=>x.id===id);
+// id материала стены «по умолчанию»: тип (#i-preset) + расцветка (#i-colorway, скрытое поле — оно
+// же сохраняется в проект общим механизмом полей); расцветка чужого типа/устаревшая игнорируется
+function curMatId(){
+  const t=$('#i-preset').value, cw=($('#i-colorway')||{}).value||'';
+  return (cw&&matType(cw)===t&&CAT_BY_ID.has(cw))?cw:t;
+}
+// тип материала по id: расцветка → её тип, иначе сам id
+const matType=id=>{ const cw=CAT_BY_ID.get(id); return cw?cw.type:id; };
+// collect() (внутри ЯДРА, читает форму) знает только тип из #i-preset — подставляем в название
+// материала расцветку (артикул), не трогая текст ядра
+{ const collectBase=collect;
+  collect=function(){ const G=collectBase(); const m=findMat(curMatId()); if(m) G.presetName=m.name; return G; }; }
+// id из старого/чужого файла, которого нет в каталоге: расцветка → её тип, чужое → null
+function normMatId(id){
+  if(!id) return id||null;
+  if(findMat(id)) return id;
+  const t=String(id).split(':')[0];
+  return PRESETS.some(x=>x.id===t)?t:null;
+}
+const matColor=id=>MATCOLORS[id]||(CAT_BY_ID.get(id)||{}).k||'var(--mat-custom)';
+// условный цвет схемы как hex для canvas/3D (там var(--…) не понимается): у типа — из CSS-переменной
+const condHex=id=>{ const cw=CAT_BY_ID.get(id); return cw?cw.k:(getComputedStyle(document.documentElement).getPropertyValue('--mat-'+id)||'').trim(); };
 // словесное описание текстуры материала — только для JSON-промпта «Визуализации на фото» (см.
 // buildAiPromptObject): цвета в проекте у нас честные (--mat-*), а вот описания фактуры/рисунка
 // нет нигде — а без него нейросеть при генерации текстуры фантазирует на глаз. Как только
@@ -1467,7 +1508,7 @@ function renderOpenings(){
       </div>
       <div class="row row-1"><div class="f"><label>Заполнение проёма материалом</label><select data-k="fillMat">
         <option value="">— без заполнения —</option>
-        ${PRESETS.filter(pp=>pp.id!=='custom').map(pp=>`<option value="${pp.id}"${o.fillMat===pp.id?' selected':''}>${pp.name}</option>`).join('')}
+        ${PRESET_TYPES.filter(pp=>pp.id!=='custom').map(pp=>`<option value="${pp.id}"${o.fillMat===pp.id?' selected':''}>${pp.name}</option>`).join('')}
       </select></div></div>
       <label class="chk"><input type="checkbox" data-k="otkos"${o.otkos?' checked':''}><span>Отделывать откосы</span></label>
       <div class="row" ${o.otkos?'':'hidden'}>
@@ -3614,7 +3655,7 @@ function schemeFor(G,R,wi){
     const x=o.x, y=H-o.y-o.h;
     const surfMount=o.mount==='surface';
     if(o.fillMat){
-      const mp=PRESETS.find(pp=>pp.id===o.fillMat);
+      const mp=findMat(o.fillMat);
       const mc=matColor(o.fillMat);
       g+=`<rect x="${x}" y="${y}" width="${o.w}" height="${o.h}" fill="${mc}" fill-opacity=".55" stroke="${mc}" stroke-width="${fs*0.1}" data-drag="${o.id}" style="cursor:move"/>`;
       // полосы заполнения — раскладка материала внутри проёма
@@ -3640,7 +3681,7 @@ function schemeFor(G,R,wi){
       g+=txt(x+o.w/2,y+o.h/2,onm,fs*0.8,ink,halo);
       g+=txt(x+o.w/2,y+o.h/2+fs,`${fmt(o.w)}×${fmt(o.h)}`,fs*0.7,ink,halo);
       if(o.fillMat){
-        const mp=PRESETS.find(pp=>pp.id===o.fillMat);
+        const mp=findMat(o.fillMat);
         if(mp&&o.h>fs*4.4&&tw(mp.name,fs*0.58)<o.w*0.92)
           g+=txt(x+o.w/2,y+o.h/2+fs*2,mp.name,fs*0.58,ink,halo);
       }
@@ -4137,7 +4178,7 @@ function renderCutmap(G,R){
   const multiMat=R.fills.length>0;
   let html='';
   if(R.sheets.length){
-    if(multiMat) html+=`<div class="mat-h" style="border-left:4px solid ${matColor($('#i-preset').value)}">Материал: ${esc(G.presetName)} — ${R.sheets.length} ${plu(R.sheets.length,'лист','листа','листов')} ${fmt(G.pl)}×${fmt(G.pw)}</div>`;
+    if(multiMat) html+=`<div class="mat-h" style="border-left:4px solid ${matColor(curMatId())}">Материал: ${esc(G.presetName)} — ${R.sheets.length} ${plu(R.sheets.length,'лист','листа','листов')} ${fmt(G.pl)}×${fmt(G.pw)}</div>`;
     html+=cutmapSvg(R.sheets,{pl:G.pl,pw:G.pw,minoff:G.minoff}).replace('<svg ','<svg data-pool="main" ');
   }
   R.fills.forEach(f=>{
@@ -4288,7 +4329,7 @@ function wallCanvasTexture3D(wv,L,baseColorHex,cuts){
     const st=L.strips[p.strip];
     const x=(L.vert?st.start:p.from)*scale, y=(L.vert?H-p.to:H-st.end)*scale;
     const w=(L.vert?st.w:p.len)*scale, h=(L.vert?p.len:st.w)*scale;
-    ctx.fillStyle=cssVar('--mat-'+p.matOverride)||baseColorHex;
+    ctx.fillStyle=condHex(p.matOverride)||baseColorHex;
     ctx.fillRect(Math.max(0,x),Math.max(0,y),w,h);
   });
   // линия стыка между СОСЕДНИМИ полосами материала — только между полосами одного региона
@@ -4448,8 +4489,8 @@ function renderScene3D(G,R){
   const cssVar3d=name=>(getComputedStyle(document.documentElement).getPropertyValue(name)||'').trim();
   // реальный цвет материала проекта по умолчанию (см. комментарий у wallCanvasTexture3D) — также
   // служит цветом откоса по умолчанию, когда для его стороны не назначен свой материал (o.otkosMat)
-  const defaultMatId=$('#i-preset').value;
-  const defaultColorHex=cssVar3d('--mat-'+defaultMatId)||cssVar3d('--straw')||'#b08d57';
+  const defaultMatId=curMatId();
+  const defaultColorHex=condHex(defaultMatId)||cssVar3d('--straw')||'#b08d57';
   const cornerCuts=R.cornerCuts||new Map();
   const positions=computeWallPlacements3D(walls,cornerLinks);
   let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity,maxH=0;
@@ -4494,7 +4535,7 @@ function renderScene3D(G,R){
       if(o.kind!=='door') revealSides.push(['bottom',o.x,o.y,o.x+o.w,o.y]);
       revealSides.filter(([side])=>hasMat(side)).forEach(([side,x0,y0,x1,y1])=>{
         const mid=o.otkosMat&&o.otkosMat[side];
-        const colorHex=(mid&&cssVar3d('--mat-'+mid))||defaultColorHex;
+        const colorHex=(mid&&condHex(mid))||defaultColorHex;
         const geo=new THREE.BufferGeometry();
         geo.setAttribute('position',new THREE.Float32BufferAttribute(
           [x0,y0,0, x0,y0,dz*dep, x1,y1,0, x1,y1,dz*dep],3));
@@ -4523,7 +4564,7 @@ function renderScene3D(G,R){
         const off=dz*1.5;
         flangeRects.forEach(([side,x0,y0,x1,y1])=>{
           const mid=o.otkosMat&&o.otkosMat[side];
-          const colorHex=(mid&&cssVar3d('--mat-'+mid))||defaultColorHex;
+          const colorHex=(mid&&condHex(mid))||defaultColorHex;
           const geo=new THREE.BufferGeometry();
           geo.setAttribute('position',new THREE.Float32BufferAttribute(
             [x0,y0,off, x1,y0,off, x0,y1,off, x1,y1,off],3));
@@ -4542,7 +4583,7 @@ function renderScene3D(G,R){
     // сквозь него должны быть видны детали откоса (и фон сцены дальше), а не какая-либо деталь.
     (wv.ops||[]).forEach(o=>{
       if(!o.fillMat) return;
-      const colorHex=cssVar3d('--mat-'+o.fillMat)||defaultColorHex;
+      const colorHex=condHex(o.fillMat)||defaultColorHex;
       const dep=(o.otkos&&o.depth>0)?o.depth:2;
       const dz=o.mount==='surface'?1:-1;   // см. коммент у откосов выше — та же логика для лицевой панели короба
       const fillGeo=new THREE.BufferGeometry();
@@ -5064,7 +5105,7 @@ function renderNotes(G,R){
   // назначен свой материал (pieceMats), деталь угла молча останется другого цвета/фактуры —
   // предупреждаем, а не молчим, как и для проёма/стыка в зоне среза выше
   {
-    const defaultMatId=$('#i-preset').value;
+    const defaultMatId=curMatId();
     // деталь угла могла не появиться не только из-за cornerIssues (геометрия/лист не подошли),
     // но и из-за явного LED на одном из концов стыка (LED заменяет её целиком, см. radiusOk выше) —
     // в обоих случаях предупреждение о материале детали угла беспредметно, её просто нет в раскрое
@@ -5084,8 +5125,8 @@ function renderNotes(G,R){
       };
       const ov=new Set([...sideOverrides(a,c.as),...(b?sideOverrides(b,c.bs):[])].filter(id=>id!==defaultMatId));
       if(ov.size){
-        const names=[...ov].map(id=>{const mp=PRESETS.find(x=>x.id===id); return mp?mp.name:id;});
-        const defName=(PRESETS.find(x=>x.id===defaultMatId)||{}).name||defaultMatId;
+        const names=[...ov].map(id=>{const mp=findMat(id); return mp?mp.name:id;});
+        const defName=(findMat(defaultMatId)||{}).name||defaultMatId;
         const idx=cornerLinks.findIndex(x=>x.id===c.id);
         n.push(['warn','Радиусный угол'+(idx>=0?' '+(idx+1):''),`деталь угла кроится из материала по умолчанию (${defName}), а у прилегающей стены рядом с этим углом назначен свой материал (${names.join(', ')}) — назначить угловой детали отдельный материал нельзя, уточните это несоответствие при заказе.`]);
       }
@@ -5104,6 +5145,7 @@ function renderNotes(G,R){
   }
   if(R.failed.length) n.push(['err','Откосы не размещены',`Не выкроены: ${[...new Set(R.failed.map(f=>`${f.name} ${fmt(f.dep)}×${fmt(f.len)}`))].join(', ')}. Глубина больше ширины листа (${fmt(G.pw)} мм). В смете не учтены.`]);
   if(R.waste>0.2) n.push(['warn','Отход',`Чистый отход ${fmt(R.waste*100,1)}% (валовый ${fmt(R.wasteGross*100,1)}%). Попробуйте сменить ориентацию листа.`]);
+  if(matLoadNotice) n.push(['warn','Расцветки',matLoadNotice]);
   if(R.fills.length) n.push(['info','Несколько материалов',`Заполнения проёмов, детали и откосы с индивидуальным материалом кроятся из своих листов: ${R.fills.map(f=>`${f.matName} — ${f.sheets.length} ${plu(f.sheets.length,'лист','листа','листов')}`).join('; ')}. Карта раскроя разбита по материалам.`]);
   if(walls.length>1) n.push(['info','Общий раскрой',`Детали всех ${walls.length} стен кроятся из общего пула листов — обрезки одной стены идут на другую.`]);
   {
@@ -5229,9 +5271,9 @@ function wallFaceModel(wallId){
   // canvas не понимает var(--mat-…) (matColor отдаёт именно такую строку для SVG) — нужен
   // настоящий цвет из CSS-переменной, иначе fillStyle молча остаётся прежним
   const cs=getComputedStyle(document.documentElement);
-  const hexOf=id=>(id&&cs.getPropertyValue('--mat-'+id).trim())||null;
-  const matName=id=>(PRESETS.find(p=>p.id===id)||{}).name||id;
-  const matId=$('#i-preset').value;
+  const hexOf=id=>(id&&condHex(id))||null;
+  const matName=id=>(findMat(id)||{}).name||id;
+  const matId=curMatId();
   const color=hexOf(matId)||hexOf('custom')||'#c9a455';
   const kindLabel={window:'Окно',door:'Дверь',niche:'Ниша'};
   const pieces=[];
@@ -5247,7 +5289,7 @@ function wallFaceModel(wallId){
   S.ops.forEach((o,i)=>{
     const r={x:o.x,y:o.y,w:o.w,h:o.h,op:i,label:`${kindLabel[o.kind]||'Проём'} ${i+1}`};
     if(o.fillMat){
-      const mp=PRESETS.find(p=>p.id===o.fillMat);
+      const mp=findMat(o.fillMat);
       fills.push(Object.assign(r,{matId:o.fillMat,matName:matName(o.fillMat),color:hexOf(o.fillMat)||color,bandW:mp&&mp.pw>0?mp.pw:0}));
     } else if(!mountKeepsWall(o)) holes.push(r);
   });
@@ -5300,9 +5342,10 @@ function renderVizTargetSelect(){
     .join('');
   if([...targetSel.options].some(o=>o.value===prev)) targetSel.value=prev;
 }
-$('#i-preset').innerHTML=PRESETS.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+$('#i-preset').innerHTML=PRESET_TYPES.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
 $('#i-ledtemp').innerHTML=LED_TEMPS.map(t=>`<option value="${t.k}"${t.k===4000?' selected':''}>${t.name}</option>`).join('');
 $('#i-preset').addEventListener('change',()=>{
+  $('#i-colorway').value='';                  // расцветка принадлежит типу — при смене типа сбрасывается
   const p=PRESETS.find(x=>x.id===$('#i-preset').value);
   if(p&&p.id!=='custom'){ $('#i-pl').value=p.pl; $('#i-pw').value=p.pw; $('#p-panel').value=p.price; $('#i-glue').value=p.tubesPerSheet; }
   run();
@@ -5319,6 +5362,8 @@ $('#rail').addEventListener('change',railRecalc);
 // эти заглушки): разметка фото (точки углов, откосы, зоны исключения, наложенные стены) живёт
 // там, а в файл проекта и в историю отмены попадает через snapshot()/applySnapshot()
 const vizBridge={exportMarkup:()=>null, importMarkup:()=>{}};
+// текст про расцветки проекта, которых нет в текущем каталоге (см. applySnapshot) — показывается среди замечаний
+let matLoadNotice='';
 function snapshot(){
   formToWall();
   const o={v:3,walls:JSON.parse(JSON.stringify(walls)),active,manual:manualMoves,
@@ -5351,6 +5396,7 @@ function applySnapshot(o,fromFile){
   // формат до v3 (одна стена, без массива walls) больше не поддерживается — такие файлы
   // считаются нечитаемыми (см. catch в обработчике файла), как и любой другой повреждённый JSON
   if(!(o.v===3 && Array.isArray(o.walls) && o.walls.length)) throw new Error('неподдерживаемый формат файла');
+  $('#i-colorway').value='';                                // старые файлы поля расцветки не знали
   Object.entries(o.fields||{}).forEach(([id,v])=>{
     if(WALL_FIELDS.includes(id)) return;                    // стеновые поля берём из walls
     if(id.startsWith('viz-')) return;                       // старые файлы писали сюда и поля фото-раздела
@@ -5361,6 +5407,22 @@ function applySnapshot(o,fromFile){
   });
   // сохраняем исходные id стен (на них могут ссылаться cornerLinks) — донумеровываем только то, чего не было
   walls=o.walls.map((w,i)=>Object.assign(newWall(),w,{id:w.id||(i+1)}));
+  // расцветки, которых нет в каталоге (удалена/чужой файл), заменяем типом материала — иначе
+  // деталь/проём молча выпали бы из раскроя; о замене предупреждаем среди замечаний
+  {
+    const lost=new Set();
+    const fix=id=>{ const n=normMatId(id); if(id&&n!==id) lost.add(id); return n; };
+    walls.forEach(w=>{
+      if(w.pieceMats) Object.keys(w.pieceMats).forEach(k=>{ const n=fix(w.pieceMats[k]); if(n) w.pieceMats[k]=n; else delete w.pieceMats[k]; });
+      (w.ops||[]).forEach(op=>{
+        if(op.fillMat){ const n=fix(op.fillMat); op.fillMat=n||null; }
+        if(op.otkosMat) Object.keys(op.otkosMat).forEach(k=>{ const n=fix(op.otkosMat[k]); if(n) op.otkosMat[k]=n; else delete op.otkosMat[k]; });
+      });
+    });
+    const cw=$('#i-colorway').value;
+    if(cw&&(!CAT_BY_ID.has(cw)||matType(cw)!==$('#i-preset').value)){ if(!CAT_BY_ID.has(cw)) lost.add(cw); $('#i-colorway').value=''; }
+    matLoadNotice=lost.size?`В файле есть расцветки, которых нет в каталоге: ${[...lost].join(', ')}. Они заменены базовым материалом типа — выберите расцветку заново.`:'';
+  }
   wallSeq=Math.max(walls.length,...walls.map(w=>w.id||0));
   // старые файлы не знали autoName — считаем автономером только то, что похоже на «Стена N»
   // (не трогаем реально переименованные пользователем стены), и сразу подтягиваем к текущим
@@ -5666,7 +5728,7 @@ document.addEventListener('keydown',e=>{
         b.insertBefore(sw,b.firstChild);
       };
       mk(null,'— материал стены (по умолчанию) —');
-      PRESETS.filter(pp=>pp.id!=='custom').forEach(pp=>mk(pp.id,pp.name));
+      PRESET_TYPES.filter(pp=>pp.id!=='custom').forEach(pp=>mk(pp.id,pp.name));
     }
   }
   function showMatMenu(ev,opId){
@@ -5681,7 +5743,7 @@ document.addEventListener('keydown',e=>{
       b.insertBefore(sw,b.firstChild);
     };
     mk(null,'— без заполнения —');
-    PRESETS.filter(pp=>pp.id!=='custom').forEach(pp=>mk(pp.id,pp.name));
+    PRESET_TYPES.filter(pp=>pp.id!=='custom').forEach(pp=>mk(pp.id,pp.name));
   }
   // индивидуальный материал отдельной детали стены — та же механика, что у заполнения проёма;
   // если у выбранного материала листы меньше самой детали, она соберётся из нескольких — это
@@ -5701,7 +5763,7 @@ document.addEventListener('keydown',e=>{
       b.insertBefore(sw,b.firstChild);
     };
     mk(null,'— материал стены (по умолчанию) —');
-    PRESETS.filter(pp=>pp.id!=='custom').forEach(pp=>mk(pp.id,pp.name));
+    PRESET_TYPES.filter(pp=>pp.id!=='custom').forEach(pp=>mk(pp.id,pp.name));
   }
 })();
 // touch-action, чтобы палец не скроллил страницу при перетаскивании
@@ -6734,7 +6796,7 @@ document.addEventListener('keydown',e=>{
     const c=document.createElement('canvas'); c.width=cw; c.height=ch;
     const cx=c.getContext('2d');
     const cs=getComputedStyle(document.documentElement);
-    const color=(matId&&cs.getPropertyValue('--mat-'+matId).trim())||fallbackColor;
+    const color=(matId&&condHex(matId))||fallbackColor;
     cx.fillStyle=color; cx.fillRect(0,0,cw,ch);
     if(!noBorder){
       cx.strokeStyle='rgba(0,0,0,.25)'; cx.lineWidth=Math.max(1,px*0.8);
@@ -7090,7 +7152,7 @@ document.addEventListener('keydown',e=>{
           opening_side:o.label,
           depth_mm:Math.round(o.dep), length_mm:Math.round(o.len),
           material_color_hex:(o.matId&&m.hexOf(o.matId))||m.color,
-          material_name:o.matId?(PRESETS.find(p=>p.id===o.matId)||{}).name||o.matId:m.matName
+          material_name:o.matId?(findMat(o.matId)||{}).name||o.matId:m.matName
         })),
         openings_without_marked_reveal:openingsWithoutMarkedReveal.length?openingsWithoutMarkedReveal:undefined,
         openings_without_reveal_in_project:openingsNoReveal.length?openingsNoReveal:undefined,
@@ -7150,7 +7212,7 @@ document.addEventListener('keydown',e=>{
     });
     const mainId=layersR[0].m.matId;
     const materials=[...matRoles.entries()].map(([id,roles])=>{
-      const pr=PRESETS.find(x=>x.id===id)||{};
+      const pr=findMat(id)||{};
       const pl=id===mainId?LAST.G.pl:pr.pl, pw=id===mainId?LAST.G.pw:pr.pw;
       return {name:pr.name||id, color_hex:layersR[0].m.hexOf(id)||layersR[0].m.color,
         texture_hint:TEXTURE_HINTS[id]||TEXTURE_HINTS.custom,
