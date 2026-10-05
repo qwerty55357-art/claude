@@ -36,13 +36,13 @@ function mkWall(r){
   }
   // свободная расстановка стыков (w.vfree): у трети стен — детерминированно по размерам (поток rnd не
   // меняется, старые сценарии остаются теми же); к ручным стыкам добавляем ещё три на 1/4, 1/2, 3/4
-  if(((W/10+H/10)%3)===0){
+  if(typeof NOFREE==='undefined'&&((W/10+H/10)%3)===0){
     w.vfree=true;
     for(let k=1;k<=3;k++){ const pos=Math.round(W*k/4/10)*10; if(!w.vseamsU.some(sm=>Math.abs(sm.pos-pos)<5)) w.vseamsU.push({id:100+k,pos}); }
   }
   // свободная расстановка горизонтальных стыков (w.hfree): у четверти стен — детерминированно по размерам;
   // добавляем ручные стыки, часть из них действует только на чётные/нечётные полосы
-  if(((W/10+H/10)%4)===1){
+  if(typeof NOFREE==='undefined'&&((W/10+H/10)%4)===1){
     w.hfree=true; w.seamsU=w.seamsU||[];
     [[0.3,null],[0.6,'even'],[0.8,'odd']].forEach(([k,sc],i)=>{ const pos=Math.round(H*k/10)*10; if(!w.seamsU.some(sm=>Math.abs(sm.pos-pos)<5)) w.seamsU.push(Object.assign({id:200+i,pos},sc?{scope:sc}:{})); });
   }

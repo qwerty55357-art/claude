@@ -1079,6 +1079,7 @@ function hSeamRows(){
 }
 // двигаем ручной стык: тип стыка (jointModes) и привязки LED-контуров едут вместе с ним
 function moveHSeam(w,sm,newPos){
+  delete sm.nat;       // тронули — стык стал настоящим ручным (дизайнерским)
   const o=Math.round(sm.pos), n=Math.round(newPos);
   if(o!==n){
     const jm=w.jointModes||{}, po='h|'+o+'|';
@@ -1097,7 +1098,7 @@ function enableHFree(w){
   if(w.hfree) return;
   const info=hSeamGroups(); w.seamsU=w.seamsU||[];
   if(info) info.groups.forEach(g=>{
-    if(!w.seamsU.some(sm=>Math.abs(sm.pos-g.pos)<1.5)) addUserHSeam(w,g.pos,hScopeFor(info.L,g.pos,g.strips));
+    if(!w.seamsU.some(sm=>Math.abs(sm.pos-g.pos)<1.5)) addUserHSeam(w,g.pos,hScopeFor(info.L,g.pos,g.strips)).nat=true;
   });
   w.hfree=true;
   const cb=$('#i-hfree'); if(cb) cb.checked=true;
@@ -3408,9 +3409,9 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
     // стены b — просто свои стыки стены a): иначе стык на детали угла обрывался бы «в никуда»,
     // не продолжаясь ни в одну из стен, и LED вдоль него не имел бы физического смысла — линия
     // должна быть общей для стены A, угла и стены B, а не выдумкой одной лишь детали угла
-    const aSeamPts=(a.seamsU||[]).map(s=>s.pos);
+    const aSeamPts=(a.seamsU||[]).filter(s=>!s.nat).map(s=>s.pos);   // nat — естественный стык, ставший ручным при включении свободной расстановки: дизайнерским не считается
     const seamPts=b
-      ? aSeamPts.filter(p=>(b.seamsU||[]).some(s=>Math.abs(s.pos-p)<2))
+      ? aSeamPts.filter(p=>(b.seamsU||[]).some(s=>!s.nat&&Math.abs(s.pos-p)<2))
       : aSeamPts;
     const bounds=cornerHeightBounds(a.H,G.pl,seamPts);
     const em=v=>edgeMode(v);
@@ -4046,7 +4047,7 @@ function schemeFor(G,R,wi){
       const [b0,bL]=L.vert?[o.y,o.h]:[o.x,o.w];
       if(b0<sm.pos-1 && b0+bL>sm.pos+1) gaps.push([Math.max(sm.a0,a0),Math.min(sm.a1,a0+aL)]);
     });
-    const isUser=(wall.seamsU||[]).some(u=>Math.abs(u.pos-sm.pos)<1.5);
+    const isUser=(wall.seamsU||[]).some(u=>!u.nat&&Math.abs(u.pos-sm.pos)<1.5);
     subIn(sm.a0,sm.a1,gaps.filter(x=>x[1]>x[0])).forEach(seg=>{
       const mode=jointSegMode(wall,S,'h',sm.pos,seg[0]);
       const col=mode==='led'?'var(--warn)':mode==='butt'?'var(--muted)':'var(--err)';
@@ -5734,7 +5735,7 @@ function wallFaceModel(wallId){
     }
     if(leg.el==='otkos'||!mode||mode==='none') return;   // контур проёма — не стык на плоскости
     seg.mode=mode;
-    seg.user=leg.el==='jointH'&&(wall.seamsU||[]).some(u=>Math.abs(u.pos-leg.pos)<1.5);
+    seg.user=leg.el==='jointH'&&(wall.seamsU||[]).some(u=>!u.nat&&Math.abs(u.pos-leg.pos)<1.5);
     seams.push(seg);
   });
   ledCircuits.forEach(c=>c.legs.forEach(l=>{
