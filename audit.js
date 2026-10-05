@@ -34,6 +34,12 @@ function mkWall(r){
       mount:r()<0.15?'surface':null,mountCut:r()<0.5,
       otkosMode:{left:modes(),right:modes(),top:modes(),bottom:modes()}});
   }
+  // свободная расстановка стыков (w.vfree): у трети стен — детерминированно по размерам (поток rnd не
+  // меняется, старые сценарии остаются теми же); к ручным стыкам добавляем ещё три на 1/4, 1/2, 3/4
+  if(((W/10+H/10)%3)===0){
+    w.vfree=true;
+    for(let k=1;k<=3;k++){ const pos=Math.round(W*k/4/10)*10; if(!w.vseamsU.some(sm=>Math.abs(sm.pos-pos)<5)) w.vseamsU.push({id:100+k,pos}); }
+  }
   return w;
 }
 const N=12000; const rand=rnd(20260816); let crashed=0;
@@ -110,6 +116,27 @@ for(let t=0;t<N;t++){
     chk('L135g',Math.abs(edgeSum-expEdge)<1,`${id} стена ${wi}: сумма рёбер edge в графе ${edgeSum} != ${expEdge} (короб со сплошной стеной не должен рвать край)`);
   });
 
+  // V1–V4: полосы и вертикальные стыки (в т.ч. свободная расстановка w.vfree)
+  wallsArr.forEach((w,wi)=>{
+    const L=R.layouts[wi]; const vert=G.orient==='v';
+    L.strips.forEach(st=>chk('V1',st.w<=G.pw+0.5&&st.w>0.5,`${id} стена ${wi}: полоса шире листа или нулевая (${st.w} при листе ${G.pw})`));
+    const byReg=new Map(); L.strips.forEach(st=>{ if(!byReg.has(st.region)) byReg.set(st.region,[]); byReg.get(st.region).push(st); });
+    byReg.forEach((arr,ri)=>{
+      for(let k=1;k<arr.length;k++) chk('V2',Math.abs(arr[k].start-arr[k-1].end)<0.5,`${id} стена ${wi}: разрыв между полосами ${k-1}/${k} участка ${ri}`);
+      if(!w.vfree) return;
+      // свободная расстановка: границы — ровно ручные стыки внутри участка + авто-деление участков шире листа
+      const r0=arr[0].start, r1=arr[arr.length-1].end;
+      const cuts=(w.vseamsU||[]).map(sm=>sm.pos).filter(pos=>pos>r0+1&&pos<r1-1).sort((x,y)=>x-y).filter((pos,k2,aa)=>k2===0||pos-aa[k2-1]>1);
+      const edges=[r0,...cuts,r1]; let want=0;
+      for(let k=0;k<edges.length-1;k++){
+        const span=edges[k+1]-edges[k]; if(span<1) continue;
+        const nFull=Math.floor(span/G.pw), rest=span-nFull*G.pw;
+        want+= rest<1?Math.max(nFull,1):nFull+1;
+      }
+      chk('V3',arr.length===want,`${id} стена ${wi} участок ${ri}: полос ${arr.length}, ожидалось ${want} при ручных стыках ${cuts.join(',')}`);
+      cuts.forEach(pos=>chk('V4',arr.some(st=>Math.abs(st.end-pos)<0.6),`${id} стена ${wi}: ручной стык ${pos} не стал границей полос`));
+    });
+  });
   // L1: деталь внутри листа
   R.sheets.forEach(sh=>sh.list.forEach(p=>chk('L1',p.x>=-0.5&&p.y>=-0.5&&p.x+p.w<=G.pw+0.5&&p.y+p.len<=G.pl+0.5,
     `${id}: ${p.label} вне листа`)));

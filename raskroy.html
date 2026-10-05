@@ -285,9 +285,15 @@ tbody tr:hover td{background:var(--surface)}
       <button class="btn btn-mini" id="btn-add-seam" style="margin-bottom:4px">+ добавить горизонтальный стык</button>
       <p class="hint">Дизайнерские швы в точных отметках от пола. Стык можно перетаскивать прямо на схеме; перетаскивание автоматического стыка превращает его в ручной. Профиль на стыке (соединитель / встык / LED) — клик по линии на схеме, либо в разделе «LED».</p>
       <label class="sub-l">Вертикальные стыки активной стены</label>
+      <label class="chk"><input type="checkbox" id="i-vfree"><span>Свободная расстановка стыков — любой стык можно двигать</span></label>
       <div id="vseams-list"></div>
+      <div class="row" id="vseam-fill" style="grid-template-columns:1fr 1fr auto;align-items:end;margin-bottom:6px">
+        <div class="f"><label>Ширина полосы</label><input type="number" id="vseam-step" value="700" min="50"><span class="unit">мм</span></div>
+        <div class="f"><label>Считать</label><select id="vseam-from"><option value="l">слева направо</option><option value="r">справа налево</option></select></div>
+        <button class="btn btn-mini" id="btn-vseam-fill" title="Заменяет стыки на участках стены стыками через равную ширину полосы">расставить</button>
+      </div>
       <button class="btn btn-mini" id="btn-add-vseam" style="margin-bottom:4px">+ добавить вертикальный стык</button>
-      <p class="hint">Дополнительный разрез внутри полосы материала в точной отметке от левого края — необязательно на естественной границе полос. Тип стыка (соединитель / встык / LED) — клик по линии на схеме, либо в разделе «LED».</p>
+      <p class="hint">Без галочки «свободная расстановка» границы панелей фиксированы, а стык можно только добавить внутри полосы. С галочкой фиксированных стыков нет: каждый можно задать цифрой («от левого края» или «от предыдущего стыка») либо перетащить на схеме; участок шире листа делится на панели автоматически (строка «авто»). «Расставить» делает стыки через равную ширину полосы (например 700 мм). Тип стыка (соединитель / встык / LED) — клик по линии на схеме, либо в разделе «LED».</p>
       <div class="row row-1" style="margin-top:4px">
         <button class="btn btn-mini btn-del" id="btn-del-wall" style="justify-self:start">Удалить эту стену</button>
       </div>
@@ -1021,6 +1027,7 @@ function wallToForm(){
   $('#i-w').value=w.W; $('#i-h').value=w.H; $('#i-ceil').value=w.ceil;
   $('#i-e-top').value=edgeMode(w.edges.top); $('#i-e-bot').value=edgeMode(w.edges.bot);
   $('#i-e-left').value=edgeMode(w.edges.left); $('#i-e-right').value=edgeMode(w.edges.right);
+  $('#i-vfree').checked=!!w.vfree;   // только здесь: renderVSeams вызывается и из пересчёта, прямо во время клика по галочке
   renderSeams(); renderVSeams();
 }
 function formToWall(){
@@ -1029,7 +1036,7 @@ function formToWall(){
   w.W=num('#i-w'); w.H=num('#i-h'); w.ceil=num('#i-ceil');
   w.edges={top:$('#i-e-top').value,bot:$('#i-e-bot').value,left:$('#i-e-left').value,right:$('#i-e-right').value};
 }
-const WALL_FIELDS=['i-wname','i-w','i-h','i-ceil','i-e-top','i-e-bot','i-e-left','i-e-right'];
+const WALL_FIELDS=['i-wname','i-w','i-h','i-ceil','i-e-top','i-e-bot','i-e-left','i-e-right','i-vfree'];
 $('#i-wname').addEventListener('input',()=>{ AW().name=$('#i-wname').value.trim()||AW().name; AW().autoName=false; renderWallCompass(); });
 // [ОТРИСОВКА]
 function renderSeams(){
@@ -1064,35 +1071,158 @@ $('#btn-add-seam').addEventListener('click',()=>{
   renderSeams(); run();
 });
 // [ОТРИСОВКА]
-function renderVSeams(){
-  const w=AW();
-  $('#vseams-list').innerHTML=(w.vseamsU||[]).map(sm=>`
-    <div class="row" data-vseamrow="${sm.id}" style="align-items:center;margin-bottom:4px">
-      <div class="f"><label>Отметка от левого края</label><input type="number" data-vseampos value="${Math.round(sm.pos)}"><span class="unit">мм</span></div>
-      <div class="f" style="display:flex;gap:8px;align-items:center;margin-top:14px">
-        <span class="hint" style="margin:0">профиль — клик по линии на схеме</span>
-        <button class="btn btn-del btn-mini" data-vseamdel="${sm.id}">удалить</button>
-      </div>
-    </div>`).join('');
+const fmtIn=v=>Math.round(v*10)/10;
+// Границы полос активной стены по последнему расчёту, в координатах ВВОДА (до среза радиусным
+// углом, как и w.vseamsU): участки (между проёмами во всю высоту) и стыки внутри них
+function vSeamBounds(){
+  const w=AW(), R=LAST&&LAST.R, L=R&&R.layouts&&R.layouts[active];
+  if(!L||!L.strips.length) return null;
+  const shift=((R.cornerCuts&&R.cornerCuts.get(w.id))||{}).left||0;
+  const regions=[];
+  L.strips.forEach((st,k)=>{
+    if(k===0||st.region!==L.strips[k-1].region) regions.push({a:st.start+shift,b:st.end+shift,joints:[]});
+    else { const rg=regions[regions.length-1]; rg.joints.push(st.start+shift); rg.b=st.end+shift; }
+  });
+  return {regions,shift};
 }
+// строки списка: ручные стыки (редактируются) и, при свободной расстановке, авто-границы (участок
+// шире листа). prev — ближайшая граница слева (стык, край участка или стены) для замера «от соседнего»
+function vSeamRows(){
+  const w=AW(), vb=vSeamBounds(), seams=(w.vseamsU||[]).slice().sort((a,b)=>a.pos-b.pos);
+  const prevOf=pos=>{
+    if(!vb){ const q=seams.filter(sm=>sm.pos<pos-0.5).pop(); return q?q.pos:0; }
+    let best=0;
+    vb.regions.forEach(rg=>{ if(pos>rg.a+0.5&&pos<=rg.b+0.5){ best=rg.a; rg.joints.forEach(j=>{ if(j<pos-0.5&&j>best) best=j; }); } });
+    return best;
+  };
+  const rows=seams.map(sm=>({pos:sm.pos,sm,prev:prevOf(sm.pos)}));
+  if(w.vfree&&vb) vb.regions.forEach(rg=>rg.joints.forEach(j=>{
+    if(!seams.some(sm=>Math.abs(sm.pos-j)<1.5)) rows.push({pos:j,sm:null,prev:prevOf(j)});
+  }));
+  rows.sort((x,y)=>x.pos-y.pos);
+  return rows;
+}
+// двигаем ручной стык: тип стыка (jointModes) и привязки LED-контуров едут вместе с ним — они
+// ключуются позицией стыка, без этого передвижение сбрасывало бы профиль/LED на этом стыке
+function moveVSeam(w,sm,newPos){
+  const vb=vSeamBounds(), sh=vb?vb.shift:0;
+  const o=Math.round(sm.pos-sh), n=Math.round(newPos-sh);
+  if(o!==n){
+    const jm=w.jointModes||{}, po='v|'+o+'|';
+    Object.keys(jm).filter(k=>k.startsWith(po)).forEach(k=>{ jm['v|'+n+'|'+k.slice(po.length)]=jm[k]; delete jm[k]; });
+    ledCircuits.forEach(c=>c.legs.forEach(l=>{ if(+l.wall===w.id&&l.el==='jointV'&&Math.round(l.pos)===o) l.pos=n; }));
+  }
+  sm.pos=newPos;
+}
+function addUserVSeam(w,pos){
+  w.vseamsU=w.vseamsU||[]; w.vseamSeq=(w.vseamSeq||0)+1;
+  const sm={id:w.vseamSeq,pos:fmtIn(pos)}; w.vseamsU.push(sm); return sm;
+}
+// свободная расстановка: все естественные границы полос становятся ручными стыками (позиции те же —
+// раскладка не меняется), дальше любой можно двигать
+function enableVFree(w){
+  if(w.vfree) return;
+  const vb=vSeamBounds(); w.vseamsU=w.vseamsU||[];
+  if(vb) vb.regions.forEach(rg=>rg.joints.forEach(j=>{ if(!w.vseamsU.some(sm=>Math.abs(sm.pos-j)<1.5)) addUserVSeam(w,j); }));
+  w.vfree=true;
+  const cb=$('#i-vfree'); if(cb) cb.checked=true;      // включено не галочкой (перетаскиванием/меню/«расставить») — показываем
+}
+// [ОТРИСОВКА]
+function renderVSeams(){
+  const w=AW(); const horiz=(($('#i-orient')||{}).value)==='h';
+  const rows=vSeamRows(), vb=vSeamBounds();
+  const L1=horiz?'от пола':'от левого края', L2='от предыдущего стыка';
+  const grid='grid-template-columns:1fr 1fr auto;align-items:end;margin-bottom:4px';
+  let html=rows.map((r,i)=>r.sm?`
+    <div class="row" data-vseamrow="${r.sm.id}" style="${grid}">
+      <div class="f"><label>Стык ${i+1} · ${L1}</label><input type="number" step="any" data-vseampos value="${fmtIn(r.sm.pos)}"><span class="unit">мм</span></div>
+      <div class="f"><label>${L2}</label><input type="number" step="any" data-vseamgap value="${fmtIn(r.pos-r.prev)}"><span class="unit">мм</span></div>
+      <button class="btn btn-del btn-mini" data-vseamdel="${r.sm.id}">удалить</button>
+    </div>`:`
+    <div class="row" data-vseamauto="${fmtIn(r.pos)}" style="${grid}">
+      <div class="f"><label>Стык ${i+1} · ${L1} · авто</label><input type="number" disabled value="${fmtIn(r.pos)}"><span class="unit">мм</span></div>
+      <div class="f"><label>${L2}</label><input type="number" disabled value="${fmtIn(r.pos-r.prev)}"><span class="unit">мм</span></div>
+      <button class="btn btn-mini" data-vseamfix="${fmtIn(r.pos)}" title="Автоматический стык (участок шире листа) — закрепить, чтобы двигать">закрепить</button>
+    </div>`).join('');
+  if(vb&&rows.length){
+    const rg=vb.regions[vb.regions.length-1], lastJ=rg.joints.length?rg.joints[rg.joints.length-1]:rg.a;
+    html+=`<p class="hint" style="margin:0 0 6px">Крайняя правая полоса: ${fmtIn(rg.b-lastJ)} мм.</p>`;
+  }
+  $('#vseams-list').innerHTML=html;
+}
+// пока пользователь печатает в списке — обновляем только «соседние» значения на месте, без перерисовки
+function updateVSeamsInPlace(){
+  const box=$('#vseams-list'); if(!box) return;
+  const rows=vSeamRows();
+  if(rows.length!==box.querySelectorAll('[data-vseamrow],[data-vseamauto]').length){ renderVSeams(); return; }
+  rows.forEach(r=>{
+    if(!r.sm) return;
+    const row=box.querySelector(`[data-vseamrow="${r.sm.id}"]`); if(!row) return;
+    const pi=row.querySelector('[data-vseampos]'), gi=row.querySelector('[data-vseamgap]');
+    if(pi&&pi!==document.activeElement) pi.value=fmtIn(r.sm.pos);
+    if(gi&&gi!==document.activeElement) gi.value=fmtIn(r.pos-r.prev);
+  });
+}
+// решение «перерисовать или обновить на месте» — отложенно: в момент blur/change у прежнего поля
+// document.activeElement ещё body, и синхронная перерисовка стирала бы поле, в которое кликнули
+let vsListTimer=null;
+document.addEventListener('raskroy:recomputed',()=>{
+  clearTimeout(vsListTimer);
+  vsListTimer=setTimeout(()=>{
+    const box=$('#vseams-list'); if(!box) return;
+    if(box.contains(document.activeElement)) updateVSeamsInPlace(); else renderVSeams();
+  },0);
+});
 $('#vseams-list').addEventListener('input',e=>{
   const row=e.target.closest('[data-vseamrow]'); if(!row) return;
   const w=AW(); const sm=(w.vseamsU||[]).find(x=>x.id==row.dataset.vseamrow); if(!sm) return;
-  if(e.target.hasAttribute('data-vseampos')) sm.pos=parseFloat(e.target.value)||0;
-  else return;
+  const v=parseFloat(e.target.value), val=isFinite(v)?v:0;
+  if(e.target.hasAttribute('data-vseampos')) moveVSeam(w,sm,val);
+  else if(e.target.hasAttribute('data-vseamgap')){
+    const me=vSeamRows().find(r=>r.sm===sm);
+    moveVSeam(w,sm,(me?me.prev:0)+val);
+    const pi=row.querySelector('[data-vseampos]'); if(pi) pi.value=fmtIn(sm.pos);
+  } else return;
   run();
 });
+// Enter / уход из списка — упорядочить строки по позиции. Перерисовывать на каждый change нельзя:
+// клик или Tab в соседнее поле списка сначала вызывает change у прежнего и стирал бы новое поле
+$('#vseams-list').addEventListener('focusout',()=>setTimeout(()=>{ if(!$('#vseams-list').contains(document.activeElement)) renderVSeams(); },0));
+$('#vseams-list').addEventListener('keydown',e=>{ if(e.key==='Enter'&&e.target.tagName==='INPUT') e.target.blur(); });
 $('#vseams-list').addEventListener('click',e=>{
-  const id=e.target.dataset.vseamdel; if(!id) return;
-  const w=AW(); w.vseamsU=(w.vseamsU||[]).filter(x=>x.id!=id);
+  const w=AW();
+  if(e.target.dataset.vseamdel){ w.vseamsU=(w.vseamsU||[]).filter(x=>x.id!=e.target.dataset.vseamdel); renderVSeams(); run(); return; }
+  if(e.target.dataset.vseamfix!==undefined){ addUserVSeam(w,+e.target.dataset.vseamfix); renderVSeams(); run(); }
+});
+$('#i-vfree').addEventListener('change',()=>{
+  const w=AW();
+  if($('#i-vfree').checked) enableVFree(w); else w.vfree=false;
+  renderVSeams(); run();
+});
+// «расставить»: стыки через равную ширину полосы на каждом участке стены; расстановка по шагу имеет смысл
+// только при свободных стыках — включаем их
+$('#btn-vseam-fill').addEventListener('click',()=>{
+  const w=AW(), step=parseFloat($('#vseam-step').value), vb=vSeamBounds();
+  if(!vb||!(step>=50)) return;
+  const fromRight=$('#vseam-from').value==='r';
+  w.vfree=true; w.vseamsU=w.vseamsU||[]; $('#i-vfree').checked=true;
+  vb.regions.forEach(rg=>{
+    w.vseamsU=w.vseamsU.filter(sm=>!(sm.pos>rg.a+1&&sm.pos<rg.b-1));   // прежние стыки участка заменяются
+    for(let k=1;;k++){
+      const pos=fromRight?rg.b-k*step:rg.a+k*step;
+      if(fromRight?pos<=rg.a+1:pos>=rg.b-1) break;
+      addUserVSeam(w,pos);
+    }
+  });
+  w.vseamsU.sort((x,y)=>x.pos-y.pos);
   renderVSeams(); run();
 });
 $('#btn-add-vseam').addEventListener('click',()=>{
-  const w=AW(); w.vseamsU=w.vseamsU||[]; w.vseamSeq=(w.vseamSeq||0)+1;
+  const w=AW(); w.vseamsU=w.vseamsU||[];
   // новая отметка — посередине по ширине, не совпадая с существующими
   let pos=Math.round(w.W/2/10)*10;
   while(w.vseamsU.some(x=>Math.abs(x.pos-pos)<20)) pos+=100;
-  w.vseamsU.push({id:w.vseamSeq,pos});
+  addUserVSeam(w,pos);
   renderVSeams(); run();
 });
 
@@ -2002,7 +2132,25 @@ function buildLayout(S){
     return [...Array(nFull).fill(bandW),rest];
   };
   const strips=[]; let si=0;
-  regions.forEach((rg,ri)=>{
+  if(S.vfree){
+    // СВОБОДНАЯ расстановка стыков: границы полос — только ручные вертикальные стыки (S.userVSeams) —
+    // естественных «краёв панелей» нет, поэтому каждый стык можно двигать. Участок между соседними
+    // стыками (или краем стены/проёма-разделителя) — одна полоса, если он не шире листа; если шире —
+    // он, как и раньше, делится layoutRegion на панели (симметрично при S.sym), и эти авто-границы
+    // — единственное, что пользователь не задавал сам (в списке стыков они помечены «авто»).
+    regions.forEach((rg,ri)=>{
+      const cuts=(S.userVSeams||[]).filter(pos=>pos>rg[0]+1&&pos<rg[1]-1).sort((a,b)=>a-b)
+        .filter((pos,k,arr)=>k===0||pos-arr[k-1]>1);
+      const edges=[rg[0],...cuts,rg[1]];
+      for(let k=0;k<edges.length-1;k++){
+        let cur=edges[k]; const span=edges[k+1]-edges[k]; if(span<1) continue;
+        layoutRegion(span).forEach(w=>{
+          strips.push({i:si++,region:ri,start:cur,w,end:cur+w,segs:[],cuts:[]});
+          cur+=w;
+        });
+      }
+    });
+  } else regions.forEach((rg,ri)=>{
     let cur=rg[0];
     layoutRegion(rg[1]-rg[0]).forEach(w=>{
       strips.push({i:si++,region:ri,start:cur,w,end:cur+w,segs:[],cuts:[]});
@@ -2011,8 +2159,9 @@ function buildLayout(S){
   });
   // Ручные вертикальные стыки: принудительный разрез полосы В ЛЮБОМ месте по ширине (высоте —
   // при горизонтальной раскладке), а не только на естественной границе панелей. Если позиция
-  // уже совпадает с границей — резать нечего, там и так есть стык.
-  (S.userVSeams||[]).forEach(pos=>{
+  // уже совпадает с границей — резать нечего, там и так есть стык. (При свободной расстановке
+  // они уже стали границами полос выше — повторно не режем.)
+  if(!S.vfree) (S.userVSeams||[]).forEach(pos=>{
     const idx=strips.findIndex(st=>pos>st.start+1 && pos<st.end-1);
     if(idx<0) return;
     const st=strips[idx];
@@ -2925,7 +3074,7 @@ function wallCutView(w,cuts){
 }
 function wallS(G,w){
   return Object.assign({},G,{W:w.W,H:w.H,ceil:w.ceil,rowH:w.rowH||0,
-    userSeams:(w.seamsU||[]).map(x=>x.pos),userVSeams:(w.vseamsU||[]).map(x=>x.pos),ops:w.ops,
+    userSeams:(w.seamsU||[]).map(x=>x.pos),userVSeams:(w.vseamsU||[]).map(x=>x.pos),vfree:!!w.vfree,ops:w.ops,
     edges:w.edges,cout:w.cout,cin:w.cin,
     // резолверы типа стыка для геометрии (LED-соединитель физически шире, см. LED_GAP в buildLayout) —
     // те же jointSegMode/jointSegKey, что использует и остальной проект для сметы/подсветки линий
@@ -3759,8 +3908,8 @@ function schemeFor(G,R,wi){
         :`<line x1="${s[0]}" y1="${H-j.pos}" x2="${s[1]}" y2="${H-j.pos}" stroke="${col}" stroke-width="${fs*wgt}"${mode==='butt'?` stroke-dasharray="${fs*0.15} ${fs*0.2}"`:''}/>`;
       // широкая невидимая зона захвата под клик (подсветку продольного стыка не двигают, только переключают)
       g+=L.vert
-        ?`<rect x="${j.pos-fs*0.5}" y="${H-s[1]}" width="${fs*1}" height="${s[1]-s[0]}" fill="transparent" data-jvclick="${Math.round(j.pos)}" data-jvseg="${Math.round(s[0])}" style="cursor:pointer"/>`
-        :`<rect x="${s[0]}" y="${H-j.pos-fs*0.5}" width="${s[1]-s[0]}" height="${fs*1}" fill="transparent" data-jvclick="${Math.round(j.pos)}" data-jvseg="${Math.round(s[0])}" style="cursor:pointer"/>`;
+        ?`<rect x="${j.pos-fs*0.5}" y="${H-s[1]}" width="${fs*1}" height="${s[1]-s[0]}" fill="transparent" data-jvclick="${Math.round(j.pos)}" data-jvseg="${Math.round(s[0])}" style="cursor:ew-resize"/>`
+        :`<rect x="${s[0]}" y="${H-j.pos-fs*0.5}" width="${s[1]-s[0]}" height="${fs*1}" fill="transparent" data-jvclick="${Math.round(j.pos)}" data-jvseg="${Math.round(s[0])}" style="cursor:ns-resize"/>`;
     });
   });
 
@@ -5189,7 +5338,7 @@ function renderNotes(G,R){
     if(L.seams.length)
       n.push(['info','Горизонтальные стыки',wt(i)+`швы на отметках ${[...new Set(L.seams.map(x=>fmt(x.pos)))].join(', ')} мм.`+(G.jointH?' Профиль заложен.':' Профиль на горизонтальные швы ВЫКЛЮЧЕН — проверьте, так ли задумано.')]);
     const last=L.strips[L.strips.length-1];
-    if(L.strips.length>1&&last.w<150&&!G.sym)
+    if(L.strips.length>1&&last.w<150&&!G.sym&&!w.vfree)
       n.push(['warn','Раскладка',wt(i)+`крайняя полоса всего ${fmt(last.w)} мм. Включите симметричную раскладку.`]);
     const cuts=R.cornerCuts&&R.cornerCuts.get(w.id);
     w.ops.forEach((o,k)=>{
@@ -5714,6 +5863,15 @@ document.addEventListener('keydown',e=>{
       try{ box.setPointerCapture(ev.pointerId); }catch(_){}
       return;
     }
+    if(t.dataset&&t.dataset.jvclick!==undefined){
+      // вертикальный стык: клик — меню типа стыка, перетаскивание — перенос; ручной стык переносится
+      // как есть, естественную границу полос сначала превращаем в ручной (включается свободная
+      // расстановка) — запись создаётся только когда движение реально началось (см. pointermove)
+      drag={mode:'vseam',startPos:+t.dataset.jvclick,seamId:null,started:false,shift:0};
+      ev.preventDefault();
+      try{ box.setPointerCapture(ev.pointerId); }catch(_){}
+      return;
+    }
     const id=t.dataset&&(t.dataset.resize||t.dataset.drag);
     if(!id) return;
     const w=AW(); const o=w.ops.find(x=>x.id==id); if(!o) return;
@@ -5736,6 +5894,30 @@ document.addEventListener('keydown',e=>{
       pos=Math.min(Math.max(pos,50),(vert?w.H:w.W)-50);
       sm.pos=pos;
       run();
+      return;
+    }
+    if(drag.mode==='vseam'){
+      const pt=svgPoint(ev); if(!pt) return;
+      if(!drag.started){
+        if(!downAt||(Math.abs(ev.clientX-downAt.x)<5&&Math.abs(ev.clientY-downAt.y)<5)) return;   // дрожание руки — это клик
+        const vb0=vSeamBounds(); drag.shift=vb0?vb0.shift:0;
+        const upos=drag.startPos+drag.shift;
+        let sm0=(w.vseamsU||[]).find(x=>Math.abs(x.pos-upos)<2);
+        if(!sm0){ enableVFree(w); sm0=(w.vseamsU||[]).find(x=>Math.abs(x.pos-upos)<2); }
+        if(!sm0){ drag=null; return; }
+        drag.seamId=sm0.id; drag.started=true;
+      }
+      const sm=(w.vseamsU||[]).find(x=>x.id===drag.seamId); if(!sm){ drag=null; return; }
+      const vert=collect().orient==='v';
+      let pos=Math.round(((vert?pt.x:w.H-pt.y)+drag.shift)/10)*10;
+      // не перетаскиваем через соседние стыки / края участка (оставляем минимум 50 мм полосы)
+      const vb=vSeamBounds(); let lo=0, hi=vert?w.W:w.H;
+      if(vb) vb.regions.forEach(rg=>{
+        if(sm.pos>rg.a-1&&sm.pos<rg.b+1){ lo=rg.a; hi=rg.b;
+          rg.joints.forEach(j=>{ if(Math.abs(j-sm.pos)<0.6) return; if(j<sm.pos&&j>lo) lo=j; if(j>sm.pos&&j<hi) hi=j; }); }
+      });
+      pos=Math.min(Math.max(pos,lo+50),hi-50);
+      if(pos!==sm.pos){ moveVSeam(w,sm,pos); run(); }
       return;
     }
     const o=w.ops.find(x=>x.id==drag.id); if(!o){drag=null;return;}
@@ -5774,7 +5956,7 @@ document.addEventListener('keydown',e=>{
   const stop=(ev)=>{
     const wasDrag=drag; const m=drag&&drag.mode;
     drag=null;
-    if(wasDrag){ if(m==='seam') renderSeams(); else renderOpenings(); }
+    if(wasDrag){ if(m==='seam') renderSeams(); else if(m==='vseam') renderVSeams(); else renderOpenings(); }
     // клик без движения -> контекстное меню по тому, что под курсором
     if(ev&&downAt&&Math.abs(ev.clientX-downAt.x)<5&&Math.abs(ev.clientY-downAt.y)<5){
       if(downAt.otkosOp!==undefined) showOtkosMenu(ev,downAt.otkosOp,downAt.otkosSide);
@@ -5829,12 +6011,17 @@ document.addEventListener('keydown',e=>{
     menuBtn(menu,'Соединитель',cur==='cap',()=>setMode('cap'));
     menuBtn(menu,'Встык (без профиля)',cur==='butt',()=>setMode('butt'));
     if(cur==='led') menuDivider(menu,'Сейчас: LED (меняется в разделе «LED»)');
-    const sm=(w.vseamsU||[]).find(x=>Math.abs(x.pos-pos)<2);
+    const vbm=vSeamBounds(), upos=pos+(vbm?vbm.shift:0);
+    const sm=(w.vseamsU||[]).find(x=>Math.abs(x.pos-upos)<2);
     if(sm) menuBtn(menu,'Удалить стык',false,()=>{
       w.vseamsU=(w.vseamsU||[]).filter(x=>x.id!==sm.id);
       delete (w.jointModes||{})[key];
       closeMatMenu(); renderVSeams(); run();
     },true);
+    else menuBtn(menu,w.vfree?'Закрепить стык (чтобы двигать)':'Сделать все стыки перемещаемыми',false,()=>{
+      if(w.vfree) addUserVSeam(w,upos); else enableVFree(w);
+      closeMatMenu(); renderVSeams(); run();
+    });
   }
   function showEdgeMenu(ev,side){
     const w=AW();

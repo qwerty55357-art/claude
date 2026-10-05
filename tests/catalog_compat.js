@@ -31,7 +31,7 @@ async function fingerprint(browser,url,name,proj){
     document.querySelector('#i-preset').value=proj.preset;
     document.querySelector('#i-preset').dispatchEvent(new Event('change'));
     walls.length=0; proj.walls.forEach(w=>walls.push(JSON.parse(JSON.stringify(w)))); active=0; wallToForm(); renderOpenings(); run();
-    const t=s=>{ const e=document.querySelector(s); return e?e.innerHTML:''; };
+    const t=s=>{ const e=document.querySelector(s); return e?e.innerHTML.replace(/cursor:(ew|ns)-resize/g,'cursor:pointer'):''; };   // курсор над стыком теперь «перетаскивание» — осознанное отличие
     return {cut:t('#cutmap'),scheme:t('#scheme'),est:t('#estimate'),spec:t('#spec'),notes:t('#notes')};
   },{proj});
   await p.close(); return {fp,errs};
