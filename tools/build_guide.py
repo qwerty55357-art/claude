@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Собирает самодостаточный docs/guide.html: подставляет картинки docs/guide/img/*.jpg в guide.src.html как data-URI.
-Запуск: python3 tools/build_guide.py   (PDF: см. tools/guide_shots/README.md)"""
+"""Собирает самодостаточные docs/guide.html и docs/generation.html: подставляет картинки <папка>/img/*.jpg
+в <имя>.src.html как data-URI. Запуск: python3 tools/build_guide.py   (PDF: tools/guide_shots/make_pdf.js)"""
 import base64, re, pathlib
 root = pathlib.Path(__file__).resolve().parent.parent
-src = (root / 'docs/guide/guide.src.html').read_text(encoding='utf-8')
-def inline(m):
-    f = root / 'docs/guide' / m.group(1)
-    return 'src="data:image/jpeg;base64,' + base64.b64encode(f.read_bytes()).decode() + '"'
-out = re.sub(r'src="(img/[^"]+\.jpg)"', inline, src)
-(root / 'docs/guide.html').write_text(out, encoding='utf-8')
-print('docs/guide.html', len(out) // 1024, 'KB')
+for srcf in sorted((root / 'docs').glob('*/*.src.html')):
+    d = srcf.parent
+    def inline(m, d=d):
+        return 'src="data:image/jpeg;base64,' + base64.b64encode((d / m.group(1)).read_bytes()).decode() + '"'
+    out = re.sub(r'src="(img/[^"]+\.jpg)"', inline, srcf.read_text(encoding='utf-8'))
+    dst = root / 'docs' / (srcf.name[:-len('.src.html')] + '.html')
+    dst.write_text(out, encoding='utf-8')
+    print(dst.relative_to(root), len(out) // 1024, 'KB')

@@ -37,6 +37,9 @@ async function marks(p,list){
       c.textContent=m.n;
       c.style.cssText=`position:fixed;z-index:99999;pointer-events:none;width:${S}px;height:${S}px;border-radius:50%;background:#ff3b6b;color:#fff;font:700 13px/${S}px Arial,sans-serif;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.6);border:1.5px solid #fff;left:${x}px;top:${y}px`;
       document.body.appendChild(c);
+      if(m.text){ const t=document.createElement('div'); t.className='__mk'; t.textContent=m.text;
+        t.style.cssText=`position:fixed;z-index:99999;pointer-events:none;background:#fff;color:#23211c;font:600 13px/1.25 Arial,sans-serif;padding:3px 8px;border-radius:5px;border:1.5px solid #ff3b6b;box-shadow:0 1px 4px rgba(0,0,0,.4);white-space:nowrap;left:${x+S+4+(m.tx||0)}px;top:${y+1+(m.ty||0)}px`;
+        document.body.appendChild(t); }
     }
   },list);
 }

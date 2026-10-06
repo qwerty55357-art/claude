@@ -1,5 +1,7 @@
 # Скриншоты и сборка руководства
 
+Два документа: общее руководство (`docs/guide/`) и инструкция по генерации визуализаций (`docs/generation/`), собираются одной командой.
+
 Руководство: исходник `docs/guide/guide.src.html`, картинки `docs/guide/img/*.jpg`; готовые файлы `docs/guide.html`
 (самодостаточный, картинки внутри) и `docs/guide.pdf`.
 
@@ -8,7 +10,7 @@
 ```
 cd tools/guide_shots && mkdir -p img
 export NODE_PATH=$(npm root -g)        # нужен playwright и chromium
-for f in shots1 shots2 shots3 shots4 shots5 shots6 shots8; do node $f.js; done   # пишут PNG в img/
+for f in shots1 shots2 shots3 shots4 shots5 shots6 shots8 shots9 mock3; do node $f.js; done   # пишут PNG в img/
 ```
 
 `demo.js` собирает демонстрационный проект через настоящий интерфейс, `lib.js` — выноски и съёмка по селектору.
