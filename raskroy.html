@@ -84,6 +84,15 @@ button,input,select,textarea{font:inherit;color:inherit}
 .shelf-piece b{font-size:11.5px}
 .shelf-rot{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:var(--void);border:1px solid var(--line-2);color:var(--paper);font-size:12px;line-height:18px;cursor:pointer}
 @media print{ .shelf-zone{display:none !important} }
+/* карта раскроя + верстак: верстак — липкая колонка справа, остаётся на экране, пока листаете листы (на узком экране
+   уходит наверх и прилипает под шапкой). --topbar-h выставляет скрипт по высоте шапки */
+.cutmap-layout{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:14px;align-items:start}
+.cutmap-layout>.shelf-zone{position:sticky;top:calc(var(--topbar-h,76px) + 12px);margin-bottom:0;z-index:20;max-height:calc(100vh - var(--topbar-h,76px) - 36px);overflow:auto}
+@media (max-width:1100px){
+  .cutmap-layout{grid-template-columns:minmax(0,1fr)}
+  .cutmap-layout>.shelf-zone{order:-1;max-height:34vh}
+}
+@media print{ .cutmap-layout{display:block} }
 .mini-scheme{margin:6px 0 8px;border:1px solid var(--line);border-radius:var(--r);background:var(--void)}
 .mini-scheme svg{display:block;width:100%}
 .op-btns{display:flex;gap:6px;margin-left:auto}
@@ -566,11 +575,13 @@ tbody tr:hover td{background:var(--surface)}
   </div>
   <div class="block">
     <div class="stage-h"><h2>Карта раскроя</h2><span class="meta" id="cut-meta"></span><span class="rule"></span></div>
-    <div id="shelf-zone" class="shelf-zone" data-shelfzone="1">
-      <div class="shelf-h">Верстак — временно отложенные детали</div>
-      <div id="shelf-items" class="shelf-items"><span class="shelf-empty">перетащите сюда деталь с карты, чтобы освободить для неё место</span></div>
+    <div class="cutmap-layout" id="cutmap-layout">
+      <div class="svg-wrap" id="cutmap"></div>
+      <div id="shelf-zone" class="shelf-zone" data-shelfzone="1">
+        <div class="shelf-h">Верстак — временно отложенные детали</div>
+        <div id="shelf-items" class="shelf-items"><span class="shelf-empty">перетащите сюда деталь с карты, чтобы освободить для неё место</span></div>
+      </div>
     </div>
-    <div class="svg-wrap" id="cutmap"></div>
     <div class="legend">
       <span><svg width="12" height="12"><rect width="12" height="12" fill="var(--straw-face)" stroke="var(--straw-deep)"/></svg>деталь стены</span>
       <span><svg width="12" height="12"><rect width="12" height="12" fill="var(--alu-face)" stroke="var(--alu-deep)"/></svg>деталь откоса</span>
@@ -8588,6 +8599,14 @@ document.addEventListener('keydown',e=>{
       setTimeout(()=>URL.revokeObjectURL(zipUrl),10000);
     }));
   });
+})();
+
+// высота липкой шапки — для липкого верстака рядом с картой раскроя (CSS-переменная --topbar-h)
+(function(){
+  const tb=document.querySelector('.topbar');
+  const set=()=>document.documentElement.style.setProperty('--topbar-h',(tb?tb.offsetHeight:76)+'px');
+  set(); window.addEventListener('resize',set);
+  if(typeof ResizeObserver!=='undefined'&&tb) new ResizeObserver(set).observe(tb);
 })();
 
 /* ---------- старт ---------- */
