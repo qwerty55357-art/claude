@@ -155,7 +155,8 @@ for(let t=0;t<N;t++){
         if(!inScope) return;
         st.segs.forEach(sg=>{
           if(!(sm.pos>sg[0]+0.5&&sm.pos<sg[1]-0.5)) return;
-          const mine=L.pieces.filter(p=>p.strip===st.i&&p.from>=sg[0]-8&&p.to<=sg[1]+8);
+          // деталь у проёма с «изгибом» заходит в проём (foldZones) — границы детали шире сегмента, поэтому берём любые детали, перекрывающие сегмент
+          const mine=L.pieces.filter(p=>p.strip===st.i&&p.from<sg[1]+0.5&&p.to>sg[0]-0.5);
           chk('H2',mine.some(p=>Math.abs(p.from-sm.pos)<9||Math.abs(p.to-sm.pos)<9),
             `${id} стена ${wi} полоса ${st.i}: ручной стык ${sm.pos} (scope ${sm.scope||'все'}) не стал границей куска`);
         });
@@ -302,7 +303,7 @@ for(let t=0;t<N;t++){
     // на LED_GAP именно с той стороны, где выбран этот режим, панель со стороны проёма отступает
     const wOp={W:3000,H:2300,ceil:3000,rowH:0,seamsU:[],seamSeq:0,vseamsU:[],vseamSeq:0,
       edges:{top:'none',bot:'none',left:'none',right:'none'},cout:0,cin:0,jointModes:{},
-      ops:[{kind:'window',w:800,h:1000,x:1000,y:500,otkos:true,depth:150,id:1,
+      ops:[{kind:'window',w:800,h:1000,x:1037,y:500,otkos:true,depth:150,id:1,   // 1037: не кратно ширине листа (100/150/600/1150)
             otkosMode:{left:'cap',right:'cap',top:'cap',bottom:'cap'}}]};
     const baseOp=C.computeProject(Gt,[wOp]).layouts[0];
     wOp.ops[0].otkosMode.left='led';
@@ -366,6 +367,9 @@ for(let t=0;t<N;t++){
 
     // 90°, R=300 — tan(45°)=1, значит t=R=300 ровно
     const radius=300, angle=90, t=radius/Math.tan(angle*Math.PI/180/2), arcW=radius*(Math.PI-angle*Math.PI/180);
+    // допущения о листе: дуга шириной arcW(471 мм) должна поместиться в ширину листа, деталь высотой стены (2400)
+    // — в длину листа без нарезки (иначе деталь угла режется по высоте, а на узкой рейке не помещается вообще)
+    const arcFits=G.pw>=arcW+0.5, tall24=G.pl>=2400;
     const linkRadius=[{id:1,kind:'radius',type:'out',angle,radius,aw:1,as:'right',bw:2,bs:'left'}];
     const Rrad=C.computeProject(Gt2,[wR1,wR2],{},linkRadius,[]);
 
@@ -375,17 +379,22 @@ for(let t=0;t<N;t++){
     chk('L140d',Math.abs((w2sharp-w2rad)-t)<0.5,`${id}: радиус — ширина панелей стены 2 не уменьшилась на t (${w2sharp}->${w2rad}, t=${t})`);
 
     const arcPiece=Rrad.sheets.flatMap(sh=>sh.list).find(p=>p.isCorner);
-    chk('L140e',!!arcPiece,`${id}: радиус — деталь угла не попала в раскрой листов`);
-    if(arcPiece) chk('L140f',Math.abs(arcPiece.w-arcW)<0.5&&Math.abs(arcPiece.len-2400)<0.5,
+    if(arcFits) chk('L140e',!!arcPiece,`${id}: радиус — деталь угла не попала в раскрой листов`);
+    else{
+      // узкий лист (рейка 100–150 мм): гнутая деталь шире листа физически не режется — откат на обычный профиль
+      chk('L140e2',!arcPiece&&(Rrad.cornerIssues||[]).length===1&&((Rrad.prof.find(p=>p.key==='cout')||{total:0}).total>0.5),
+        `${id}: радиус — на листе уже дуги (${G.pw}мм) угол должен откатиться на обычный профиль с issue (arcPiece=${!!arcPiece}, issues=${(Rrad.cornerIssues||[]).length})`);
+    }
+    if(arcPiece&&tall24) chk('L140f',Math.abs(arcPiece.w-arcW)<0.5&&Math.abs(arcPiece.len-2400)<0.5,
       `${id}: радиус — размеры детали угла ${arcPiece.w}×${arcPiece.len} != ожидаемых ${arcW}×2400`);
 
     const coutRad=(Rrad.prof.find(p=>p.key==='cout')||{total:0}).total;
-    chk('L140g',coutRad<0.5,`${id}: радиус — успешный радиусный угол всё равно начислил обычный профиль cout=${coutRad}`);
+    if(arcFits) chk('L140g',coutRad<0.5,`${id}: радиус — успешный радиусный угол всё равно начислил обычный профиль cout=${coutRad}`);
 
     // L140o (нов): деталь угла (isCorner) гнутая — поворот на 90° меняет направление изгиба
     // относительно материала (физически другая, непригодная деталь), applyManual обязан
     // игнорировать rot:true для неё, как и для любой попытки повернуть её на карте раскроя
-    if(arcPiece){
+    if(arcPiece&&tall24){
       const arcSheetIdx=Rrad.sheets.findIndex(sh=>sh.list.includes(arcPiece));
       const manRot={main:{[arcPiece._uid]:{sheet:arcSheetIdx,x:arcPiece.x,y:arcPiece.y,rot:true}}};
       const Rrot=C.computeProject(Gt2,[wR1,wR2],manRot,linkRadius,[]);
@@ -420,14 +429,17 @@ for(let t=0;t<N;t++){
     const linkFlat=[{id:1,kind:'radius',type:'out',angle,radius,flatA,flatB,aw:1,as:'right',bw:2,bs:'left'}];
     const Rflat=C.computeProject(Gt2,[wR1,wR2],{},linkFlat,[]);
     const arcFlat=Rflat.sheets.flatMap(sh=>sh.list).find(p=>p.isCorner);
-    chk('L140t',!!arcFlat,`${id}: радиус с плоскими зонами — деталь угла не попала в раскрой`);
+    const flatFits=G.pw>=arcW+flatA+flatB+0.5;
+    if(flatFits) chk('L140t',!!arcFlat,`${id}: радиус с плоскими зонами — деталь угла не попала в раскрой`);
+    else if(arcFits) chk('L140t2',!arcFlat&&(Rflat.cornerIssues||[]).length===1,
+      `${id}: радиус с плоскими зонами шире листа (${arcW+flatA+flatB}>${G.pw}) должен откатиться (arcFlat=${!!arcFlat}, issues=${(Rflat.cornerIssues||[]).length})`);
     if(arcFlat) chk('L140u',Math.abs(arcFlat.w-(arcW+flatA+flatB))<0.5,
       `${id}: радиус с плоскими зонами — ширина детали угла ${arcFlat.w} != arcW+flatA+flatB=${arcW+flatA+flatB}`);
     // успешный радиусный угол с плоскими зонами всё ещё заменяет собой обычный угловой профиль
     // целиком (cout/cin), а не добавляется к нему — та же гарантия, что и L140g, но теперь с
     // плоскими зонами, которые трогают именно cornerCuts/arcWTotal, а не сам этот блок кода
     const coutFlat=(Rflat.prof.find(p=>p.key==='cout')||{total:0}).total;
-    chk('L140z1',coutFlat<0.5,`${id}: радиус с плоскими зонами — успешный угол всё равно начислил обычный профиль cout=${coutFlat}`);
+    if(flatFits) chk('L140z1',coutFlat<0.5,`${id}: радиус с плоскими зонами — успешный угол всё равно начислил обычный профиль cout=${coutFlat}`);
     const w1flat=stripsW(Rflat.layouts[0]), w2flat=stripsW(Rflat.layouts[1]);
     chk('L140v',Math.abs((w1sharp-w1flat)-(t+flatA))<0.5,
       `${id}: радиус с плоскими зонами — ширина панелей стены 1 урезана не на t+flatA (${w1sharp}->${w1flat}, t+flatA=${t+flatA})`);
@@ -438,7 +450,7 @@ for(let t=0;t<N;t++){
     const linkFlatNoB=[{id:1,kind:'radius',type:'out',angle,radius,flatA,flatB:500,aw:1,as:'right',bw:'',bs:''}];
     const RflatNoB=C.computeProject(Gt2,[wR1,wR2],{},linkFlatNoB,[]);
     const arcFlatNoB=RflatNoB.sheets.flatMap(sh=>sh.list).find(p=>p.isCorner);
-    chk('L140x',!!arcFlatNoB&&Math.abs(arcFlatNoB.w-(arcW+flatA))<0.5,
+    if(G.pw>=arcW+flatA+0.5) chk('L140x',!!arcFlatNoB&&Math.abs(arcFlatNoB.w-(arcW+flatA))<0.5,
       `${id}: радиус без второй стены — flatB не должна учитываться (ширина ${arcFlatNoB?arcFlatNoB.w:'нет детали'}, ожидали ${arcW+flatA})`);
     // деталь угла с плоскими зонами всё ещё шире листа - должна корректно провалиться (сумма!),
     // а не пройти проверку по одной только дуге
@@ -458,6 +470,7 @@ for(let t=0;t<N;t++){
     // же механика, что и у обычной стены (buildLayout/splitSeg), но раньше стена ВЫШЕ листа была
     // просто ошибкой (cornerIssues), а дизайнерский стык вообще не мог появиться на детали угла —
     // LED вдоль такого стыка был физически невозможен (см. cornerHeightBounds в computeProject).
+    if(arcFits){
     const wTall1=Object.assign({},wR1,{H:2400+G.pl}), wTall2=Object.assign({},wR2,{H:2400+G.pl});
     const RtallOverflow=C.computeProject(Gt2,[wTall1,wTall2],{},linkRadius,[]);
     const tallPieces=RtallOverflow.sheets.flatMap(sh=>sh.list).filter(p=>p.isCorner);
@@ -484,7 +497,7 @@ for(let t=0;t<N;t++){
 
     const RseamOnlyA=C.computeProject(Gt2,[wSeamA,wR2],{},linkRadius,[]);
     const piecesOnlyA=RseamOnlyA.sheets.flatMap(sh=>sh.list).filter(p=>p.isCorner);
-    chk('L141f',piecesOnlyA.length===1,
+    if(tall24) chk('L141f',piecesOnlyA.length===1,
       `${id}: радиус — стык только у ОДНОЙ смежной стены не должен резать деталь угла (получили ${piecesOnlyA.length} кусков)`);
 
     // одиночный радиус без второй стены (bw='') — использует свои же стыки стены a напрямую
@@ -508,7 +521,7 @@ for(let t=0;t<N;t++){
       edges:{bot:'led',top:'none'}}];
     const RedgeLed=C.computeProject(Gt2,[wR1,wR2],{},linkEdgeLed,[]);
     const pieceEdgeLed=RedgeLed.sheets.flatMap(sh=>sh.list).find(p=>p.isCorner);
-    chk('L141i',!!pieceEdgeLed&&Math.abs(pieceEdgeLed.y0-10)<0.5,
+    if(tall24) chk('L141i',!!pieceEdgeLed&&Math.abs(pieceEdgeLed.y0-10)<0.5,
       `${id}: радиус — LED на нижнем крае детали угла должен дать отступ 10мм снизу (y0=${pieceEdgeLed&&pieceEdgeLed.y0})`);
 
     // L142 (нов): низ/верх/поперечный стык детали угла (c.edges/c.jointModes) действительно
@@ -543,6 +556,7 @@ for(let t=0;t<N;t++){
     const expectRun=Math.ceil(arcW/400-1e-9)+Math.ceil(arcW2/400-1e-9);
     chk('L142d',!!Rtwo.led&&Rtwo.led.runCount===expectRun,
       `${id}: радиус — два разных угла с LED на низе схлопнулись в общий ledRunLens-ключ (runCount=${Rtwo.led&&Rtwo.led.runCount}, ожидали ${expectRun})`);
+    }   // arcFits
 
     // fallback: разная высота стен
     const wR2b=Object.assign({},wR2,{H:2000});
@@ -562,10 +576,11 @@ for(let t=0;t<N;t++){
     const linkWide=[{id:1,kind:'radius',type:'out',angle:90,radius:1000,aw:1,as:'right',bw:2,bs:'left'}];
     const Rwide=C.computeProject(Gt2,[wR1,wR2],{},linkWide,[]);
     const arcWide=Rwide.sheets.flatMap(sh=>sh.list).find(p=>p.isCorner);
-    chk('L140l',!arcWide,`${id}: радиус — деталь угла шире листа всё равно попала в раскрой`);
+    const wideOnly=G.pw<1570;   // arcW=1571 помещается в более широкий лист — тогда «слишком широкой» детали нет
+    if(wideOnly) chk('L140l',!arcWide,`${id}: радиус — деталь угла шире листа всё равно попала в раскрой`);
     const coutWide=(Rwide.prof.find(p=>p.key==='cout')||{total:0}).total;
-    chk('L140m',coutWide>0.5,`${id}: радиус — угол со слишком широкой деталью должен откатиться на обычный профиль`);
-    chk('L140n',(Rwide.cornerIssues||[]).length===1,`${id}: радиус — деталь угла шире листа не дала issue`);
+    if(wideOnly) chk('L140m',coutWide>0.5,`${id}: радиус — угол со слишком широкой деталью должен откатиться на обычный профиль`);
+    if(wideOnly) chk('L140n',(Rwide.cornerIssues||[]).length===1,`${id}: радиус — деталь угла шире листа не дала issue`);
   }
   // L7/L8: панелей в разумных пределах
   const needArea=(R.netArea+R.otkosArea)*1e6;
@@ -1004,6 +1019,7 @@ for(let t=0;t<N;t++){
             const ov=o.otkosOverlap||0;
             len+=(sideMode('left')==='protrude'?ov:0)+(sideMode('right')==='protrude'?ov:0);
           }
+          if(o.depth>G.pw && !(G.rot && o.depth<=G.pl)) continue;   // глубина больше ширины листа — деталь «не выкроена» (R.failed), шов не при чём
           if(len>G.pl){ cand={wi,oi,side,len}; break outer; }
         }
       }
