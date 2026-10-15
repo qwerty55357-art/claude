@@ -4897,6 +4897,29 @@ function computeWallPlacements3D(walls,cornerLinks){
 // реальный цвет ТЕКУЩЕГО материала проекта (см. вызов ниже) — раньше тут был жёстко зашит цвет
 // акцента интерфейса (--straw), который лишь случайно совпадает с бамбуком (материал по
 // умолчанию), а для любого другого материала (мрамор, рейка, скала) 3D-стена красилась неверно.
+// Текстура заполнения проёма материалом (рейка, мрамор…) в 3D: заливка цветом материала + границы реек и
+// поперечные стыки наращивания — те же линии, что и на схеме раскладки (fillSeamLines/fillSeamRuns). Раньше
+// заполнение было плоской заливкой без единой линии — рейка в 3D выглядела сплошным листом.
+function fillCanvasTexture3D(o,segs,runs,colorHex,modeOf){
+  const scale=Math.min(1024/Math.max(o.w,1),1024/Math.max(o.h,1),1.5);
+  const cw=Math.max(2,Math.round(o.w*scale)), ch=Math.max(2,Math.round(o.h*scale));
+  const canvas=document.createElement('canvas'); canvas.width=cw; canvas.height=ch;
+  const ctx=canvas.getContext('2d');
+  ctx.fillStyle=colorHex; ctx.fillRect(0,0,cw,ch);
+  ctx.strokeStyle=(getComputedStyle(document.documentElement).getPropertyValue('--void')||'').trim()||'#141414';
+  const line=(x0,y0,x1,y1,lw)=>{                        // координаты стены, y от пола → канва (0 сверху)
+    ctx.lineWidth=lw; ctx.beginPath();
+    ctx.moveTo((x0-o.x)*scale,(o.h-(y0-o.y))*scale); ctx.lineTo((x1-o.x)*scale,(o.h-(y1-o.y))*scale); ctx.stroke();
+  };
+  (segs||[]).filter(sg=>sg.kind==='band').forEach(sg=>line(sg.x0,sg.y0,sg.x1,sg.y1,Math.max(1.5,scale*3)));
+  (runs||[]).forEach(r=>{
+    const lw=Math.max(modeOf(r)==='butt'?1.5:2.5,scale*(modeOf(r)==='butt'?2.5:4));
+    if(r.horizontal) line(r.a0,r.pos,r.a1,r.pos,lw); else line(r.pos,r.a0,r.pos,r.a1,lw);
+  });
+  const tex=new THREE.CanvasTexture(canvas);
+  tex.needsUpdate=true;
+  return tex;
+}
 function wallCanvasTexture3D(wv,L,baseColorHex,cuts){
   const effWidth=Math.max(wv.W,1), H=Math.max(wv.H,1);
   const scale=Math.min(1024/effWidth,1024/H,1.5);
@@ -4935,6 +4958,14 @@ function wallCanvasTexture3D(wv,L,baseColorHex,cuts){
     const x=cur.start*scale;
     ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,ch); ctx.stroke();
   }
+  // граница между полосой стены и заполнением (рейка/мрамор во всю длину раскладки, см. buildLayout: joint.fill) —
+  // стык двух материалов: линия по краю проёма. Проём ниже вырежет только ту половину, что попала бы внутрь
+  (L.joints||[]).filter(j=>j.fill).forEach(j=>j.segs.forEach(sg=>{
+    ctx.beginPath();
+    if(L.vert){ const x=j.pos*scale; ctx.moveTo(x,(H-sg[1])*scale); ctx.lineTo(x,(H-sg[0])*scale); }
+    else { const y=(H-j.pos)*scale; ctx.moveTo(sg[0]*scale,y); ctx.lineTo(sg[1]*scale,y); }
+    ctx.stroke();
+  }));
   // край стены, урезанный под радиусный угол (cuts.left/right, см. cornerCuts в computeProject) —
   // на этой стороне у стены ЕСТЬ настоящая соседняя деталь (гнутая деталь угла), просто она не
   // часть раскладки ЭТОЙ стены (L.strips её не знает) — тот же физический стык, что и между
@@ -5167,7 +5198,7 @@ function renderScene3D(G,R){
     // отдельная деталь В ГЛУБИНЕ проёма, за откосом (на всю глубину o.depth, если откос есть,
     // иначе у самой лицевой плоскости): проём БЕЗ заполнения обязан остаться настоящей дырой —
     // сквозь него должны быть видны детали откоса (и фон сцены дальше), а не какая-либо деталь.
-    (wv.ops||[]).forEach(o=>{
+    (wv.ops||[]).forEach((o,k)=>{
       if(!o.fillMat) return;
       const colorHex=condHex(o.fillMat)||defaultColorHex;
       const dep=(o.otkos&&o.depth>0)?o.depth:2;
@@ -5178,7 +5209,14 @@ function renderScene3D(G,R){
       fillGeo.setAttribute('uv',new THREE.Float32BufferAttribute([0,0, 1,0, 0,1, 1,1],2));
       fillGeo.setIndex([0,1,2, 2,1,3]);
       fillGeo.computeVertexNormals();
-      const fillMatThree=new THREE.MeshStandardMaterial({color:new THREE.Color(colorHex),side:THREE.DoubleSide,roughness:0.85});
+      // линии раскладки заполнения — те же, что на схеме (границы реек + поперечные стыки с их типом)
+      const vertL=L.vert, fl=(R.fills||[]).find(x=>x.kind==='opening'&&x.layouts.some(l=>l.wi===wi&&l.k===k));
+      const segs=fl?fillSeamLines(R,wi,k,o):null;
+      const runs=fl?fillSeamRuns(fl.layouts.find(l=>l.wi===wi&&l.k===k).L,o,vertL).map(r=>Object.assign(r,{horizontal:vertL})):null;
+      const fillTex=segs?fillCanvasTexture3D(o,segs,runs,colorHex,r=>jointSegMode(wv,G,'h',r.pos,r.a0)):null;
+      const fillMatThree=fillTex
+        ?new THREE.MeshStandardMaterial({map:fillTex,side:THREE.DoubleSide,roughness:0.85})
+        :new THREE.MeshStandardMaterial({color:new THREE.Color(colorHex),side:THREE.DoubleSide,roughness:0.85});
       mesh.add(new THREE.Mesh(fillGeo,fillMatThree));
     });
     // LED-лента — тонкая светящаяся полоска вдоль контура (см. wallLedGraph/ledCircuitOf, та же

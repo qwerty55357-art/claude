@@ -77,6 +77,15 @@ let fails=0; const ok=(c,w)=>{ if(!c){ fails++; console.log('✗',w); } else con
   ok(await p.evaluate(()=>collect().rot===false),'основной материал — рейка: collect().rot = false даже при включённой галочке');
   await p.selectOption('#i-preset','bamboo29'); await p.waitForTimeout(400);
   ok(await p.evaluate(()=>!document.querySelector('#i-rot').disabled),'у бамбука галочка «Однотонная панель» доступна');
+  // --- 3D-макет: заполнение с текстурой, на которой видны границы реек и поперечный стык
+  await load(); await p.locator('#scene3d').scrollIntoViewIfNeeded(); await p.waitForTimeout(1200);
+  const tex3d=await p.evaluate(()=>{
+    const meshes=scene3d.group.children[0].children.filter(m=>m.material&&m.material.map&&m.material.map.image&&m.material.map.image.getContext);
+    return meshes.map(m=>{ const c=m.material.map.image, d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;
+      const base=[d[0],d[1],d[2]]; let dark=0; for(let i=0;i<d.length;i+=4) if(Math.abs(d[i]-base[0])+Math.abs(d[i+1]-base[1])+Math.abs(d[i+2]-base[2])>60) dark++;
+      return {w:c.width,h:c.height,dark,share:dark/(c.width*c.height)}; });
+  });
+  ok(tex3d.length===2&&tex3d.every(t=>t.share>0.01),'3D: оба заполнения рейкой с текстурой, на ней видны линии раскладки: '+tex3d.map(t=>t.w+'×'+t.h+' линий '+(t.share*100).toFixed(1)+'%').join(', '));
   // --- печать
   await load();
   await p.emulateMedia({media:'print'});
