@@ -151,7 +151,7 @@ window.__consistency=function(){
     if(lbl!==+sv.dataset.n) bad('C4c','карта '+sv.dataset.pool+': подписей «ЛИСТ» '+lbl+' != '+sv.dataset.n); });
   // C5: детали и площади не теряются между расчётом стен и листами
   const pcs=R.layouts.flatMap(L=>L.pieces), onSheets=R.sheets.flatMap(s=>s.list).filter(p=>!p.isCorner);   // деталь радиусного угла лежит на листе, но не принадлежит стене
-  const shelfMain=(R.shelf||[]).length;
+  const shelfMain=(R.shelf||[]).filter(e=>e.kind==='w'&&!e.isCorner).length;
   if(pcs.length!==onSheets.length+shelfMain) bad('C5a','деталей по стенам '+pcs.length+' != на листах '+onSheets.length+' + верстак '+shelfMain);
   const ar=a=>a.reduce((s,p)=>s+p.w*p.len,0)/1e6;
   if(!shelfMain&&!near(ar(pcs),ar(onSheets),0.001)) bad('C5b','площадь деталей по стенам '+ar(pcs).toFixed(3)+' != на листах '+ar(onSheets).toFixed(3));
@@ -192,5 +192,24 @@ window.__overlaps=function(){
   chkPool('main',R.sheets,G.pl,G.pw);
   R.fills.forEach(f=>chkPool(f.matName,f.sheets,f.pl,f.pw));
   return out.slice(0,10);
+};
+
+// случайные ручные правки на карте раскроя (перенос на другой лист/место, поворот, верстак) — движок обязан либо принять
+// правку, либо молча отклонить, но результат всегда валиден: детали не теряются, не перекрываются, лежат в пределах листа
+window.__rndManual=function(seed,count){
+  let x=(seed*104729+7)&0x7fffffff; const r=()=>{ x=(x*1103515245+12345)&0x7fffffff; return x/0x7fffffff; };
+  const pools=[{pool:'main',sheets:LAST.R.sheets,pl:LAST.G.pl,pw:LAST.G.pw},...LAST.R.fills.map(f=>({pool:f.matId,sheets:f.sheets,pl:f.pl,pw:f.pw}))].filter(q=>q.sheets.length);
+  if(!pools.length) return 0;
+  const mm={shelf:[]}; let n=0;
+  for(let k=0;k<(count||4);k++){
+    const q=pools[Math.floor(r()*pools.length)];
+    const items=q.sheets.flatMap((sh,si)=>[...sh.list.map(o=>({o,si})),...sh.otk.map(o=>({o,si}))]).filter(it=>it.o._uid);
+    if(!items.length) continue;
+    const it=items[Math.floor(r()*items.length)], uid=it.o._uid; n++;
+    if(r()<0.35){ mm.shelf.push({pool:q.pool,uid,rot:r()<0.3}); continue; }
+    mm[q.pool]=mm[q.pool]||{};
+    mm[q.pool][uid]={sheet:Math.floor(r()*(q.sheets.length+(r()<0.2?1:0))),x:Math.round(r()*q.pw/10)*10,y:Math.round(r()*q.pl/10)*10,rot:r()<0.3};
+  }
+  manualMoves=mm; run(); return n;
 };
 `;

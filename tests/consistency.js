@@ -25,8 +25,11 @@ let fails=0; const byId={};
     for(let s=-1;s<N;s++){
       const tag='['+M.n+(s<0?' насыщенный':' #'+s)+'] ';
       try{ await p.evaluate(s=>{ s<0?window.__rich():window.__rnd(s); },s); }catch(e){ console.log('✗',tag+'сборка проекта: '+String(e).slice(0,160)); fails++; continue; }
-      const vio=await p.evaluate(()=>window.__consistency().concat(window.__scan().map(x=>'SCAN: '+x),window.__overlaps().map(x=>'OVERLAP: '+x),window.__badNums().map(x=>'NUM: '+x)));
-      vio.forEach(v=>{ fails++; bad++; const id=v.split(':')[0]; byId[id]=(byId[id]||0)+1; if(bad<=6) console.log('✗',tag+v.slice(0,260)); });
+      const all=()=>p.evaluate(()=>window.__consistency().concat(window.__scan().map(x=>'SCAN: '+x),window.__overlaps().map(x=>'OVERLAP: '+x),window.__badNums().map(x=>'NUM: '+x)));
+      const report=(vio,suffix)=>vio.forEach(v=>{ fails++; bad++; const id=v.split(':')[0]; byId[id]=(byId[id]||0)+1; if(bad<=6) console.log('✗',tag+suffix+v.slice(0,260)); });
+      report(await all(),'');
+      // случайные ручные правки на карте раскроя (два раунда): детали не теряются, не перекрываются, остаются в листе
+      for(let k=0;k<2;k++){ await p.evaluate(([s,k])=>window.__rndManual(s*7+k+1,5),[s,k]); report(await all(),'после ручных правок '+(k+1)+': '); }
       errs.splice(0).forEach(e=>{ fails++; console.log('✗',tag+e); });
       n++;
     }

@@ -83,6 +83,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .shelf-piece.k-o{background:var(--alu-face);color:var(--ink-alu);border:1px solid var(--alu-deep)}
 .shelf-piece b{font-size:11.5px}
 .shelf-rot{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:var(--void);border:1px solid var(--line-2);color:var(--paper);font-size:12px;line-height:18px;cursor:pointer}
+.shelf-back{right:auto;left:-6px}
 @media print{ .shelf-zone{display:none !important} }
 /* карта раскроя + верстак: верстак — липкая колонка справа, остаётся на экране, пока листаете листы (на узком экране
    уходит наверх и прилипает под шапкой). --topbar-h выставляет скрипт по высоте шапки */
@@ -3615,7 +3616,6 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
     });
   });
   const sheets=packers[best.pi](allPieces,G);   // повторный прогон победителя — детерминирован
-  const mainSheets=sheets.length;
   const ot=packOtkos(parts,sheets,G,strats[best.si]);
   manual.main=manual.main||{}; manual.shelf=manual.shelf||[];
   const man=applyManual(sheets,manual.main,G,G.pl,G.pw,manual.shelf.filter(s=>s.pool==='main'));
@@ -4041,7 +4041,10 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
   }
 
   const fillArea=fills.reduce((a,f)=>a+f.area,0);
-  return {layouts,L:layouts[0],sheets,fills,fillArea,mainSheets,extraSheets:ot.extra,
+  // «на плоскость» и «на откосы» считаем по итоговым листам: ручные перестановки (applyManual) убирают опустевшие листы,
+  // и числа до перестановок не сходились бы с общим количеством
+  const mainSheets=sheets.filter(sh=>!sh.extra).length, extraSheets=sheets.length-mainSheets;
+  return {layouts,L:layouts[0],sheets,fills,fillArea,mainSheets,extraSheets,
           failed:ot.failed.concat(otkosOverrideFailed),
           spliced:ot.spliced,forced:ot.forced,manualSeamIgnored:ot.manualIgnored,
           parts:parts.concat(otkosOverrideParts),sheetArea,
@@ -4824,7 +4827,9 @@ function renderCutmap(G,R){
   }
   R.fills.forEach(f=>{
     html+=`<div class="mat-h" style="border-left:4px solid ${matColor(f.matColorId||f.matId)}">Материал: ${esc(f.matName)} — ${f.sheets.length} ${plu(f.sheets.length,'лист','листа','листов')} ${fmt(f.pl)}×${fmt(f.pw)} · ${fillKindText(f.kind)}</div>`;
-    html+=cutmapSvg(f.sheets,{pl:f.pl,pw:f.pw,minoff:G.minoff,noRot:matType(String(f.matId).replace(/^piece:/,''))==='slat'}).replace('<svg ','<svg data-pool="'+f.matId+'" ');
+    // все детали пула лежат на верстаке — листов нет, рисовать нечего (иначе SVG с нулевым размером и NaN в viewBox)
+    html+=f.sheets.length?cutmapSvg(f.sheets,{pl:f.pl,pw:f.pw,minoff:G.minoff,noRot:matType(String(f.matId).replace(/^piece:/,''))==='slat'}).replace('<svg ','<svg data-pool="'+f.matId+'" ')
+      :'<p class="hint">Все детали этого материала лежат на верстаке — листов не нужно. Верните их кнопкой ↩ на верстаке.</p>';
   });
   $('#cutmap').innerHTML=html;
   const placed=R.parts.length-R.failed.length;
@@ -4855,6 +4860,7 @@ function renderShelf(R){
   box.innerHTML=items.map(it=>
     `<div class="shelf-piece k-${it.kind}" data-shelfpiece="${it.uid}" data-pool="${it.pool}">`+
     `<button class="shelf-rot" data-shelfrot="${it.uid}" title="повернуть">↻</button>`+
+    `<button class="shelf-rot shelf-back" data-shelfback="${it.uid}" title="вернуть на исходное место">↩</button>`+
     `<b>${esc(it.label)}</b><span>${fmt(it.w)}×${fmt(it.h)}${it.rot?' ↻':''}</span></div>`
   ).join('');
 }
@@ -6625,6 +6631,12 @@ document.addEventListener('keydown',e=>{
   // поворот безусловен даже для детали с вырезом — applyManual синхронно повернёт и сам вырез.
   // Деталь угла (isCorner) — исключение, как и везде: она гнутая, поворот на 90° физически
   // меняет направление изгиба относительно материала, не поддерживаем никогда
+  function doShelfBack(uid){
+    if(!LAST) return;
+    manualMoves.shelf=(manualMoves.shelf||[]).filter(s=>s.uid!==uid);
+    Object.keys(manualMoves).forEach(k=>{ if(k!=='shelf'&&manualMoves[k]) delete manualMoves[k][uid]; });
+    run();
+  }
   function doShelfRotate(uid){
     if(!LAST) return;
     let pool=null,entry=null;
@@ -6669,6 +6681,10 @@ document.addEventListener('keydown',e=>{
   shelfBox.addEventListener('pointerdown',ev=>{
     const rotEl=ev.target.closest&&ev.target.closest('[data-shelfrot]');
     if(rotEl){ ev.preventDefault(); ev.stopPropagation(); doShelfRotate(rotEl.dataset.shelfrot); return; }
+    // «↩»: деталь уходит с верстака на своё исходное место (единственный способ, когда у материала не осталось ни одного листа, —
+    // целиться курсором тогда некуда)
+    const backEl=ev.target.closest&&ev.target.closest('[data-shelfback]');
+    if(backEl){ ev.preventDefault(); ev.stopPropagation(); doShelfBack(backEl.dataset.shelfback); return; }
     const pieceEl=ev.target.closest&&ev.target.closest('[data-shelfpiece]');
     if(!pieceEl||!LAST) return;
     const uid=pieceEl.dataset.shelfpiece, pool=pieceEl.dataset.pool;
