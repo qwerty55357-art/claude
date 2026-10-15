@@ -2874,8 +2874,9 @@ function packOtkos(parts,sheets,S,opt){
   };
 
   order.forEach(pt=>{
-    // по ширине деталь не спасёт никакая стыковка
-    if(pt.dep>S.pw && !(S.rot && pt.dep<=S.pl)){ failed.push(pt); return; }
+    // по ширине деталь не спасёт никакая стыковка; единственный выход — повернуть её на 90° ЦЕЛИКОМ (разрешён поворот и деталь
+    // целиком влезает повёрнутой) — стыковка кусками повёрнутой детали не поддерживается, иначе она легла бы мимо узкого листа
+    if(pt.dep>S.pw && !(S.rot && pt.dep<=S.pl && pt.len<=S.pw)){ failed.push(pt); return; }
 
     const whole = S.rot
       ? ((pt.len<=S.pl&&pt.dep<=S.pw)||(pt.dep<=S.pl&&pt.len<=S.pw))

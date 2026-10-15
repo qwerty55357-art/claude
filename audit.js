@@ -166,6 +166,10 @@ for(let t=0;t<N;t++){
   // L1: деталь внутри листа
   R.sheets.forEach(sh=>sh.list.forEach(p=>chk('L1',p.x>=-0.5&&p.y>=-0.5&&p.x+p.w<=G.pw+0.5&&p.y+p.len<=G.pl+0.5,
     `${id}: ${p.label} вне листа`)));
+  // L1b: детали откосов тоже целиком внутри листа (раньше проверялись только детали стен: откос шире узкого листа при
+  // разрешённом повороте молча ложился «мимо» листа)
+  R.sheets.forEach(sh=>sh.otk.forEach(o=>{ const w=o.dw||o.dep, h=o.dh||o.len;
+    chk('L1b',o.x>=-0.5&&o.y>=-0.5&&o.x+w<=G.pw+0.5&&o.y+h<=G.pl+0.5,`${id}: откос ${o.name} (${w}×${h} в (${o.x},${o.y})) вне листа ${G.pw}×${G.pl}`); }));
   // L2: непересечение (стена×стена, откос×откос; откос×стена — только в дырке)
   R.sheets.forEach(sh=>{
     const walls2=sh.list.map(p=>({x:p.x,y:p.y,w:p.w,h:p.len,n:p.label,cuts:p.cuts}));
@@ -1019,7 +1023,7 @@ for(let t=0;t<N;t++){
             const ov=o.otkosOverlap||0;
             len+=(sideMode('left')==='protrude'?ov:0)+(sideMode('right')==='protrude'?ov:0);
           }
-          if(o.depth>G.pw && !(G.rot && o.depth<=G.pl)) continue;   // глубина больше ширины листа — деталь «не выкроена» (R.failed), шов не при чём
+          if(o.depth>G.pw && !(G.rot && o.depth<=G.pl && len<=G.pw)) continue;   // глубина больше ширины листа — деталь «не выкроена» (R.failed), шов не при чём
           if(len>G.pl){ cand={wi,oi,side,len}; break outer; }
         }
       }
