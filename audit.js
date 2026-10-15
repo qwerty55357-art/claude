@@ -1136,6 +1136,28 @@ for(let t=0;t<N;t++){
         chk('L104',!!p2,
           `${id}: ${p.label} с занятым вырезом повернулась вопреки запрету (не нашлась с исходными размерами среди одноимённых деталей)`);
       }
+    // L106 (нов): место, освободившееся после переноса детали на верстак, доступно другой детали: деталь B, переставленная
+    // на прежнее место отложенной детали A (внутри её габарита), остаётся там; раньше A продолжала «занимать» это место
+    {
+      let pair=null;
+      for(const sh of (R.sheets||[])){
+        const ws=sh.list.filter(o=>!(o.cuts&&o.cuts.length)&&!o.isCorner);
+        for(const a of ws){ for(const b2 of ws){ if(a===b2||b2.w>a.w+0.5||b2.len>a.len+0.5) continue; pair={sh,a,b:b2}; break; } if(pair) break; }
+        if(pair) break;
+      }
+      if(pair){
+        const {sh,a,b:b2}=pair;
+        const manual={main:{[b2._uid]:{sheet:sh.no-1,x:a.x,y:a.y,rot:false}},shelf:[{uid:a._uid,pool:'main',rot:false}]};
+        let R2; try{ R2=C.computeProject(G,wallsArr,manual); }catch(e){ FAIL++; if(bugs.length<30) bugs.push('CRASH-SHELF-REUSE #'+t+' :: '+e.message); R2=null; }
+        if(R2){
+          const onShelf=(R2.shelf||[]).some(x=>x.uid===a._uid);
+          const sh2=R2.sheets.find(x=>x.list.some(o=>o._uid===b2._uid));
+          const b3=sh2&&sh2.list.find(o=>o._uid===b2._uid);
+          chk('L106',!onShelf||(b3&&Math.abs(b3.x-a.x)<0.5&&Math.abs(b3.y-a.y)<0.5),
+            `${id}: ${b2.label} не встала на место ${a.label}, ушедшей на верстак (x=${a.x}, y=${a.y})`);
+        }
+      }
+    }
     }
   }
   // L110/L111 (нов): раскладка «кирпичиком». На чистой стене без проёмов и ручных швов (чтобы не

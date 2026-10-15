@@ -3125,12 +3125,24 @@ function applyManual(sheets,mv,G,pl,pw,shelfList){
   //      На каждом шаге занятость листа считается ЦЕЛИКОМ: ещё живые группы — по целевому месту,
   //      остальные детали — по их месту в свежей автораскладке. Так правка №1 всегда видит
   //      правку №5 и наоборот, а не только то, что было применено раньше по времени. ----
+  // детали, ушедшие на верстак (и «из выреза» компаньоны, едущие с ними, см. шаг 4), больше не занимают свой прежний
+  // участок листа — его можно занять другой деталью. Раньше они считались занятыми «по старому месту» до самого шага 4,
+  // и перенос детали на освободившееся после верстака место молча отклонялся (деталь «улетала» обратно)
+  const leaving=new Set(shelfUids);
+  shelfList.forEach(({uid})=>{
+    const it=byUid[uid]; if(!it||it.kind!=='w'||!(it.o.cuts&&it.o.cuts.length)) return;
+    const holes=holeRects(it.o);
+    items.forEach(x=>{
+      if(x.kind==='o'&&x.homeSheetIdx===it.homeSheetIdx&&!mv[x.uid]&&!shelfUids.has(x.uid)&&holes.some(h=>insideRect(rectOf(x),h,3))) leaving.add(x.uid);
+    });
+  });
   let alive=groups.slice(), changed=true;
   while(changed){
     changed=false;
     const groupOf={}; alive.forEach(g=>g.memberUids.forEach(u=>groupOf[u]=g));
     const bySheet=sheets.map(()=>[]);
     items.forEach(it=>{
+      if(leaving.has(it.uid)) return;
       const g=groupOf[it.uid];
       if(g) bySheet[g.destSheetIdx].push({uid:it.uid,r:g.rects[it.uid]});
       else  bySheet[it.homeSheetIdx].push({uid:it.uid,r:rectOf(it)});
