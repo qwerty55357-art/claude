@@ -1,7 +1,9 @@
 // Дифференциальный тест ядра: на одних и тех же случайных входах (стены с проёмами, откосами, стыками, ручными
 // вертикальными/горизонтальными стыками, все режимы раскладки) полный результат computeProject() новой версии
 // обязан ПОБАЙТНО совпасть с эталонной версией (до каталога и свободных стыков). Свободные режимы выключены.
-// Запуск: RASKROY_OLD=/путь/к/эталону.html NODE_PATH=$(npm root -g) [DIFF_N=3000] node tests/core_diff.js
+// NOFILL=1 — без заполнений проёмов (заполнения во всю длину раскладки с этой версии продолжают стыки стены и имеют свои стыки/края,
+// поэтому с ними расхождения с эталоном ожидаемы и проверяются отдельно — tests/slat_fill.js и audit.js).
+// Запуск: [NOFILL=1] RASKROY_OLD=/путь/к/эталону.html NODE_PATH=$(npm root -g) [DIFF_N=3000] node tests/core_diff.js
 const {chromium}=require('playwright'); const path=require('path'); const fs=require('fs');
 const NEW='file://'+path.resolve(process.env.RASKROY_HTML||path.join(__dirname,'../raskroy.html'));
 const OLD='file://'+path.resolve(process.env.RASKROY_OLD||'/tmp/old.html');
@@ -23,6 +25,7 @@ for(let t=0;t<N;t++){
     angle:rand()<0.6?90:[60,75,105,120][Math.floor(rand()*4)],radius:[0,150,300,450,600][Math.floor(rand()*5)],distance:rand()<0.2?[100,300][Math.floor(rand()*2)]:0,
     flatA:rand()<0.2?100:0,flatB:rand()<0.2?100:0,aw:i+1,as:'right',bw:i+2,bs:'left'});
   if(nWalls===1&&rand()<0.3) links.push({id:1,kind:'radius',type:'out',angle:90,radius:300,distance:0,aw:1,as:rand()<0.5?'left':'right',bw:'',bs:''});
+  if(process.env.NOFILL) ws.forEach(w=>w.ops.forEach(o=>{ o.fillMat=null; }));   // без заполнений проёмов: версия обязана совпасть с эталоном байт в байт
   inputs.push({G,walls:ws,links});
 }
 const runIn=async(browser,url)=>{

@@ -842,6 +842,8 @@ function syncColorwayUI(){
   const row=$('#row-colorway'); if(!row) return;
   const t=$('#i-preset').value, has=!!((CATALOG.types[t]||{}).items||[]).length;
   row.style.display=has?'':'none';       // .row — grid, атрибут hidden его не скрывает
+  // реечная панель: рёбра вдоль листа, поворот детали на 90° невозможен — галочка «Однотонная панель» недоступна
+  const rotChk=$('#i-rot'); if(rotChk){ rotChk.disabled=isSlatId(t); rotChk.title=isSlatId(t)?'Для реечной панели недоступно: рёбра идут вдоль листа, деталь нельзя повернуть':''; }
   const cw=$('#i-colorway').value;
   $('#i-cw-btn').innerHTML=matPickBtnHtml(cw&&matType(cw)===t?cw:null,'— без расцветки (цвет типа) —','data-cwpick="1"',true);
 }
@@ -858,7 +860,7 @@ function matSample(id){
 // collect() (внутри ЯДРА, читает форму) знает только тип из #i-preset — подставляем в название
 // материала расцветку (артикул), не трогая текст ядра
 { const collectBase=collect;
-  collect=function(){ const G=collectBase(); const m=findMat(curMatId()); if(m) G.presetName=m.name; return G; }; }
+  collect=function(){ const G=collectBase(); const m=findMat(curMatId()); if(m) G.presetName=m.name; if(isSlatId(curMatId())) G.rot=false; return G; }; }
 // id из старого/чужого файла, которого нет в каталоге: расцветка → её тип, чужое → null
 function normMatId(id){
   if(!id) return id||null;
@@ -1569,7 +1571,7 @@ function ledCircuitBadgesSvg(wall,graph,fs,H,clickable){
       byCircuit.get(c.id).segs.push({a:{x:l.ax,y:l.ay},b:{x:l.bx,y:l.by}});
     });
   });
-  const cur=clickable?' style="cursor:pointer"':'';
+  const cur=clickable?' style="cursor:pointer"':' pointer-events="none"';   // на основной схеме LED — только показ: клики идут к стыкам и краям под линией
   let out='';
   byCircuit.forEach((info,cid)=>{
     const col=info.kind==='none'?'var(--ok)':'var(--warn)';
@@ -1914,6 +1916,7 @@ function renderOpenings(){
         <div class="f"><label>Верх — отметка от пола</label><input type="number" data-k="yhigh" value="${Math.round(o.y+o.h)}"><span class="unit">мм</span></div>
       </div>
       <div class="row row-1"><div class="f"><label>Заполнение проёма материалом</label>${matPickBtnHtml(o.fillMat,'— без заполнения —',`data-fillpick="${o.id}"`)}</div></div>
+      ${o.fillMat?`<label class="chk"><input type="checkbox" data-k="fillSeams"${fillInheritsSeams(w,o,$('#i-orient').value!=='h')?' checked':''}><span>Стыки стены продолжаются в заполнении (шов идёт через все материалы)</span></label>`:''}
       <label class="chk"><input type="checkbox" data-k="otkos"${o.otkos?' checked':''}><span>Отделывать откосы</span></label>
       <div class="row" ${o.otkos?'':'hidden'}>
         <div class="f"><label>Глубина откоса</label><input type="number" data-k="depth" value="${o.depth}"><span class="unit">мм</span></div>
@@ -2189,6 +2192,32 @@ $('#wall-compass').addEventListener('click',e=>{
    collect(). Именно этот диапазон вырезается в core.js для audit.js.
    ===================================================================== */
 /* ===================== ГЕОМЕТРИЯ ===================== */
+// реечная панель: рёбра идут вдоль листа, деталь нельзя развернуть на 90° — «однотонная панель» (поворот) к ней неприменима
+const isSlatId=id=>String(id||'').split(':')[0]==='slat';
+// проём с заполнением (fillMat) тянется на весь размер стены ВДОЛЬ раскладки (колонка во всю высоту при
+// вертикальной раскладке, ряд во всю ширину при горизонтальной) — это не «дыра», а полоса другого материала в
+// общем поле стены. Стыки стены (ручные отметки, «первый стык») по умолчанию продолжаются и в ней: линия шва идёт
+// через все материалы. Явный флаг проёма (o.fillSeams) перекрывает умолчание.
+const fillSpansWall=(w,o,vert)=>vert?(o.y<=1&&o.y+o.h>=w.H-1):(o.x<=1&&o.x+o.w>=w.W-1);
+const fillInheritsSeams=(w,o,vert)=>o.fillSeams==null?fillSpansWall(w,o,vert):!!o.fillSeams;
+// Поперечные стыки внутри заполнения (рейка длиннее/короче проёма, лист короче проёма): линии в координатах
+// стены, склеенные поперёк раскладки в сплошные отрезки — один шов через 5 реек это один профиль 650 мм, а не пять
+// по 150. pos — вдоль раскладки (мм от пола при вертикальной), a0/a1 — поперёк; ключ режима — тот же jointSegKey('h',…),
+// что у стыков стены, поэтому тип (соединитель/встык) выбирается кликом по линии на схеме так же
+function fillSeamRuns(Lf,o,vert){
+  const off=vert?o.y:o.x, aOff=vert?o.x:o.y, byPos=new Map(), runs=[];
+  (Lf.seams||[]).forEach(sm=>{ const k=Math.round(sm.pos); if(!byPos.has(k)) byPos.set(k,[]); byPos.get(k).push([sm.a0,sm.a1]); });
+  byPos.forEach((segs,k)=>{
+    segs.sort((x,y)=>x[0]-y[0]);
+    let cur=null;
+    segs.forEach(sg=>{
+      if(cur&&sg[0]<=cur[1]+0.5) cur[1]=Math.max(cur[1],sg[1]);
+      else { if(cur) runs.push({pos:off+k,a0:aOff+cur[0],a1:aOff+cur[1]}); cur=[sg[0],sg[1]]; }
+    });
+    if(cur) runs.push({pos:off+k,a0:aOff+cur[0],a1:aOff+cur[1]});
+  });
+  return runs;
+}
 function subRanges(total,gaps){
   gaps=gaps.slice().sort((a,b)=>a[0]-b[0]);
   let segs=[],p=0;
@@ -2522,6 +2551,28 @@ function buildLayout(S){
     });
     joints.push({pos:st.end,segs:subRanges(along,gaps)});
   });
+  // граница между полосами стены и заполнением во всю длину раскладки (полоса другого материала — рейка,
+  // мрамор…): это стык двух материалов, а не край стены, и у него есть тип (соединитель/встык) и профиль,
+  // как у обычного вертикального стыка. Проём-заполнение рядом с краем стены даёт один такой стык, внутри
+  // стены — два (слева и справа от заполнения)
+  {
+    let added=false;
+    S.ops.forEach(o=>{
+      if(!o.fillMat||mountKeepsWall(o)) return;
+      const [a0,aL]=oA(o),[b0,bL]=oB(o);
+      if(!(b0<=1&&b0+bL>=along-1)) return;                 // заполнение не на всю длину раскладки — не граница полос
+      [[a0,st=>Math.abs(st.end-a0)<1],[a0+aL,st=>Math.abs(st.start-(a0+aL))<1]].forEach(([edge,adj])=>{
+        if(!strips.some(adj)) return;                      // с этой стороны нет полосы стены (край стены)
+        const gaps=[];
+        S.ops.forEach(o2=>{
+          if(o2===o||mountKeepsWall(o2)) return;
+          const [c0,cL]=oA(o2),[d0,dL]=oB(o2); if(c0<edge-1&&c0+cL>edge+1) gaps.push([d0,d0+dL]);
+        });
+        joints.push({pos:edge,segs:subRanges(along,gaps),fill:true}); added=true;
+      });
+    });
+    if(added) joints.sort((x,y)=>x.pos-y.pos);
+  }
   // ---- «Изгиб недорезом»: если у стороны нет соседней полосы (край проёма пришёлся
   // в СЕРЕДИНУ детали, а не на её границу), пробуем ВТОРОЙ способ — не дорезать вырез до
   // конца, оставить запас в глубину откоса на этой же самой детали и загнуть его внутрь.
@@ -3284,7 +3335,7 @@ function wallLedGraph(w,G,cuts){
 
   // накладной короб со сплошной стеной под ним (mountKeepsWall) не режет край стены, даже если
   // геометрически касается его — та же логика, что и в computeProject (throughOps)
-  const throughOps=w.ops.filter(o=>!mountKeepsWall(o));
+  const throughOps=w.ops.filter(o=>!mountKeepsWall(o)&&!o.fillMat);   // заполнение другим материалом — это панель: край стены вдоль него остаётся краем
   const edgeSides=[
     ['top',  W, throughOps.filter(o=>o.y+o.h>=H-1).map(o=>[o.x,o.x+o.w])],
     ['bot',  W, throughOps.filter(o=>o.y<=1).map(o=>[o.x,o.x+o.w])],
@@ -3610,13 +3661,32 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
     const key=c?('c'+c.id):('leg:'+ledLegKey(leg));
     ledRunLens.set(key,(ledRunLens.get(key)||0)+L);
   };
+  // раскладка заполнения проёма материалом (рейка, мрамор…) — отдельный buildLayout размером с проём; строится
+  // один раз (нужна и для профилей стыков ниже, и для раскроя листов в блоке заполнений)
+  const fillLCache=new Map();
+  const getFillL=(wi,k)=>{
+    const key=wi+'|'+k; if(fillLCache.has(key)) return fillLCache.get(key);
+    const w=walls[wi], o=w&&w.ops[k], mat=o&&o.fillMat?PRESETS.find(x=>x.id===o.fillMat):null;
+    if(!mat){ fillLCache.set(key,null); return null; }
+    const Gm=Object.assign({},G,{pl:mat.pl,pw:mat.pw,rot:G.rot&&!isSlatId(mat.id)});
+    // стыки стены продолжаются в заполнении (см. fillInheritsSeams): ручные отметки переводятся в
+    // координаты проёма вдоль раскладки, «первый стык» — как у стены
+    const inh=fillInheritsSeams(w,o,G.orient==='v');
+    const off=G.orient==='v'?o.y:o.x, alongLen=G.orient==='v'?o.h:o.w;
+    // наследуются только ЗАДАННЫЕ стыки (nat — стыки, развёрнутые из автоматических при включении свободной расстановки, —
+    // пропускаем: у заполнения свои автоматические отметки, и включение свободного режима его раскладку не меняет)
+    const fSeams=inh?(w.seamsU||[]).filter(x=>!x.nat).map(x=>x.pos-off).filter(v=>v>0.5&&v<alongLen-0.5):[];
+    const Lf=buildLayout(Object.assign({},Gm,{W:o.w,H:o.h,rowH:inh?(w.rowH||0):0,userSeams:fSeams,
+      userSeamsX:fSeams.map(pos=>({pos,scope:null})),hfree:false,ops:[]}));
+    fillLCache.set(key,Lf); return Lf;
+  };
   walls.forEach((w0,i)=>{
     const w=wallCutView(w0,cornerCuts.get(w0.id));
     const W=w.W,H=w.H,L=layouts[i];
     // край области: каждая сторона — нет / заглушка / LED-стартовый. Накладной короб со сплошной
     // стеной под ним (mountKeepsWall) не касается сюда: стена под ним целая, край не режется,
     // даже если короб геометрически касается края стены.
-    const throughOps=w.ops.filter(o=>!mountKeepsWall(o));
+    const throughOps=w.ops.filter(o=>!mountKeepsWall(o)&&!o.fillMat);   // заполнение другим материалом — это панель: край стены вдоль него остаётся краем
     const sides=[
       ['top',  W, throughOps.filter(o=>o.y+o.h>=H-1).map(o=>[o.x,o.x+o.w])],
       ['bot',  W, throughOps.filter(o=>o.y<=1).map(o=>[o.x,o.x+o.w])],
@@ -3665,10 +3735,21 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
       });
     });
 
+    // поперечные стыки внутри заполнений проёмов (рейка наращивается по длине): тот же режим «соединитель / встык»,
+    // что и у швов стены; длина — сплошным отрезком поперёк всего заполнения
+    w.ops.forEach((o,k)=>{
+      if(!o.fillMat||mountKeepsWall(o)) return;
+      const Lf=getFillL(i,k); if(!Lf) return;
+      fillSeamRuns(Lf,o,G.orient==='v').forEach(r=>{
+        if(jointSegMode(w,G,'h',r.pos,r.a0)==='cap') jhRuns.push(r.a1-r.a0);
+      });
+    });
+
     if(G.edgeOps) w.ops.forEach(o=>{
       // накладной короб со сплошной стеной не режет саму панель — голого торца стены тут
       // не бывает вовсе, заглушку/LED на нём ставить не на что
       if(o.otkos||mountKeepsWall(o)) return;
+      if(o.fillMat&&fillSpansWall(w,o,G.orient==='v')) return;   // заполнение во всю длину раскладки: его границы — стыки/края стены (см. buildLayout)
       if(o.y>1)       opsRuns.push(o.w);
       if(o.y+o.h<H-1) opsRuns.push(o.w);
       if(o.x>1)       opsRuns.push(o.h);
@@ -3792,11 +3873,11 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
       (byMat[mp.id]=byMat[mp.id]||{mat:mp,items:[]}).items.push({w,wi:i,o,k});
     }));
     Object.values(byMat).forEach(({mat,items})=>{
-      const Gm=Object.assign({},G,{pl:mat.pl,pw:mat.pw});
+      const Gm=Object.assign({},G,{pl:mat.pl,pw:mat.pw,rot:G.rot&&!isSlatId(mat.id)});
       const pieces=[];
       const fillLayouts=[];
       items.forEach(({wi,o,k})=>{
-        const L=buildLayout(Object.assign({},Gm,{W:o.w,H:o.h,rowH:0,userSeams:[],ops:[]}));
+        const L=getFillL(wi,k);
         const pref=(multi?tag(wi)+'·':'')+'О'+(k+1);
         L.pieces.forEach(pp=>{ pp.label=pref+'·'+pp.label; });
         fillLayouts.push({wi,k,L});
@@ -3832,7 +3913,7 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
     }));
     Object.values(byMat).forEach(({mat,items})=>{
       const poolId='piece:'+mat.id;
-      const Gm=Object.assign({},G,{pl:mat.pl,pw:mat.pw});
+      const Gm=Object.assign({},G,{pl:mat.pl,pw:mat.pw,rot:G.rot&&!isSlatId(mat.id)});
       const pieces=[];
       const fillLayouts=[];
       items.forEach(({wi,p})=>{
@@ -3879,7 +3960,7 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
     });
     Object.values(byMat).forEach(({mat,items})=>{
       const poolId='otkos:'+mat.id;
-      const Gm=Object.assign({},G,{pl:mat.pl,pw:mat.pw});
+      const Gm=Object.assign({},G,{pl:mat.pl,pw:mat.pw,rot:G.rot&&!isSlatId(mat.id)});
       const ptT=items.map(pp=>({...pp}));
       const sheetsM=[];
       const otO=packOtkos(ptT,sheetsM,Gm,{order:'cur',fit:'best'});
@@ -4063,11 +4144,21 @@ function schemeFor(G,R,wi){
     g+=`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="transparent" data-piececlick="${encodeURIComponent(p.pk)}" data-piecelabel="${encodeURIComponent(p.label)}" style="cursor:pointer"/>`;
   });
   // стыки между полосами — только вне проёмов; режим (соединитель/встык/LED) выбирается по отрезку
+  let gFillJoints='';        // границы заполнения (рейка/мрамор во всю длину раскладки) рисуются ПОСЛЕ проёмов — иначе заливка заполнения перекрывает половину линии и зону клика
   L.joints.forEach(j=>{
     j.segs.forEach(s=>{
       const mode=jointSegMode(wall,S,'v',j.pos,s[0]);
       const col=mode==='led'?'var(--warn)':mode==='butt'?'var(--muted)':'var(--straw-deep)';
       const wgt=mode==='led'?0.24:mode==='butt'?0.08:0.14;
+      if(j.fill){
+        gFillJoints+=(L.vert
+          ?`<line x1="${j.pos}" y1="${H-s[1]}" x2="${j.pos}" y2="${H-s[0]}" stroke="${col}" stroke-width="${fs*Math.max(wgt,0.14)}"${mode==='butt'?` stroke-dasharray="${fs*0.15} ${fs*0.2}"`:''}/>`
+          :`<line x1="${s[0]}" y1="${H-j.pos}" x2="${s[1]}" y2="${H-j.pos}" stroke="${col}" stroke-width="${fs*Math.max(wgt,0.14)}"${mode==='butt'?` stroke-dasharray="${fs*0.15} ${fs*0.2}"`:''}/>`)+
+          (L.vert
+          ?`<rect x="${j.pos-fs*0.5}" y="${H-s[1]}" width="${fs*1}" height="${s[1]-s[0]}" fill="transparent" data-jvclick="${Math.round(j.pos)}" data-jvseg="${Math.round(s[0])}" data-jvfill="1" style="cursor:pointer"/>`
+          :`<rect x="${s[0]}" y="${H-j.pos-fs*0.5}" width="${s[1]-s[0]}" height="${fs*1}" fill="transparent" data-jvclick="${Math.round(j.pos)}" data-jvseg="${Math.round(s[0])}" data-jvfill="1" style="cursor:pointer"/>`);
+        return;
+      }
       g+=L.vert
         ?`<line x1="${j.pos}" y1="${H-s[1]}" x2="${j.pos}" y2="${H-s[0]}" stroke="${col}" stroke-width="${fs*wgt}"${mode==='butt'?` stroke-dasharray="${fs*0.15} ${fs*0.2}"`:''}/>`
         :`<line x1="${s[0]}" y1="${H-j.pos}" x2="${s[1]}" y2="${H-j.pos}" stroke="${col}" stroke-width="${fs*wgt}"${mode==='butt'?` stroke-dasharray="${fs*0.15} ${fs*0.2}"`:''}/>`;
@@ -4123,10 +4214,24 @@ function schemeFor(G,R,wi){
       // (границы полос и поперечные стыки); нет раскладки — прежние полосы шириной с лист от края
       const fsl=fillSeamLines(R,wi,i,o);
       if(fsl){
-        fsl.forEach(sg=>{
-          g+=sg.kind==='cross'
-            ?`<line x1="${sg.x0}" y1="${H-sg.y0}" x2="${sg.x1}" y2="${H-sg.y1}" stroke="var(--err)" stroke-width="${fs*0.09}" stroke-dasharray="${fs*0.32} ${fs*0.2}" data-fillcross="1"/>`
-            :`<line x1="${sg.x0}" y1="${H-sg.y0}" x2="${sg.x1}" y2="${H-sg.y1}" stroke="${mc}" stroke-width="${fs*0.05}" stroke-opacity=".8"/>`;
+        fsl.forEach(sg=>{ if(sg.kind==='band')
+          g+=`<line x1="${sg.x0}" y1="${H-sg.y0}" x2="${sg.x1}" y2="${H-sg.y1}" stroke="${mc}" stroke-width="${fs*0.05}" stroke-opacity=".8"/>`;
+        });
+        // поперечные стыки заполнения (рейка наращивается по длине): сплошной отрезок поперёк всего заполнения,
+        // тип (соединитель / встык) — кликом, как у стыков стены
+        const fl=(R.fills.find(x=>x.kind==='opening'&&x.layouts.some(l=>l.wi===wi&&l.k===i))||{layouts:[]}).layouts.find(l=>l.wi===wi&&l.k===i);
+        if(fl) fillSeamRuns(fl.L,o,L.vert).forEach(r=>{
+          const mode=jointSegMode(wall,S,'h',r.pos,r.a0);
+          const col=mode==='butt'?'var(--muted)':'var(--err)', wgt=mode==='butt'?0.08:0.16;
+          // дизайнерский шов стены, продолжающийся в заполнении, рисуется так же (штрих), как и сам шов стены
+          const isUserF=(wall.seamsU||[]).some(u=>!u.nat&&Math.abs(u.pos-r.pos)<1.5);
+          const dash=mode==='butt'?` stroke-dasharray="${fs*0.15} ${fs*0.2}"`:isUserF?` stroke-dasharray="${fs*0.5} ${fs*0.28}"`:'';
+          g+=L.vert
+            ?`<line x1="${r.a0}" y1="${H-r.pos}" x2="${r.a1}" y2="${H-r.pos}" stroke="${col}" stroke-width="${fs*wgt}"${dash} data-fillcross="1"/>`
+            :`<line x1="${r.pos}" y1="${H-r.a1}" x2="${r.pos}" y2="${H-r.a0}" stroke="${col}" stroke-width="${fs*wgt}"${dash} data-fillcross="1"/>`;
+          g+=L.vert
+            ?`<rect x="${r.a0}" y="${H-r.pos-fs*0.55}" width="${r.a1-r.a0}" height="${fs*1.1}" fill="transparent" data-fillseam="${Math.round(r.pos)}" data-fillseg="${Math.round(r.a0)}" style="cursor:pointer"/>`
+            :`<rect x="${r.pos-fs*0.55}" y="${H-r.a1}" width="${fs*1.1}" height="${r.a1-r.a0}" fill="transparent" data-fillseam="${Math.round(r.pos)}" data-fillseg="${Math.round(r.a0)}" style="cursor:pointer"/>`;
         });
       } else if(mp&&mp.pw>0){
         const nb=Math.floor(o.w/mp.pw);
@@ -4212,6 +4317,7 @@ function schemeFor(G,R,wi){
       g+=`<rect x="${x+o.w-oz/2}" y="${y}" width="${oz}" height="${o.h}" fill="transparent" data-otkosop="${o.id}" data-otkosside="right" style="cursor:pointer"/>`;
     }
   });
+  g+=gFillJoints;     // границы заполнения — поверх заливки проёмов (см. выше)
 
   // окантовка
   const e=S.edges, ew=fs*0.2;
@@ -5802,6 +5908,19 @@ function wallFaceModel(wallId){
     if(+l.wall!==w0.id||l.el!=='free') return;
     ledLines.push({x0:l.ax,y0:l.ay,x1:l.bx,y1:l.by,el:'free',kind:c.kind});
   }));
+  // поперечные стыки внутри заполнений (рейка наращивается по длине) — такие же стыки на плоскости стены, как и
+  // остальные: попадают и на схему для нейросети, и в описание (тип — по клику на схеме раскладки)
+  fills.forEach(fr=>{
+    const fl=(R.fills||[]).find(x=>x.kind==='opening'&&x.layouts.some(l=>l.wi===wi&&l.k===fr.op)); if(!fl) return;
+    const Lf=fl.layouts.find(l=>l.wi===wi&&l.k===fr.op).L;
+    fillSeamRuns(Lf,S.ops[fr.op],L.vert).forEach(run=>{
+      const mode=jointSegMode(wall,S,'h',run.pos,run.a0);
+      if(mode!=='cap'&&mode!=='butt') return;
+      const user=(wall.seamsU||[]).some(u=>!u.nat&&Math.abs(u.pos-run.pos)<1.5);
+      seams.push(L.vert?{x0:run.a0,y0:run.pos,x1:run.a1,y1:run.pos,el:'jointH',pos:run.pos,mode,user}
+                       :{x0:run.pos,y0:run.a0,x1:run.pos,y1:run.a1,el:'jointH',pos:run.pos,mode,user});
+    });
+  });
   return {wallId:w0.id, wi, name:w0.name, W, H, vert:L.vert, strips:L.strips, wall, S,
     matId, matName:G.presetName, color, hexOf, pieces, fills, holes, seams, ledLines};
 }
@@ -6049,6 +6168,7 @@ document.addEventListener('keydown',e=>{
       try{ box.setPointerCapture(ev.pointerId); }catch(_){}
       return;
     }
+    if(t.dataset&&t.dataset.jvfill!==undefined){ ev.preventDefault(); return; }   // граница заполнения: только меню типа стыка, не двигается
     if(t.dataset&&t.dataset.jvclick!==undefined){
       // вертикальный стык: клик — меню типа стыка, перетаскивание — перенос; ручной стык переносится
       // как есть, естественную границу полос сначала превращаем в ручной (включается свободная
@@ -6149,6 +6269,7 @@ document.addEventListener('keydown',e=>{
   box.addEventListener('pointerdown',ev=>{
     const ds=ev.target.dataset||{};
     downAt={x:ev.clientX,y:ev.clientY,dragId:ds.drag,seamPos:ds.seamdrag,seamSeg:ds.seamseg,
+            fillSeamPos:ds.fillseam,fillSeamSeg:ds.fillseg,jointFill:ds.jvfill,
             jointPos:ds.jvclick,jointSeg:ds.jvseg,edgeSide:ds.edgeclick,
             otkosOp:ds.otkosop,otkosSide:ds.otkosside,piecePk:ds.piececlick,pieceLabel:ds.piecelabel};
   },true);
@@ -6161,7 +6282,8 @@ document.addEventListener('keydown',e=>{
       if(downAt.otkosOp!==undefined) showOtkosMenu(ev,downAt.otkosOp,downAt.otkosSide);
       else if(downAt.dragId!==undefined) showMatMenu(ev,downAt.dragId);
       else if(downAt.seamPos!==undefined) showSeamMenu(ev,+downAt.seamPos,+downAt.seamSeg);
-      else if(downAt.jointPos!==undefined) showJointMenu(ev,+downAt.jointPos,+downAt.jointSeg);
+      else if(downAt.fillSeamPos!==undefined) showFillSeamMenu(ev,+downAt.fillSeamPos,+downAt.fillSeamSeg);
+      else if(downAt.jointPos!==undefined) showJointMenu(ev,+downAt.jointPos,+downAt.jointSeg,!!downAt.jointFill);
       else if(downAt.edgeSide!==undefined) showEdgeMenu(ev,downAt.edgeSide);
       else if(downAt.piecePk!==undefined) showPieceMatMenu(ev,decodeURIComponent(downAt.piecePk),decodeURIComponent(downAt.pieceLabel||''));
     }
@@ -6202,7 +6324,17 @@ document.addEventListener('keydown',e=>{
       closeMatMenu(); renderSeams(); run();
     });
   }
-  function showJointMenu(ev,pos,segStart){
+  function showFillSeamMenu(ev,pos,segStart){
+    const w=AW(); const G=collect();
+    const key=jointSegKey('h',pos,segStart);
+    const cur=jointSegMode(w,G,'h',pos,segStart);
+    const menu=menuShell(ev,`Стык в заполнении · ${fmt(pos)} мм`);
+    const setMode=mode=>{ w.jointModes=w.jointModes||{}; w.jointModes[key]=mode; closeMatMenu(); run(); };
+    menuBtn(menu,'Соединитель',cur==='cap',()=>setMode('cap'));
+    menuBtn(menu,'Встык (без профиля)',cur==='butt',()=>setMode('butt'));
+    menuDivider(menu,'Стык стены продолжается в заполнении — двигается вместе с ним (галочка «Стыки стены продолжаются…» в карточке проёма)');
+  }
+  function showJointMenu(ev,pos,segStart,fillEdge){
     const w=AW(); const G=collect();
     const key=jointSegKey('v',pos,segStart);
     const cur=jointSegMode(w,G,'v',pos,segStart);
@@ -6215,6 +6347,7 @@ document.addEventListener('keydown',e=>{
     menuBtn(menu,'Соединитель',cur==='cap',()=>setMode('cap'));
     menuBtn(menu,'Встык (без профиля)',cur==='butt',()=>setMode('butt'));
     if(cur==='led') menuDivider(menu,'Сейчас: LED (меняется в разделе «LED»)');
+    if(fillEdge){ menuDivider(menu,'Граница заполнения (другой материал во всю высоту) — не двигается'); return; }
     const vbm=vSeamBounds(), upos=pos+(vbm?vbm.shift:0);
     const sm=(w.vseamsU||[]).find(x=>Math.abs(x.pos-upos)<2);
     if(sm) menuBtn(menu,'Удалить стык',false,()=>{
@@ -7391,7 +7524,7 @@ document.addEventListener('keydown',e=>{
       // отдельным непрозрачным слоем линий, см. drawGuideLines)
       if((r.lines||r.bandW>0)&&!guide){
         cx.strokeStyle=guide?'rgba(15,15,15,.55)':'rgba(0,0,0,.18)'; cx.lineWidth=Math.max(1,cw/1400);
-        if(r.lines) r.lines.forEach(sg=>{ cx.beginPath(); cx.moveTo(sg.x0*px,(m.H-sg.y0)*px); cx.lineTo(sg.x1*px,(m.H-sg.y1)*px); cx.stroke(); });
+        if(r.lines) r.lines.filter(sg=>sg.kind==='band').forEach(sg=>{ cx.beginPath(); cx.moveTo(sg.x0*px,(m.H-sg.y0)*px); cx.lineTo(sg.x1*px,(m.H-sg.y1)*px); cx.stroke(); });
         else for(let bx=r.x+r.bandW;bx<r.x+r.w-1;bx+=r.bandW){
           cx.beginPath(); cx.moveTo(bx*px,y); cx.lineTo(bx*px,y+h); cx.stroke();
         }
@@ -7571,7 +7704,7 @@ document.addEventListener('keydown',e=>{
       // только внутри контура стены: линия по краю стены не вылезает на потолок/соседнюю стену
       lctx.beginPath(); q.forEach((p,i)=>i?lctx.lineTo(p.x,p.y):lctx.moveTo(p.x,p.y)); lctx.closePath(); lctx.clip();
       m.fills.forEach(r=>{
-        if(r.lines){ r.lines.forEach(sg=>marked(P(sg.x0,sg.y0),P(sg.x1,sg.y1),U*0.9,'rgba(10,10,10,.75)',U*1.7,.3)); return; }
+        if(r.lines){ r.lines.filter(sg=>sg.kind==='band').forEach(sg=>marked(P(sg.x0,sg.y0),P(sg.x1,sg.y1),U*0.9,'rgba(10,10,10,.75)',U*1.7,.3)); return; }
         if(!(r.bandW>0)) return;
         for(let bx=r.x+r.bandW;bx<r.x+r.w-1;bx+=r.bandW){
           const a=P(bx,r.y), b=P(bx,r.y+r.h);

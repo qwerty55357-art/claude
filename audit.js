@@ -112,7 +112,7 @@ for(let t=0;t<N;t++){
     // (throughOps): короб со сплошной стеной не режет край стены, даже если геометрически касается
     let edgeSum=0; graph.edges.forEach(e=>{ if(e.leg.el==='edge') edgeSum+=Math.hypot(
       (byKey.get(e.a)||{}).x-(byKey.get(e.b)||{}).x,(byKey.get(e.a)||{}).y-(byKey.get(e.b)||{}).y); });
-    const throughOps=w.ops.filter(o=>!keepsWall(o));
+    const throughOps=w.ops.filter(o=>!keepsWall(o)&&!o.fillMat);   // заполнение другим материалом — панель: край стены идёт вдоль него
     const expEdge=[
       ['top',w.W,throughOps.filter(o=>o.y+o.h>=w.H-1).map(o=>[o.x,o.x+o.w])],
       ['bot',w.W,throughOps.filter(o=>o.y<=1).map(o=>[o.x,o.x+o.w])],
@@ -708,6 +708,8 @@ for(let t=0;t<N;t++){
             if(m(k)==='cap') expOps+=len;
             if(m(k)==='led') expLed+=len;
           });
+        } else if(o.fillMat&&(G.orient==='v'?(o.y<=1&&o.y+o.h>=H-1):(o.x<=1&&o.x+o.w>=W-1))) {
+          // заполнение во всю длину раскладки: его границы — стыки/край стены, контурной заглушки нет (см. computeProject)
         } else if(!(o.mount==='surface'&&!o.mountCut)) {
           // старый источник ops: проём вообще без откоса — торец закрыт заглушкой на сторонах,
           // не касающихся края стены. Короб со сплошной стеной исключён — панель под ним целая,
@@ -839,7 +841,43 @@ for(let t=0;t<N;t++){
         maxAll+=(sm.a1-sm.a0);
       });
     });
+    // поперечные стыки внутри заполнений проёмов (рейка наращивается) — тоже горизонтальные стыки (jointH)
+    (R.fills||[]).filter(f=>f.kind==='opening').forEach(f=>f.layouts.forEach(l=>(l.L.seams||[]).forEach(sm=>{ maxAll+=(sm.a1-sm.a0); })));
     chk('L51',sumAll<=maxAll+1,`${id}: сумма всех стыковых профилей ${sumAll} > теор.максимума ${maxAll}`);
+  }
+  // F1–F4 (нов): заполнение проёма другим материалом (рейка, мрамор…) — часть общего поля стены, а не дыра.
+  //  F1: заполнение во всю длину раскладки даёт стык-границу (joint.fill) с каждой стороны, где к нему примыкает полоса стены;
+  //  F3: стыки стены продолжаются в заполнении — у каждой его полосы есть граница куска на этой отметке;
+  //  F4: детали реечного заполнения/откосов не поворачиваются (рёбра вдоль листа).
+  {
+    const vert=G.orient==='v', isSlat=id=>String(id||'').split(':')[0]==='slat';
+    wallsArr.forEach((w,wi)=>{
+      const L=R.layouts[wi];
+      w.ops.forEach((o,k)=>{
+        if(!o.fillMat||keepsWall(o)) return;
+        const f=R.fills.find(x=>x.kind==='opening'&&x.layouts.some(l=>l.wi===wi&&l.k===k)); if(!f) return;
+        const Lf=f.layouts.find(l=>l.wi===wi&&l.k===k).L;
+        const span=vert?(o.y<=1&&o.y+o.h>=w.H-1):(o.x<=1&&o.x+o.w>=w.W-1);
+        const [a0,aL]=vert?[o.x,o.w]:[o.y,o.h], along=vert?o.h:o.w, off=vert?o.y:o.x;
+        if(span){
+          [a0,a0+aL].forEach((edge,side)=>{
+            const adj=L.strips.some(st=>side===0?Math.abs(st.end-edge)<1:Math.abs(st.start-edge)<1);
+            const has=L.joints.some(j=>j.fill&&Math.abs(j.pos-edge)<1);
+            chk('F1',adj===has,`${id} стена ${wi} проём ${k}: граница заполнения на ${edge} — примыкает полоса: ${adj}, стык-граница: ${has}`);
+          });
+        }
+        if(o.fillSeams==null?span:!!o.fillSeams)
+          (w.seamsU||[]).filter(u=>!u.nat).forEach(u=>{
+            const pos=u.pos-off; if(!(pos>0.5&&pos<along-0.5)) return;
+            chk('F3',Lf.strips.every(st=>Lf.pieces.some(p=>p.strip===st.i&&Math.abs(p.to-pos)<1.5)),
+              `${id} стена ${wi} проём ${k}: стык стены ${u.pos} не продолжился в заполнении`);
+          });
+      });
+    });
+    R.fills.forEach(f=>{
+      if(!isSlat(String(f.matId).replace(/^piece:/,''))) return;
+      f.sheets.forEach(sh=>sh.list.concat(sh.otk).forEach(o=>chk('F4',!o.rot,`${id}: деталь реечного пула ${f.matId} повёрнута`)));
+    });
   }
   // L60-62 (нов): режим стыка по отрезкам — назначаем случайные режимы на реальные
   // отрезки этого прогона и проверяем: длина сохраняется, butt даёт ноль, каждый
