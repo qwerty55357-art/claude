@@ -60,7 +60,7 @@ window.__rnd=function(seed){
   const pick=a=>a[Math.floor(r()*a.length)];
   const r10=(a,b)=>Math.round((a+r()*(b-a))/10)*10;
   const fillIds=['marble','slat','rockL','rockS','slat:5139','marble:044'].filter(id=>id.indexOf(':')<0||CAT_BY_ID.has(id));
-  const n=1+Math.floor(r()*3), slots=n===1?['N']:['W','N','E'].slice(0,n);
+  const n=1+Math.floor(r()*4), slots=n===1?['N']:['W','N','E','S'].slice(0,n);
   const H=r10(1800,3200), list=[];
   for(let k=0;k<n;k++){
     const W=r10(900,7000);
@@ -92,6 +92,8 @@ window.__rnd=function(seed){
   for(let k=0;k<n-1;k++) o.cornerLinks.push({id:k+1,kind:pick(['sharp','radius','radius','across']),type:o.cornerType,angle:r()<0.7?90:pick([60,75,105,120]),
     radius:pick([0,100,200,300,450]),distance:r()<0.2?pick([100,300]):0,flatA:r()<0.2?100:0,flatB:r()<0.2?100:0,
     aw:list[k].id,as:'right',bw:list[k+1].id,bs:'left'});
+  if(n===4) o.cornerLinks.push({id:4,kind:pick(['sharp','radius']),type:o.cornerType,angle:90,radius:pick([100,200,300]),distance:0,flatA:0,flatB:0,
+    aw:list[3].id,as:'right',bw:list[0].id,bs:'left'});   // замыкаем комнату: Юг → Запад
   o.ledCircuits=r()<0.5?[{id:1,kind:pick(['start','joint']),legs:[{wall:list[0].id,el:'free',id:1,ax:0,ay:Math.round(H*0.9),bx:list[0].W,by:Math.round(H*0.9)}]}]:[];
   list.forEach(w=>w.ops.forEach(op=>{ if(op.otkos&&r()<0.25){ op.otkosMat={}; ['left','right','top','bottom'].forEach(sd=>{ if(r()<0.5) op.otkosMat[sd]=pick(fillIds); }); } }));
   applySnapshot(JSON.parse(JSON.stringify(o)),false);
