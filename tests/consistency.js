@@ -24,7 +24,7 @@ let fails=0; const byId={};
     let n=0, bad=0;
     for(let s=-1;s<N;s++){
       const tag='['+M.n+(s<0?' насыщенный':' #'+s)+'] ';
-      try{ await p.evaluate(s=>{ s<0?window.__rich():window.__rnd(s); },s); }catch(e){ console.log('✗',tag+'сборка проекта: '+String(e).slice(0,160)); fails++; continue; }
+      try{ await p.evaluate(s=>{ s<0?window.__rich():window.__rnd(s); },s); await p.waitForTimeout(150); }catch(e){ console.log('✗',tag+'сборка проекта: '+String(e).slice(0,160)); fails++; continue; }
       const all=()=>p.evaluate(()=>window.__consistency().concat(window.__scan().map(x=>'SCAN: '+x),window.__overlaps().map(x=>'OVERLAP: '+x),window.__badNums().map(x=>'NUM: '+x)));
       const report=(vio,suffix)=>vio.forEach(v=>{ fails++; bad++; const id=v.split(':')[0]; byId[id]=(byId[id]||0)+1; if(bad<=6) console.log('✗',tag+suffix+v.slice(0,260)); });
       report(await all(),'');

@@ -6,7 +6,8 @@ window.__scan=function(){
   const zones=['#notes','#cards','#scheme','#scheme-meta','#cutmap','#shelf-zone','#cuts','#spec','#estimate','#jointsv-list','#led-summary','#led-circuits-list','#led-draw','#scene3d-meta','#corner-scheme-block','#cutmap-layout','#openings'];
   zones.forEach(z=>{
     document.querySelectorAll(z).forEach(el=>{
-      const h=el.innerHTML.replace(/data:[^"')\s]+/g,'data:…'), m=h.match(re);
+      let h=el.innerHTML; if(h.indexOf('NaN')<0&&h.indexOf('undefined')<0&&h.indexOf('Infinity')<0&&h.indexOf('[object')<0) return;   // быстрый выход: большой SVG не гоняем через regex
+      h=h.replace(/data:[^"')\s]+/g,'data:…'); const m=h.match(re);
       if(m){ const i=m.index; out.push(z+' …'+h.slice(Math.max(0,i-60),i+40).replace(/\s+/g,' ')+'…'); }
     });
   });
@@ -88,10 +89,15 @@ window.__rnd=function(seed){
   Object.assign(o.fields,{'i-orient':pick(['v','h']),'i-sym':r()<0.5,'i-brick':r()<0.4,'i-offcut':r()<0.8,'i-splice':r()<0.4,'i-rot':r()<0.4,
     'i-kerf':pick([0,3,5,10]),'i-minoff':pick([100,300,500]),'i-joint-v':r()<0.85,'i-joint-h':r()<0.85,'i-edgeops':r()<0.8});
   o.cornerLinks=[];
-  for(let k=0;k<n-1;k++) o.cornerLinks.push({id:k+1,kind:r()<0.5?'radius':'sharp',type:o.cornerType,angle:90,radius:pick([100,200,300]),
-    aw:list[k].id,as:'right',bw:list[k+1].id,bs:'left',flatA:0,flatB:0});
+  for(let k=0;k<n-1;k++) o.cornerLinks.push({id:k+1,kind:pick(['sharp','radius','radius','across']),type:o.cornerType,angle:r()<0.7?90:pick([60,75,105,120]),
+    radius:pick([0,100,200,300,450]),distance:r()<0.2?pick([100,300]):0,flatA:r()<0.2?100:0,flatB:r()<0.2?100:0,
+    aw:list[k].id,as:'right',bw:list[k+1].id,bs:'left'});
   o.ledCircuits=r()<0.5?[{id:1,kind:pick(['start','joint']),legs:[{wall:list[0].id,el:'free',id:1,ax:0,ay:Math.round(H*0.9),bx:list[0].W,by:Math.round(H*0.9)}]}]:[];
+  list.forEach(w=>w.ops.forEach(op=>{ if(op.otkos&&r()<0.25){ op.otkosMat={}; ['left','right','top','bottom'].forEach(sd=>{ if(r()<0.5) op.otkosMat[sd]=pick(fillIds); }); } }));
   applySnapshot(JSON.parse(JSON.stringify(o)),false);
+  // материал отдельных деталей стен (ключ — устойчивый pk детали)
+  if(r()<0.5){ walls.forEach(w=>{ const L=LAST.R.layouts[walls.indexOf(w)]; if(!L||!L.pieces.length) return;
+    for(let i=0;i<2;i++){ const pc=L.pieces[Math.floor(r()*L.pieces.length)]; if(pc&&pc.pk) w.pieceMats[pc.pk]=pick(fillIds); } }); run(); }
   return n;
 };
 
@@ -150,7 +156,7 @@ window.__consistency=function(){
   svgs.forEach(sv=>{ const lbl=[...sv.querySelectorAll('text')].filter(t=>/^ЛИСТ \d+( ·.*)?$/.test(t.textContent.trim())&&t.getAttribute('fill')!=='none').length;
     if(lbl!==+sv.dataset.n) bad('C4c','карта '+sv.dataset.pool+': подписей «ЛИСТ» '+lbl+' != '+sv.dataset.n); });
   // C5: детали и площади не теряются между расчётом стен и листами
-  const pcs=R.layouts.flatMap(L=>L.pieces), onSheets=R.sheets.flatMap(s=>s.list).filter(p=>!p.isCorner);   // деталь радиусного угла лежит на листе, но не принадлежит стене
+  const pcs=R.layouts.flatMap(L=>L.pieces).filter(p=>!p.matOverride), onSheets=R.sheets.flatMap(s=>s.list).filter(p=>!p.isCorner);   // деталь радиусного угла лежит на листе, но не принадлежит стене
   const shelfMain=(R.shelf||[]).filter(e=>e.kind==='w'&&!e.isCorner).length;
   if(pcs.length!==onSheets.length+shelfMain) bad('C5a','деталей по стенам '+pcs.length+' != на листах '+onSheets.length+' + верстак '+shelfMain);
   const ar=a=>a.reduce((s,p)=>s+p.w*p.len,0)/1e6;
@@ -160,7 +166,7 @@ window.__consistency=function(){
     const dw=p.w, dl=p.len;   // как rectOf в движке: после поворота w/len уже поменяны местами
     if(p.x<-0.01||p.y<-0.01||p.x+dw>G.pw+0.01||p.y+dl>G.pl+0.01) bad('C5c','лист '+(i+1)+': деталь '+p.label+' ('+p.x+','+p.y+' '+dw+'×'+dl+') вне листа '+G.pw+'×'+G.pl);
   }));
-  R.fills.forEach(f=>{ const fp=f.layouts.flatMap(x=>x.L.pieces), fo=f.sheets.flatMap(s=>s.list);
+  R.fills.filter(f=>f.kind==='opening').forEach(f=>{ const fp=f.layouts.flatMap(x=>x.L.pieces), fo=f.sheets.flatMap(s=>s.list);
     if(fp.length!==fo.length+(f.shelf||[]).length) bad('C5d','заполнение '+f.matName+': деталей '+fp.length+' != на листах '+fo.length+' + верстак '+(f.shelf||[]).length); });
   // C6: таблица вырезов
   const cutRows=document.querySelectorAll('#cuts tbody tr, #cuts tr').length-(document.querySelector('#cuts thead')||document.querySelector('#cuts tr th')?1:0);

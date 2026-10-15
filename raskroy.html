@@ -6180,10 +6180,15 @@ $('#file-load').addEventListener('change',e=>{
   const f=e.target.files[0]; if(!f) return;
   const r=new FileReader();
   r.onload=()=>{
+    // applySnapshot меняет состояние по частям — на повреждённом файле он мог бросить исключение уже после замены стен,
+    // оставив полузагруженный проект, с которым дальше ничего не работало. Поэтому прежний проект сохраняем заранее и
+    // при ошибке возвращаем его
+    let backup=null; try{ backup=JSON.parse(JSON.stringify(snapshot())); }catch(err){}
     try{
       applySnapshot(JSON.parse(r.result),true);
     }catch(err){
-      $('#notes').innerHTML=`<div class="note err"><b>Файл</b><span>Не удалось прочитать проект: файл повреждён или это не проект раскроя.</span></div>`;
+      if(backup){ try{ applySnapshot(backup,false); }catch(err2){} }
+      $('#notes').innerHTML=`<div class="note err"><b>Файл</b><span>Не удалось прочитать проект: файл повреждён или это не проект раскроя. Прежний проект оставлен без изменений.</span></div>`;
     }
   };
   r.readAsText(f); e.target.value='';
