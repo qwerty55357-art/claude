@@ -500,6 +500,7 @@ tbody tr:hover td{background:var(--surface)}
       <span><svg width="14" height="12"><line x1="7" y1="0" x2="7" y2="12" stroke="var(--straw-deep)" stroke-width="3"/></svg>вертикальный стык (соединитель)</span>
       <span><svg width="14" height="12"><line x1="0" y1="6" x2="14" y2="6" stroke="var(--err)" stroke-width="3"/></svg>горизонтальный стык (соединитель)</span>
       <span><svg width="14" height="12"><line x1="0" y1="6" x2="14" y2="6" stroke="var(--warn)" stroke-width="4"/></svg>LED-профиль (стартовый / соединительный)</span>
+      <span><svg width="14" height="12"><line x1="0" y1="6" x2="14" y2="6" stroke="var(--err)" stroke-width="2" stroke-dasharray="4 3"/></svg>стык реек по длине (наращивание в проёме)</span>
       <span><svg width="14" height="12"><line x1="0" y1="6" x2="14" y2="6" stroke="var(--ok)" stroke-width="4"/></svg>изгиб панели (без детали откоса)</span>
       <span><svg width="14" height="12"><line x1="0" y1="6" x2="14" y2="6" stroke="var(--muted)" stroke-width="3" stroke-dasharray="3 2"/></svg>откос встык (без профиля)</span>
       <span><svg width="14" height="12"><rect x="1" y="1" width="12" height="10" fill="var(--straw)" fill-opacity=".3" stroke="var(--straw)" stroke-dasharray="3 2"/></svg>откос выступающий (накладка на стену)</span>
@@ -4002,6 +4003,32 @@ function dimV(y0,y1,x,fs,color,bold,text){
 const ext=(x1,y1,x2,y2,fs)=>`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--line-2)" stroke-width="${fs*0.035}" stroke-dasharray="${fs*0.25} ${fs*0.2}"/>`;
 
 /* ===================== СХЕМА СТЕНЫ ===================== */
+// Линии раскладки материала внутри проёма, зашитого другим материалом (fillMat): границы полос
+// (рейки, «паз») и поперечные стыки наращивания по длине — ровно те, что получились в раскрое
+// (R.fills[].layouts, тот же buildLayout, что кроит листы), а не «полосы шириной с лист от левого
+// края», как рисовалось раньше: при симметричной раскладке, «кирпичике» или проёме выше листа схема
+// расходилась с картой раскроя. Координаты — мм стены, y ОТ ПОЛА. null — раскладки нет (старый путь).
+function fillSeamLines(R,wi,k,o){
+  const f=R&&(R.fills||[]).find(x=>x.kind==='opening'&&(x.layouts||[]).some(l=>l.wi===wi&&l.k===k));
+  if(!f) return null;
+  const L=f.layouts.find(l=>l.wi===wi&&l.k===k).L;
+  if(!L||!L.strips||!L.strips.length) return null;
+  const segs=[], along=L.vert?o.h:o.w;
+  L.strips.forEach((st,i)=>{
+    if(i>0) segs.push(L.vert?{kind:'band',x0:o.x+st.start,y0:o.y,x1:o.x+st.start,y1:o.y+o.h}
+                            :{kind:'band',x0:o.x,y0:o.y+st.start,x1:o.x+o.w,y1:o.y+st.start});
+  });
+  const seen=new Set();
+  L.pieces.forEach(p=>{
+    if(!(p.to<along-0.5)) return;             // конец полосы — не стык
+    const st=L.strips[p.strip]; if(!st) return;
+    const sg=L.vert?{kind:'cross',x0:o.x+st.start,y0:o.y+p.to,x1:o.x+st.end,y1:o.y+p.to}
+                   :{kind:'cross',x0:o.x+p.to,y0:o.y+st.start,x1:o.x+p.to,y1:o.y+st.end};
+    const key=[sg.x0,sg.y0,sg.x1,sg.y1].map(Math.round).join();
+    if(!seen.has(key)){ seen.add(key); segs.push(sg); }
+  });
+  return segs;
+}
 function schemeFor(G,R,wi){
   // радиусный угол «съедает» часть ширины стены (см. computeProject) — схема должна рисовать
   // ровно ту же (урезанную) панельную зону, что и реальный раскрой L, иначе куски визуально не
@@ -4092,8 +4119,16 @@ function schemeFor(G,R,wi){
       const mp=findMat(o.fillMat);
       const mc=matColor(o.fillMat);
       g+=`<rect x="${x}" y="${y}" width="${o.w}" height="${o.h}" fill="${mc}" fill-opacity=".55" stroke="${mc}" stroke-width="${fs*0.1}" data-drag="${o.id}" style="cursor:move"/>`;
-      // полосы заполнения — раскладка материала внутри проёма
-      if(mp&&mp.pw>0){
+      // полосы заполнения — раскладка материала внутри проёма: берём ту, по которой кроятся листы
+      // (границы полос и поперечные стыки); нет раскладки — прежние полосы шириной с лист от края
+      const fsl=fillSeamLines(R,wi,i,o);
+      if(fsl){
+        fsl.forEach(sg=>{
+          g+=sg.kind==='cross'
+            ?`<line x1="${sg.x0}" y1="${H-sg.y0}" x2="${sg.x1}" y2="${H-sg.y1}" stroke="var(--err)" stroke-width="${fs*0.09}" stroke-dasharray="${fs*0.32} ${fs*0.2}" data-fillcross="1"/>`
+            :`<line x1="${sg.x0}" y1="${H-sg.y0}" x2="${sg.x1}" y2="${H-sg.y1}" stroke="${mc}" stroke-width="${fs*0.05}" stroke-opacity=".8"/>`;
+        });
+      } else if(mp&&mp.pw>0){
         const nb=Math.floor(o.w/mp.pw);
         for(let bi=1;bi<=nb;bi++){
           const bx=x+bi*mp.pw; if(bx<x+o.w-1)
@@ -4447,14 +4482,20 @@ function renderScheme(G,R){
 
 /* ===================== КАРТА РАСКРОЯ ===================== */
 function cutmapSvg(sheets,S){
-  const cols=Math.min(sheets.length,5), rows=Math.ceil(sheets.length/cols);
+  // узкий лист (рейка 2900×150): лист в десятки раз длиннее своей ширины, пять колонок дают карту
+  // 1:9 — на экране она крошечная, а в печати растягивается на ширину страницы вместе с подписями.
+  // Для таких листов — до 12 колонок в ряд и подписи, вписанные в ширину колонки
+  const narrow=S.pw<S.pl*0.2;
+  const cols=Math.min(sheets.length,narrow?12:5), rows=Math.ceil(sheets.length/cols);
   const gapX=S.pw*0.30, gapY=S.pl*0.13;
   const cw=S.pw+gapX, ch=S.pl+gapY;
   const fs=S.pl/28;
   let g='';
   sheets.forEach((sh,i)=>{
     const cx=(i%cols)*cw, cy=Math.floor(i/cols)*ch;
-    g+=txt(cx,cy-fs*0.6,`ЛИСТ ${sh.no}${sh.extra?' · добор под откосы':''}`,fs*0.85,
+    const capTxt=`ЛИСТ ${sh.no}${sh.extra?' · добор под откосы':''}`;
+    const capFs=narrow?Math.min(fs*0.85,fs*0.85*(cw*0.82)/Math.max(1,tw(capTxt,fs*0.85))):fs*0.85;
+    g+=txt(cx,cy-fs*0.6,capTxt,capFs,
           sh.extra?'var(--warn)':'var(--muted)','var(--surface)',{anchor:'start'});
     g+=`<rect x="${cx}" y="${cy}" width="${S.pw}" height="${S.pl}" fill="var(--void)" stroke="var(--line-2)" stroke-width="${fs*0.08}"/>`;
     // свободные зоны (материал из вырезов рисуем позже — поверх детали)
@@ -4538,6 +4579,11 @@ function cutmapSvg(sheets,S){
         g+=txt(lx,ly,p.label,fs*0.95,'var(--ink-face)','var(--straw-face)',{bold:1});
         if(two && tw(dims,fs*0.72)<p.w*0.92)
           g+=txt(lx,ly+fs*1.15,dims,fs*0.72,'var(--ink-face)','var(--straw-face)');
+      } else if(p.len>p.w*1.5 && room>=fs*2){
+        // узкая длинная деталь (рейка): подпись вдоль детали, шрифт — по её ширине
+        const cap=`${p.label} · ${dims}`, f2=Math.min(fs*0.7,p.w*0.42);
+        if(f2>=fs*0.16 && tw(cap,f2)<room*0.92)
+          g+=txt(lx,cy+p.y+band[0]+room/2,cap,f2,'var(--ink-face)','var(--straw-face)',{rot:-90,bold:1});
       }
       // кнопка поворота — доступна и у детали с вырезом, если только в вырезе сейчас никто не
       // сидит (иначе пришлось бы двигать «детей» под новую форму выреза — не поддерживаем), и
@@ -4546,7 +4592,7 @@ function cutmapSvg(sheets,S){
       // 90° меняет направление изгиба относительно материала, кнопки для неё не показываем никогда
       // (не полагаемся на то, что развёрнутые габариты случайно не влезут в лист — см. canRotate)
       const holeBusy=p.cuts&&p.cuts.length&&holeRects(p).some(h=>sh.otk.some(k=>insideRect({x:k.x,y:k.y,w:k.dw||k.dep,h:k.dh||k.len},h,3)));
-      if(p._uid && !p.isCorner && !holeBusy && p.len<=S.pw+0.5 && p.w<=S.pl+0.5){
+      if(p._uid && !p.isCorner && !holeBusy && !S.noRot && p.len<=S.pw+0.5 && p.w<=S.pl+0.5){
         const minSide=Math.min(p.w,p.len);
         if(minSide>fs*0.7){
           const ir=Math.min(fs*0.6,minSide/2.8), mg=ir*0.32;
@@ -4591,7 +4637,7 @@ function cutmapSvg(sheets,S){
       // кнопка поворота: та же геометрическая проверка — развёрнутая деталь должна помещаться на лист.
       // «из выреза» пропускаем: такая деталь сидит в узком гнезде вместе с соседями, и развёрнутая
       // почти никогда туда не попадает — кнопка, которая всегда отказывает, хуже её отсутствия.
-      if(o._uid && !o.fromCut && dh<=S.pw+0.5 && dw<=S.pl+0.5){
+      if(o._uid && !o.fromCut && !S.noRot && dh<=S.pw+0.5 && dw<=S.pl+0.5){
         const minSide=Math.min(dw,dh);
         if(minSide>fs*0.7){
           const ir=Math.min(fs*0.6,minSide/2.8), mg=ir*0.32;
@@ -4605,7 +4651,7 @@ function cutmapSvg(sheets,S){
     });
   });
   const vb=`${-S.pw*0.08} ${-fs*2} ${cols*cw} ${rows*ch+fs*1.5}`;
-  return `<svg viewBox="${vb}" style="width:100%;max-height:82vh" role="img" aria-label="Карта раскроя листов" data-cw="${cw}" data-ch="${ch}" data-cols="${cols}" data-n="${sheets.length}" data-pl="${S.pl}" data-pw="${S.pw}">${g}</svg>`;
+  return `<svg viewBox="${vb}" style="width:100%;max-height:82vh" role="img" aria-label="Карта раскроя листов" data-cw="${cw}" data-ch="${ch}" data-cols="${cols}" data-n="${sheets.length}" data-pl="${S.pl}" data-pw="${S.pw}"${S.noRot?' data-norot="1"':''}>${g}</svg>`;
 }
 function renderCutmap(G,R){
   if(!R.sheets.length && !R.fills.length){ $('#cutmap').innerHTML='<p class="hint">Нет деталей для раскроя.</p>'; return; }
@@ -4613,11 +4659,11 @@ function renderCutmap(G,R){
   let html='';
   if(R.sheets.length){
     if(multiMat) html+=`<div class="mat-h" style="border-left:4px solid ${matColor(curMatId())}">Материал: ${esc(G.presetName)} — ${R.sheets.length} ${plu(R.sheets.length,'лист','листа','листов')} ${fmt(G.pl)}×${fmt(G.pw)}</div>`;
-    html+=cutmapSvg(R.sheets,{pl:G.pl,pw:G.pw,minoff:G.minoff}).replace('<svg ','<svg data-pool="main" ');
+    html+=cutmapSvg(R.sheets,{pl:G.pl,pw:G.pw,minoff:G.minoff,noRot:matType(curMatId())==='slat'}).replace('<svg ','<svg data-pool="main" ');
   }
   R.fills.forEach(f=>{
     html+=`<div class="mat-h" style="border-left:4px solid ${matColor(f.matColorId||f.matId)}">Материал: ${esc(f.matName)} — ${f.sheets.length} ${plu(f.sheets.length,'лист','листа','листов')} ${fmt(f.pl)}×${fmt(f.pw)} · ${fillKindText(f.kind)}</div>`;
-    html+=cutmapSvg(f.sheets,{pl:f.pl,pw:f.pw,minoff:G.minoff}).replace('<svg ','<svg data-pool="'+f.matId+'" ');
+    html+=cutmapSvg(f.sheets,{pl:f.pl,pw:f.pw,minoff:G.minoff,noRot:matType(String(f.matId).replace(/^piece:/,''))==='slat'}).replace('<svg ','<svg data-pool="'+f.matId+'" ');
   });
   $('#cutmap').innerHTML=html;
   const placed=R.parts.length-R.failed.length;
@@ -5391,8 +5437,9 @@ function renderCuts(G,R){
 }
 function renderSpec(G,R){const S=G;
   const rows=[];
-  rows.push(['Панель '+S.presetName, R.sheetsTotal+' шт',
-    `${R.mainSheets} на плоскость`+(R.extraSheets?` + ${R.extraSheets} на откосы`:R.parts.length?', откосы из обрезков':'')]);
+  if(R.sheetsTotal>0||!R.fills.length)           // весь материал стены ушёл в другие материалы — строки «0 шт» нет
+    rows.push(['Панель '+S.presetName, R.sheetsTotal+' шт',
+      `${R.mainSheets} на плоскость`+(R.extraSheets?` + ${R.extraSheets} на откосы`:R.parts.length?', откосы из обрезков':'')]);
   R.fills.forEach(f=>{
     const nP=f.kind==='otkos'?f.sheets.reduce((a,sh)=>a+sh.otk.length,0):f.layouts.reduce((a,x)=>a+x.L.pieces.length,0);
     rows.push(['Панель '+f.matName, f.sheets.length+' шт', `${fillKindText(f.kind)} · ${nP} ${plu(nP,'деталь','детали','деталей')} · ${fmt(f.area,2)} м²`]);
@@ -5725,7 +5772,8 @@ function wallFaceModel(wallId){
     const r={x:o.x,y:o.y,w:o.w,h:o.h,op:i,label:`${kindLabel[o.kind]||'Проём'} ${i+1}`};
     if(o.fillMat){
       const mp=findMat(o.fillMat);
-      fills.push(Object.assign(r,{matId:o.fillMat,matName:matName(o.fillMat),color:hexOf(o.fillMat)||color,bandW:mp&&mp.pw>0?mp.pw:0}));
+      fills.push(Object.assign(r,{matId:o.fillMat,matName:matName(o.fillMat),color:hexOf(o.fillMat)||color,bandW:mp&&mp.pw>0?mp.pw:0,
+        lines:fillSeamLines(R,wi,i,o)}));
     } else if(!mountKeepsWall(o)) holes.push(r);
   });
   const graph=wallLedGraph(w0,G,cuts);
@@ -6286,6 +6334,7 @@ document.addEventListener('keydown',e=>{
   };
   function doRotate(svg,uid){
     if(!LAST) return;
+    if(svg.dataset.norot) return;              // рейка: рёбра идут вдоль листа, разворот на 90° невозможен
     const pool=svg.dataset.pool||'main';
     const it=findItem(pool,uid); if(!it||!canRotate(it)) return;
     const geo=geoOf(svg), r=rectOf(it);
@@ -7340,9 +7389,10 @@ document.addEventListener('keydown',e=>{
       cx.fillStyle=r.color; cx.fillRect(x,y,w,h);
       // полосы материала внутри зашитого проёма — как на схеме раскладки (в схеме для нейросети —
       // отдельным непрозрачным слоем линий, см. drawGuideLines)
-      if(r.bandW>0&&!guide){
+      if((r.lines||r.bandW>0)&&!guide){
         cx.strokeStyle=guide?'rgba(15,15,15,.55)':'rgba(0,0,0,.18)'; cx.lineWidth=Math.max(1,cw/1400);
-        for(let bx=r.x+r.bandW;bx<r.x+r.w-1;bx+=r.bandW){
+        if(r.lines) r.lines.forEach(sg=>{ cx.beginPath(); cx.moveTo(sg.x0*px,(m.H-sg.y0)*px); cx.lineTo(sg.x1*px,(m.H-sg.y1)*px); cx.stroke(); });
+        else for(let bx=r.x+r.bandW;bx<r.x+r.w-1;bx+=r.bandW){
           cx.beginPath(); cx.moveTo(bx*px,y); cx.lineTo(bx*px,y+h); cx.stroke();
         }
       }
@@ -7521,6 +7571,7 @@ document.addEventListener('keydown',e=>{
       // только внутри контура стены: линия по краю стены не вылезает на потолок/соседнюю стену
       lctx.beginPath(); q.forEach((p,i)=>i?lctx.lineTo(p.x,p.y):lctx.moveTo(p.x,p.y)); lctx.closePath(); lctx.clip();
       m.fills.forEach(r=>{
+        if(r.lines){ r.lines.forEach(sg=>marked(P(sg.x0,sg.y0),P(sg.x1,sg.y1),U*0.9,'rgba(10,10,10,.75)',U*1.7,.3)); return; }
         if(!(r.bandW>0)) return;
         for(let bx=r.x+r.bandW;bx<r.x+r.w-1;bx+=r.bandW){
           const a=P(bx,r.y), b=P(bx,r.y+r.h);

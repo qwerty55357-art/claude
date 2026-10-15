@@ -1,0 +1,159 @@
+{
+ "v": 3,
+ "walls": [
+  {
+   "id": 1,
+   "name": "Стена 1",
+   "autoName": true,
+   "W": 2440,
+   "H": 3020,
+   "ceil": 3240,
+   "rowH": 0,
+   "ops": [
+    {
+     "id": 3,
+     "kind": "window",
+     "w": 650,
+     "h": 3020,
+     "x": 0,
+     "y": 0,
+     "otkos": false,
+     "depth": 200,
+     "anchorH": "left",
+     "otkosMode": {},
+     "fillMat": "slat:5139",
+     "mountCut": true
+    },
+    {
+     "id": 4,
+     "kind": "window",
+     "w": 650,
+     "h": 3020,
+     "x": 1790,
+     "y": 0,
+     "otkos": false,
+     "depth": 200,
+     "anchorH": "left",
+     "otkosMode": {},
+     "fillMat": "slat:5139",
+     "mount": null,
+     "mountCut": true
+    }
+   ],
+   "opSeq": 4,
+   "seamsU": [
+    {
+     "id": 2,
+     "pos": 320
+    }
+   ],
+   "seamSeq": 2,
+   "vseamsU": [],
+   "vseamSeq": 3,
+   "jointModes": {
+    "h|320|600": "cap"
+   },
+   "pieceMats": {
+    "0|0|1": "bamboo29:5139",
+    "0|0|0": "bamboo29:5139",
+    "2|0|1": "bamboo29:5139",
+    "2|0|0": "bamboo29:5139",
+    "1|0|1": "bamboo29:5139",
+    "1|0|0": "bamboo29:5139"
+   },
+   "edges": {
+    "top": "none",
+    "bot": "none",
+    "left": "cap",
+    "right": "cap"
+   },
+   "cout": 0,
+   "cin": 0,
+   "slot": "N",
+   "hfree": false,
+   "vfree": true
+  }
+ ],
+ "active": 0,
+ "manual": {
+  "main": {},
+  "shelf": [],
+  "slat:5139": {},
+  "piece:bamboo29:5139": {}
+ },
+ "cornerLinks": [],
+ "cornerType": "out",
+ "ledCircuits": [
+  {
+   "id": 1,
+   "kind": "none",
+   "legs": [
+    {
+     "wall": 1,
+     "el": "free",
+     "id": 1,
+     "ax": 650,
+     "ay": 3020,
+     "bx": 650,
+     "by": 0
+    }
+   ]
+  },
+  {
+   "id": 2,
+   "kind": "none",
+   "legs": [
+    {
+     "wall": 1,
+     "el": "free",
+     "id": 2,
+     "ax": 1790,
+     "ay": 3020,
+     "bx": 1790,
+     "by": 0
+    }
+   ]
+  }
+ ],
+ "fields": {
+  "i-client": "Тест, рейка в проёмах",
+  "hseam-step": "1000",
+  "hseam-from": "l",
+  "vseam-step": "700",
+  "vseam-from": "l",
+  "i-preset": "bamboo29",
+  "i-colorway": "",
+  "i-profcolor": "black_matt",
+  "i-pl": "2900",
+  "i-pw": "1150",
+  "i-orient": "v",
+  "i-sym": true,
+  "i-brick": false,
+  "i-offcut": true,
+  "i-minoff": "300",
+  "i-kerf": "5",
+  "i-rot": false,
+  "i-splice": false,
+  "i-stock": "3000",
+  "i-joint-v": true,
+  "i-joint-h": true,
+  "i-edgeops": false,
+  "i-glue": "1.5",
+  "i-gluer": "0",
+  "p-panel": "5500",
+  "p-glue": "700",
+  "p-edge": "600",
+  "p-joint": "600",
+  "p-cout": "600",
+  "p-cin": "600",
+  "p-ledprof": "1700",
+  "p-ledjoint": "1700",
+  "p-led": "2200",
+  "p-psu": "1800",
+  "p-markup": "0"
+ },
+ "viz": {
+  "v": 2,
+  "photos": []
+ }
+}
