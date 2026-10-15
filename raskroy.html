@@ -411,6 +411,8 @@ tbody tr:hover td{background:var(--surface)}
         <div class="f"><label>Блок питания, шт</label><input type="number" id="p-psu" value="2200"></div>
       </div>
       <div class="row row-1"><div class="f"><label>Наценка / работа, %</label><input type="number" id="p-markup" value="0"></div></div>
+      <p class="hint" style="margin:10px 0 4px">Панели других материалов — заполнения проёмов, откосы и детали со своим материалом. Цена основного материала — в поле «Панель, шт» выше.</p>
+      <div class="row" id="price-mats"></div>
     </div>
   </section>
   <section class="sect closed" data-sect>
@@ -858,6 +860,7 @@ function syncColorwayUI(){
   const rotChk=$('#i-rot'); if(rotChk){ rotChk.disabled=isSlatId(t); rotChk.title=isSlatId(t)?'Для реечной панели недоступно: рёбра идут вдоль листа, деталь нельзя повернуть':''; }
   const cw=$('#i-colorway').value;
   $('#i-cw-btn').innerHTML=matPickBtnHtml(cw&&matType(cw)===t?cw:null,'— без расцветки (цвет типа) —','data-cwpick="1"',true);
+  if(typeof syncMatPrices==='function') syncMatPrices();
 }
 // Образец материала для промпта и архива: у расцветки — каталожные цвет/описание/фото; у скал — рельефный
 // образец типа (цвет скалы — белый гипс, а не цвет фото); у старых id без расцветки (тип) образца нет
@@ -872,7 +875,12 @@ function matSample(id){
 // collect() (внутри ЯДРА, читает форму) знает только тип из #i-preset — подставляем в название
 // материала расцветку (артикул), не трогая текст ядра
 { const collectBase=collect;
-  collect=function(){ const G=collectBase(); const m=findMat(curMatId()); if(m) G.presetName=m.name; if(isSlatId(curMatId())) G.rot=false; return G; }; }
+  collect=function(){ const G=collectBase(); const m=findMat(curMatId()); if(m) G.presetName=m.name; if(isSlatId(curMatId())) G.rot=false;
+    // цена панели по типу материала — для заполнений, откосов и деталей со своим материалом (ядро берёт её из G.price.mats);
+    // у основного материала цена одна — поле «Панель, шт»
+    G.price.mats={}; document.querySelectorAll('#price-mats input[data-pricemat]').forEach(e=>{ G.price.mats[e.dataset.pricemat]=parseFloat(e.value)||0; });
+    G.price.mats[matType(curMatId())]=G.price.panel;
+    return G; }; }
 // id из старого/чужого файла, которого нет в каталоге: расцветка → её тип, чужое → null
 function normMatId(id){
   if(!id) return id||null;
@@ -1643,14 +1651,18 @@ function renderLedDraw(G,R){
 function showLedCircuitMenu(ev,circId){
   const c=ledCircuits.find(x=>x.id===circId); if(!c) return;
   const menu=menuShell(ev,'LED-отрезок');
-  const setKind=k=>{ c.kind=k; closeMatMenu(); run(); };
+  // run() пересоздаёт объекты контуров (чистка ножек), а клик по пункту меню сам снимает фокус с поля панели и тем самым
+  // запускает отложенное событие change → run() ДО обработчика пункта: захваченный c уже «старый», выбор молча терялся.
+  // Поэтому контур ищем по id в момент выбора
+  const cur=()=>ledCircuits.find(x=>x.id===circId)||c;
+  const setKind=k=>{ cur().kind=k; closeMatMenu(); run(); };
   menuBtn(menu,'Стартовый профиль',c.kind==='start',()=>setKind('start'));
   menuBtn(menu,'Соединительный профиль',c.kind==='joint',()=>setKind('joint'));
   menuBtn(menu,'Без профиля',c.kind==='none',()=>setKind('none'));
   menuDivider(menu,'');
   menuBtn(menu,'Удалить отрезок',false,()=>{
     const byId=new Map(walls.map(w=>[w.id,w]));
-    c.legs.forEach(l=>{ const w=byId.get(+l.wall); if(w) legRawClear(w,l); });
+    cur().legs.forEach(l=>{ const w=byId.get(+l.wall); if(w) legRawClear(w,l); });
     ledCircuits=ledCircuits.filter(x=>x.id!==circId);
     closeMatMenu(); run();
   },true);
@@ -2206,6 +2218,8 @@ $('#wall-compass').addEventListener('click',e=>{
 /* ===================== ГЕОМЕТРИЯ ===================== */
 // реечная панель: рёбра идут вдоль листа, деталь нельзя развернуть на 90° — «однотонная панель» (поворот) к ней неприменима
 const isSlatId=id=>String(id||'').split(':')[0]==='slat';
+// цена листа материала (заполнение/откосы/детали со своим материалом): по типу из G.price.mats, а без неё (старые вызовы, тесты) — цена пресета
+const matPriceOf=(G,m)=>{ const v=G.price&&G.price.mats&&G.price.mats[m.type||m.id]; return (typeof v==='number'&&Number.isFinite(v))?v:m.price; };
 // проём с заполнением (fillMat) тянется на весь размер стены ВДОЛЬ раскладки (колонка во всю высоту при
 // вертикальной раскладке, ряд во всю ширину при горизонтальной) — это не «дыра», а полоса другого материала в
 // общем поле стены. Стыки стены (ручные отметки, «первый стык») по умолчанию продолжаются и в ней: линия шва идёт
@@ -3914,7 +3928,7 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
       manual[mat.id]=manual[mat.id]||{};
       const manF=applyManual(sheetsM,manual[mat.id],Gm,mat.pl,mat.pw,manual.shelf.filter(s=>s.pool===mat.id));
       man.moved+=manF.moved; man.dropped+=manF.dropped;
-      fills.push({matId:mat.id,matName:mat.name,pl:mat.pl,pw:mat.pw,price:mat.price,
+      fills.push({matId:mat.id,matName:mat.name,pl:mat.pl,pw:mat.pw,price:matPriceOf(G,mat),
                   tubesPerSheet:mat.tubesPerSheet,sheets:sheetsM,layouts:fillLayouts,area,shelf:manF.shelf,kind:'opening'});
     });
   }
@@ -3964,7 +3978,7 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
       manual[poolId]=manual[poolId]||{};
       const manF=applyManual(sheetsM,manual[poolId],Gm,mat.pl,mat.pw,manual.shelf.filter(s=>s.pool===poolId));
       man.moved+=manF.moved; man.dropped+=manF.dropped;
-      fills.push({matId:poolId,matColorId:mat.id,matName:mat.name,pl:mat.pl,pw:mat.pw,price:mat.price,
+      fills.push({matId:poolId,matColorId:mat.id,matName:mat.name,pl:mat.pl,pw:mat.pw,price:matPriceOf(G,mat),
                   tubesPerSheet:mat.tubesPerSheet,sheets:sheetsM,layouts:fillLayouts,area,shelf:manF.shelf,kind:'piece'});
     });
   }
@@ -3993,7 +4007,7 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
       manual[poolId]=manual[poolId]||{};
       const manF=applyManual(sheetsM,manual[poolId],Gm,mat.pl,mat.pw,manual.shelf.filter(s=>s.pool===poolId));
       man.moved+=manF.moved; man.dropped+=manF.dropped;
-      fills.push({matId:poolId,matColorId:mat.id,matName:mat.name,pl:mat.pl,pw:mat.pw,price:mat.price,
+      fills.push({matId:poolId,matColorId:mat.id,matName:mat.name,pl:mat.pl,pw:mat.pw,price:matPriceOf(G,mat),
                   tubesPerSheet:mat.tubesPerSheet,sheets:sheetsM,area,shelf:manF.shelf,kind:'otkos'});
       otkosOverrideFailed.push(...otO.failed);
     });
@@ -5701,7 +5715,7 @@ function renderCards(G,R){const S=G;
       <div class="card-sub">${R.mainSheets} на плоскость${R.extraSheets?` + ${R.extraSheets} на откосы`:(R.parts.length?' · откосы из обрезков':'')}</div></div>
     <div class="card"><div class="card-k">Площадь отделки</div>
       <div class="card-v">${fmt(R.netArea+R.otkosArea,2)}<small>м²</small></div>
-      <div class="card-sub">стена ${fmt(R.netArea,2)} · откосы ${fmt(R.otkosArea,2)}</div></div>
+      <div class="card-sub">стена ${fmt(R.netArea,2)} · откосы ${fmt(R.otkosArea,2)}${R.fillArea>0?` · заполнения ${fmt(R.fillArea,2)} (в итог не входят)`:''}</div></div>
     <div class="card"><div class="card-k">Чистый отход</div>
       <div class="card-v" style="color:${R.waste>0.2?'var(--warn)':'var(--paper)'}">${fmt(R.waste*100,1)}<small>%</small></div>
       <div class="card-sub">годных обрезков ${fmt(R.offArea,2)} м² остаётся на складе</div></div>
@@ -5882,6 +5896,15 @@ function run(){
     $('#notes').innerHTML=`<div class="note err"><b>Ввод</b><span>Заполните размеры стен и листа.</span></div>`;
     return;
   }
+  // защита от опечаток вроде лишних нулей (стена 4 200 000 000 мм): отрисовка растёт линейно с числом листов, и страница
+  // на такой стене просто зависала. Реальные размеры — на порядки меньше этих пределов
+  const SIZE_MAX=100000, SIZE_MIN=10;
+  const opBig=o=>['w','h','x','y','depth','otkosOverlap'].some(k=>Math.abs(+o[k]||0)>SIZE_MAX);
+  const posBig=a=>(a||[]).some(sm=>Math.abs(+(sm&&sm.pos)||0)>SIZE_MAX);
+  if(walls.some(w=>w.W>SIZE_MAX||w.H>SIZE_MAX||w.ceil>SIZE_MAX||(w.ops||[]).some(opBig)||posBig(w.seamsU)||posBig(w.vseamsU))||G.pw>SIZE_MAX||G.pl>SIZE_MAX||G.pw<SIZE_MIN||G.pl<SIZE_MIN){
+    $('#notes').innerHTML=`<div class="note err"><b>Ввод</b><span>Размеры вне допустимых пределов: стены, проёмы, откосы и стыки — не больше ${fmt(SIZE_MAX)} мм, лист — от ${SIZE_MIN} до ${fmt(SIZE_MAX)} мм. Проверьте, нет ли лишних нулей.</span></div>`;
+    return;
+  }
   const R=computeProject(G,walls,manualMoves,cornerLinks,ledCircuits);
   LAST={G,R};
   // чистим верстак от ссылок на детали, которых больше не существует (например, после правки проёмов)
@@ -6052,6 +6075,9 @@ $('#i-cw-btn').addEventListener('click',e=>{
     $('#i-colorway').value=(id&&id!==t)?id:''; closeMatMenu(); syncColorwayUI(); run();
   }});
 });
+// цены панелей по типам материалов (для заполнений/откосов/деталей со своим материалом); строка основного типа скрыта — у него цена в «Панель, шт»
+$('#price-mats').innerHTML=PRESET_TYPES.filter(t=>t.id!=='custom').map(t=>`<div class="f" data-pricerow="${t.id}"><label>${esc(t.name)}</label><input type="number" id="p-mat-${t.id}" data-pricemat="${t.id}" data-default="${t.price}" value="${t.price}"></div>`).join('');
+function syncMatPrices(){ const main=matType(curMatId()); document.querySelectorAll('#price-mats [data-pricerow]').forEach(r=>{ r.style.display=r.dataset.pricerow===main?'none':''; }); }
 $('#i-profcolor').innerHTML=PROFILE_COLORS.map(c=>`<option value="${c.k}">${c.name}${c.k==='alu'?' (по умолчанию)':''}</option>`).join('');
 $('#i-ledtemp').innerHTML=LED_TEMPS.map(t=>`<option value="${t.k}"${t.k===4000?' selected':''}>${t.name}</option>`).join('');
 syncColorwayUI();
@@ -6109,6 +6135,7 @@ function applySnapshot(o,fromFile){
   if(!(o.v===3 && Array.isArray(o.walls) && o.walls.length)) throw new Error('неподдерживаемый формат файла');
   $('#i-colorway').value='';                                // старые файлы поля расцветки не знали
   $('#i-profcolor').value='alu';                            // и цвета профилей — по умолчанию обычный алюминий
+  document.querySelectorAll('#price-mats input').forEach(e=>{ e.value=e.dataset.default; });   // и цен других материалов — по умолчанию цена пресета
   Object.entries(o.fields||{}).forEach(([id,v])=>{
     if(WALL_FIELDS.includes(id)) return;                    // стеновые поля берём из walls
     if(id.startsWith('viz-')) return;                       // старые файлы писали сюда и поля фото-раздела
@@ -7155,13 +7182,20 @@ document.addEventListener('keydown',e=>{
     if(synth) redraw(); else matchLoadedPhoto();
     historyCommit();
   }
+  function failPhoto(file){
+    vizNotice={cls:'warn',text:`Не удалось открыть «${file.name||'файл'}» как изображение. Подойдут JPG, PNG, WebP. Фото в формате HEIC (iPhone) сохраните как JPG или сделайте скриншот — этот браузер такой формат не читает.`};
+    updateStep();
+  }
   function loadPhoto(file){
     const reader=new FileReader();
     reader.onload=ev=>{
       const img=new Image();
       img.onload=()=>acceptImage(img,ev.target.result,file.name||'',false);
+      // файл не картинка или формат браузеру незнаком (HEIC с iPhone в Chrome): раньше не происходило НИЧЕГО — без сообщения
+      img.onerror=()=>failPhoto(file);
       img.src=ev.target.result;
     };
+    reader.onerror=()=>failPhoto(file);
     reader.readAsDataURL(file);
   }
   /* ---- МАКЕТ КОМНАТЫ вместо фото: у клиента нет снимка — программа рисует простой серый макет пустой
