@@ -4252,12 +4252,15 @@ function schemeFor(G,R,wi){
     if(tw(onm,fs*0.8)<o.w*0.9 && o.h>fs*2.4){
       const ink=o.fillMat?'var(--ink-face)':'var(--muted)';
       const halo=o.fillMat?matColor(o.fillMat):'var(--void)';
-      g+=txt(x+o.w/2,y+o.h/2,onm,fs*0.8,ink,halo);
-      g+=txt(x+o.w/2,y+o.h/2+fs,`${fmt(o.w)}×${fmt(o.h)}`,fs*0.7,ink,halo);
+      // заполнение с подписанными деталями: название проёма уходит к верхнему краю — по центру стоят подписи деталей
+      const hasPieceLabels=!!(o.fillMat&&fillSeamLines(R,wi,i,o)&&o.h>fs*12);
+      const ly=hasPieceLabels?y+fs*2.2:y+o.h/2;
+      g+=txt(x+o.w/2,ly,onm,fs*0.8,ink,halo);
+      g+=txt(x+o.w/2,ly+fs,`${fmt(o.w)}×${fmt(o.h)}`,fs*0.7,ink,halo);
       if(o.fillMat){
         const mp=findMat(o.fillMat);
         if(mp&&o.h>fs*4.4&&tw(mp.name,fs*0.58)<o.w*0.92)
-          g+=txt(x+o.w/2,y+o.h/2+fs*2,mp.name,fs*0.58,ink,halo);
+          g+=txt(x+o.w/2,ly+fs*2,mp.name,fs*0.58,ink,halo);
       }
     }
     if(o.otkos){
@@ -4374,6 +4377,34 @@ function schemeFor(G,R,wi){
       g+=txt(cx,cy+fs*1.05,dims,fs*0.66,'var(--ink-face)','var(--straw-face)');
     if(hLim>fs*4 && src && tw(src,fs*0.62)<wLim*0.94)
       g+=txt(cx,cy+fs*1.95,src,fs*0.62,p.fromOffcut?'var(--alu-deep)':'var(--ink-face)','var(--straw-face)');
+  });
+
+  // подписи деталей заполнения проёма (рейка, мрамор…): то же имя, что на карте раскроя (О1·П2.2), размер и лист —
+  // иначе рейки на схеме остаются безымянными и их не найти среди листов карты раскроя
+  S.ops.forEach((o,i)=>{
+    if(!o.fillMat) return;
+    const fl=(R.fills.find(x=>x.kind==='opening'&&x.layouts.some(l=>l.wi===wi&&l.k===i))||{layouts:[]}).layouts.find(l=>l.wi===wi&&l.k===i);
+    if(!fl) return;
+    const Lf=fl.L;
+    Lf.pieces.forEach(p=>{
+      const st=Lf.strips[p.strip]; if(!st) return;
+      const axis=(Lf.vert?o.x:o.y)+st.start+st.w/2, spot=(Lf.vert?o.y:o.x)+(p.from+p.to)/2, room=p.len;
+      const wLim=Lf.vert?st.w:room, hLim=Lf.vert?room:st.w;
+      if(hLim<fs*1.1 || wLim<fs*0.9) return;
+      const cx=Lf.vert?axis:spot, cy=Lf.vert?H-spot:H-axis;
+      const dims=`${fmt(p.w)}×${fmt(p.len)}`, src=p.sheet?` · лист ${p.sheet}`:'';
+      const ink='var(--ink-face)', halo=matColor(o.fillMat);
+      if(tw(p.label,fs*0.9)<=wLim*0.94){
+        g+=txt(cx,cy,p.label,fs*0.9,ink,halo,{bold:1});
+        if(hLim>fs*2.7&&tw(dims,fs*0.66)<wLim*0.94) g+=txt(cx,cy+fs*1.05,dims,fs*0.66,ink,halo);
+        if(hLim>fs*4&&src&&tw(src.slice(3),fs*0.62)<wLim*0.94) g+=txt(cx,cy+fs*1.95,src.slice(3),fs*0.62,ink,halo);
+        return;
+      }
+      // узкая деталь (рейка): подпись вдоль неё — имя, а если помещается, то и размер и лист
+      const f2=Math.min(fs*0.7,wLim*0.42);
+      const full=`${p.label} · ${dims}${src}`, cap=tw(full,f2)<hLim*0.92?full:p.label;
+      if(f2>=fs*0.2&&tw(cap,f2)<hLim*0.92) g+=txt(cx,cy,cap,f2,ink,halo,{bold:1,rot:-90});
+    });
   });
 
   // размеры снизу: полосы -> привязки проёмов -> габарит
