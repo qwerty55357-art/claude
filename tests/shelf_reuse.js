@@ -28,7 +28,7 @@ let fails=0; const ok=(c,w)=>{ if(!c){ fails++; console.log('✗',w); } else con
   ok(before&&before.sheet===12,'деталь О2·П4.1 лежит на последнем (12-м) листе: '+JSON.stringify(before));
   // переносим её на место сверху листа 11, освободившееся после верстака
   const el=p.locator(sel+` [data-cmdrag="${await uidOf('О2·П4.1')}"]`).first(); await el.scrollIntoViewIfNeeded();
-  await drag(el,async()=>p.evaluate(s=>{ const svg=document.querySelector(s), d=svg.dataset; const q=svg.createSVGPoint(); q.x=10*+d.cw+(+d.pw)/2; q.y=160; const r=q.matrixTransform(svg.getScreenCTM()); return {x:r.x,y:r.y}; },sel));
+  await drag(el,async()=>p.evaluate(s=>{ const svg=document.querySelector(s), d=svg.dataset; const q=svg.createSVGPoint(); const i=10, cols=+d.cols; /* лист 11 (индекс 10): колонка и ряд зависят от ширины карты */ q.x=(i%cols)*+d.cw+(+d.pw)/2; q.y=Math.floor(i/cols)*+d.ch+160; const r=q.matrixTransform(svg.getScreenCTM()); return {x:r.x,y:r.y}; },sel));
   const after=await where('О2·П4.1');
   ok(after&&after.sheet===11&&after.y===0&&after.n===11,'деталь встала на освободившееся место листа 11 (и лишний лист исчез): '+JSON.stringify(after));
   ok(await p.locator('#shelf-items .shelf-piece').count()===4,'на верстаке по-прежнему четыре детали');

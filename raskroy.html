@@ -4664,7 +4664,11 @@ function cutmapSvg(sheets,S){
   // 1:9 — на экране она крошечная, а в печати растягивается на ширину страницы вместе с подписями.
   // Для таких листов — до 12 колонок в ряд и подписи, вписанные в ширину колонки
   const narrow=S.pw<S.pl*0.2;
-  const cols=Math.min(sheets.length,narrow?12:5), rows=Math.ceil(sheets.length/cols);
+  // число колонок зависит от ширины, которую карта реально занимает на экране (S.boxW): колонка с зазором не уже
+  // minPx пикселей на лист, иначе детали и подписи не прочесть (раньше всегда 5 колонок — с липким верстаком справа
+  // карта сузилась, и листы стали миниатюрными). Узкая карта — меньше колонок и больше прокрутки вниз
+  const minPx=narrow?58:190, fit=S.boxW>0?Math.floor(S.boxW/(minPx*1.3)):Infinity;
+  const cols=Math.max(1,Math.min(sheets.length,narrow?12:5,fit)), rows=Math.ceil(sheets.length/cols);
   const gapX=S.pw*0.30, gapY=S.pl*0.13;
   const cw=S.pw+gapX, ch=S.pl+gapY;
   const fs=S.pl/28;
@@ -4829,20 +4833,28 @@ function cutmapSvg(sheets,S){
     });
   });
   const vb=`${-S.pw*0.08} ${-fs*2} ${cols*cw} ${rows*ch+fs*1.5}`;
-  return `<svg viewBox="${vb}" style="width:100%;max-height:82vh" role="img" aria-label="Карта раскроя листов" data-cw="${cw}" data-ch="${ch}" data-cols="${cols}" data-n="${sheets.length}" data-pl="${S.pl}" data-pw="${S.pw}"${S.noRot?' data-norot="1"':''}>${g}</svg>`;
+  // ограничение высоты — только для одного ряда листов: у нескольких рядов оно ужимало бы всю карту до миниатюры
+  return `<svg viewBox="${vb}" style="width:100%${rows===1?';max-height:82vh':''}" role="img" aria-label="Карта раскроя листов" data-cw="${cw}" data-ch="${ch}" data-cols="${cols}" data-n="${sheets.length}" data-pl="${S.pl}" data-pw="${S.pw}"${S.noRot?' data-norot="1"':''}>${g}</svg>`;
 }
+let lastCutmapW=0;
+// окно изменили (или верстак переехал наверх на узком экране) — карту перерисовываем под новую ширину
+{ let t=null; window.addEventListener('resize',()=>{ clearTimeout(t); t=setTimeout(()=>{
+    const el=document.getElementById('cutmap'); if(!el||!LAST||!LAST.R) return;
+    if(Math.abs(el.clientWidth-lastCutmapW)>40) renderCutmap(LAST.G,LAST.R);
+  },250); }); }
 function renderCutmap(G,R){
   if(!R.sheets.length && !R.fills.length){ $('#cutmap').innerHTML='<p class="hint">Нет деталей для раскроя.</p>'; return; }
   const multiMat=R.fills.length>0;
+  const boxW=$('#cutmap').clientWidth||0; lastCutmapW=boxW;   // ширина карты на экране — от неё зависит число колонок листов
   let html='';
   if(R.sheets.length){
     if(multiMat) html+=`<div class="mat-h" style="border-left:4px solid ${matColor(curMatId())}">Материал: ${esc(G.presetName)} — ${R.sheets.length} ${plu(R.sheets.length,'лист','листа','листов')} ${fmt(G.pl)}×${fmt(G.pw)}</div>`;
-    html+=cutmapSvg(R.sheets,{pl:G.pl,pw:G.pw,minoff:G.minoff,noRot:matType(curMatId())==='slat'}).replace('<svg ','<svg data-pool="main" ');
+    html+=cutmapSvg(R.sheets,{boxW,pl:G.pl,pw:G.pw,minoff:G.minoff,noRot:matType(curMatId())==='slat'}).replace('<svg ','<svg data-pool="main" ');
   }
   R.fills.forEach(f=>{
     html+=`<div class="mat-h" style="border-left:4px solid ${matColor(f.matColorId||f.matId)}">Материал: ${esc(f.matName)} — ${f.sheets.length} ${plu(f.sheets.length,'лист','листа','листов')} ${fmt(f.pl)}×${fmt(f.pw)} · ${fillKindText(f.kind)}</div>`;
     // все детали пула лежат на верстаке — листов нет, рисовать нечего (иначе SVG с нулевым размером и NaN в viewBox)
-    html+=f.sheets.length?cutmapSvg(f.sheets,{pl:f.pl,pw:f.pw,minoff:G.minoff,noRot:matType(String(f.matId).replace(/^piece:/,''))==='slat'}).replace('<svg ','<svg data-pool="'+f.matId+'" ')
+    html+=f.sheets.length?cutmapSvg(f.sheets,{boxW,pl:f.pl,pw:f.pw,minoff:G.minoff,noRot:matType(String(f.matId).replace(/^piece:/,''))==='slat'}).replace('<svg ','<svg data-pool="'+f.matId+'" ')
       :'<p class="hint">Все детали этого материала лежат на верстаке — листов не нужно. Верните их кнопкой ↩ на верстаке.</p>';
   });
   $('#cutmap').innerHTML=html;
