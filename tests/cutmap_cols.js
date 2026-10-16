@@ -16,16 +16,25 @@ let fails=0; const ok=(c,w)=>{ if(!c){ fails++; console.log('✗',w); } else con
   for(const w of [1920,1500,1280,1024]){
     await p.setViewportSize({width:w,height:900}); await p.waitForTimeout(700);
     const s=await probe();
-    ok(s.sheetPx>=100&&s.sheetPx<=175,'окно '+w+': лист на экране ≈ '+Math.round(s.sheetPx)+' px — читаемо и не огромно (колонок '+s.cols+', карта '+s.box+' px)');
+    ok(s.sheetPx>=105&&s.sheetPx<=200,'окно '+w+': лист на экране ≈ '+Math.round(s.sheetPx)+' px — читаемо и не огромно (колонок '+s.cols+', карта '+s.box+' px)');
     ok(s.n<=s.cols?s.maxH!=='':s.maxH==='','окно '+w+': ограничение высоты '+(s.n<=s.cols?'у одного ряда есть':'у нескольких рядов снято'));
   }
   await p.setViewportSize({width:1920,height:1080}); await p.waitForTimeout(700);
   const wide=await probe(); await p.setViewportSize({width:1280,height:1080}); await p.waitForTimeout(800); const narrow=await probe();
   ok(wide.cols>narrow.cols,'при сужении окна карта перерисовалась: колонок '+wide.cols+' → '+narrow.cols);
+  // на типичном экране (1280) бамбук — 3 листа в ряд; чем уже лист, тем больше их в ряду: мрамор ≈ бамбук, скала малая больше, рейка ещё больше
+  await p.setViewportSize({width:1280,height:900}); await p.waitForTimeout(600);
+  const colsOf=async preset=>{ await p.selectOption('#i-preset',preset); await p.waitForTimeout(700); return p.evaluate(()=>+document.querySelector('#cutmap svg[data-pool="main"]').dataset.cols); };
+  const cb=await colsOf('bamboo29'), cm=await colsOf('marble'), cs=await colsOf('rockS'), cl=await colsOf('slat');
+  ok(cb===3,'бамбук на экране 1280: 3 листа в ряд ('+cb+')');
+  ok(cm===3,'мрамор (чуть шире бамбука): тоже 3 ('+cm+')');
+  ok(cs>cb,'скала 600 мм — в ряду больше, чем бамбука: '+cs+' > '+cb);
+  ok(cl>cs&&cl>=8,'рейка 150 мм — ещё больше: '+cl+' (≥ 8)');
+  await p.selectOption('#i-preset','bamboo29'); await p.waitForTimeout(700);
   // верстак узкий, а одиночный лист (заполнение мрамором) не растягивается на всю карту
   const geo=await p.evaluate(()=>{ const z=document.querySelector('#shelf-zone').getBoundingClientRect(); const sv=document.querySelector('#cutmap svg[data-pool="marble"]'); const r=sv.getBoundingClientRect(); return {shelf:z.width,one:r.width/1.3}; });
-  ok(geo.shelf<=160,'верстак узкий: '+Math.round(geo.shelf)+' px');
-  ok(geo.one<=180,'один лист заполнения не огромный: ≈ '+Math.round(geo.one)+' px');
+  ok(geo.shelf<=130,'верстак узкий: '+Math.round(geo.shelf)+' px');
+  ok(geo.one<=200,'один лист заполнения не огромный: ≈ '+Math.round(geo.one)+' px');
   // перетаскивание детали по-прежнему попадает на нужное место при любом числе колонок
   const uid=await p.evaluate(()=>LAST.R.sheets[0].list[0]._uid);
   const el=p.locator('#cutmap svg[data-pool="main"] [data-cmdrag="'+uid+'"]').first(); await el.scrollIntoViewIfNeeded();

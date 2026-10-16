@@ -88,7 +88,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 @media print{ .shelf-zone{display:none !important} }
 /* карта раскроя + верстак: верстак — липкая колонка справа, остаётся на экране, пока листаете листы (на узком экране
    уходит наверх и прилипает под шапкой). --topbar-h выставляет скрипт по высоте шапки */
-.cutmap-layout{display:grid;grid-template-columns:minmax(0,1fr) 148px;gap:12px;align-items:start}
+.cutmap-layout{display:grid;grid-template-columns:minmax(0,1fr) 124px;gap:12px;align-items:start}
 .cutmap-layout>.shelf-zone{position:sticky;top:calc(var(--topbar-h,76px) + 12px);margin-bottom:0;z-index:20;max-height:calc(100vh - var(--topbar-h,76px) - 36px);overflow:auto}
 @media (max-width:1100px){
   .cutmap-layout{grid-template-columns:minmax(0,1fr)}
@@ -4665,12 +4665,13 @@ function cutmapSvg(sheets,S){
   // 1:9 — на экране она крошечная, а в печати растягивается на ширину страницы вместе с подписями.
   // Для таких листов — до 12 колонок в ряд и подписи, вписанные в ширину колонки
   const narrow=S.pw<S.pl*0.2;
-  // число колонок зависит от ширины, которую карта реально занимает на экране (S.boxW): колонка с зазором не уже
-  // minPx пикселей на лист, иначе детали и подписи не прочесть (раньше всегда 5 колонок — с липким верстаком справа
-  // карта сузилась, и листы стали миниатюрными). Ширина самой карты ограничена сверху (maxPx на лист) — иначе один лист или
-  // пара листов растягивались бы на весь экран. Узкая карта — меньше колонок и больше прокрутки вниз
-  const minPx=narrow?58:105, maxPx=narrow?90:170, fit=S.boxW>0?Math.floor(S.boxW/(minPx*1.3)):Infinity;
-  const cols=Math.max(1,Math.min(sheets.length,narrow?12:5,fit)), rows=Math.ceil(sheets.length/cols);
+  // число колонок зависит от ширины, которую карта реально занимает на экране (S.boxW), и от ширины листа: целевая ширина листа
+  // на экране пропорциональна его ширине в мм (бамбук 1150 мм ≈ 150 px → 3 листа в ряд на типичном экране, скала 600 мм ≈ 80 px →
+  // 5, рейка — не уже 58 px → 8–12), но не меньше минимума, при котором ещё читаются подписи. Ширина самой карты ограничена
+  // сверху — один лист или пара не растягиваются на весь экран
+  const sheetPx=Math.max(narrow?58:80, S.pw*0.13);
+  const fit=S.boxW>0?Math.floor(S.boxW/(sheetPx*1.3)+0.2):(narrow?12:3);
+  const cols=Math.max(1,Math.min(sheets.length,narrow?12:(S.pw>=1000?5:8),fit)), rows=Math.ceil(sheets.length/cols);
   const gapX=S.pw*0.30, gapY=S.pl*0.13;
   const cw=S.pw+gapX, ch=S.pl+gapY;
   const fs=S.pl/28;
@@ -4836,7 +4837,7 @@ function cutmapSvg(sheets,S){
   });
   const vb=`${-S.pw*0.08} ${-fs*2} ${cols*cw} ${rows*ch+fs*1.5}`;
   // ограничение высоты — только для одного ряда листов: у нескольких рядов оно ужимало бы всю карту до миниатюры
-  return `<svg viewBox="${vb}" style="width:100%;max-width:${Math.round(cols*1.3*maxPx)}px${rows===1?';max-height:82vh':''}" role="img" aria-label="Карта раскроя листов" data-cw="${cw}" data-ch="${ch}" data-cols="${cols}" data-n="${sheets.length}" data-pl="${S.pl}" data-pw="${S.pw}"${S.noRot?' data-norot="1"':''}>${g}</svg>`;
+  return `<svg viewBox="${vb}" style="width:100%;max-width:${Math.round(cols*1.3*sheetPx*1.2)}px${rows===1?';max-height:82vh':''}" role="img" aria-label="Карта раскроя листов" data-cw="${cw}" data-ch="${ch}" data-cols="${cols}" data-n="${sheets.length}" data-pl="${S.pl}" data-pw="${S.pw}"${S.noRot?' data-norot="1"':''}>${g}</svg>`;
 }
 let lastCutmapW=0;
 // окно изменили (или верстак переехал наверх на узком экране) — карту перерисовываем под новую ширину
