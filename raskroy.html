@@ -884,6 +884,7 @@ function matSample(id){
     // у основного материала цена одна — поле «Панель, шт»
     G.price.mats={}; document.querySelectorAll('#price-mats input[data-pricemat]').forEach(e=>{ G.price.mats[e.dataset.pricemat]=parseFloat(e.value)||0; });
     G.price.mats[matType(curMatId())]=G.price.panel;
+    G.matId=curMatId();   // ядро сравнивает с ним материал детали угла (c.mat): тот же, что основной — деталь в общем пуле
     return G; }; }
 // id из старого/чужого файла, которого нет в каталоге: расцветка → её тип, чужое → null
 function normMatId(id){
@@ -904,6 +905,7 @@ function usedMatIds(){
     Object.values(w.pieceMats||{}).forEach(x=>x&&ids.push(x));
     (w.ops||[]).forEach(o=>{ if(o.fillMat) ids.push(o.fillMat); Object.values(o.otkosMat||{}).forEach(x=>x&&ids.push(x)); });
   });
+  cornerLinks.forEach(c=>{ if((c.kind||'sharp')==='radius'&&c.mat) ids.push(c.mat); });   // свой материал детали радиусного угла
   return [...new Set(ids)];
 }
 function refreshCondColors(){
@@ -959,7 +961,8 @@ const MATERIAL_TRAITS={
 // версия правил сборки промпта — идёт в JSON, чтобы результат генерации можно было связать с тем,
 // каким был промпт (менять при любой правке текста правил)
 const PROMPT_VERSION='2026-10-03.1';
-const fillKindText=(kind,short)=>kind==='piece'?(short?'материал детали':'материал деталей стены')
+// arcs — в пуле есть гнутые детали радиусных углов (свой материал угла)
+const fillKindText=(kind,short,arcs)=>kind==='piece'?(short?(arcs?'материал детали угла':'материал детали'):(arcs?'материал деталей стены и углов':'материал деталей стены'))
   :kind==='otkos'?(short?'материал откоса':'материал откосов')
   :(short?'заполнение':'заполнение проёмов');
 const PSU_NOMINALS = [12,24,36,48,60,100,150,200,250,300,350,400,500];
@@ -2174,6 +2177,15 @@ function numRowMenu(menu,label,val,onChange){
   row.querySelector('input').addEventListener('input',e=>onChange(parseFloat(e.target.value)||0));
   menu.appendChild(row);
 }
+// выбор материала гнутой детали радиусного угла (как «материал детали» на схеме стены): отдельный пул листов этого материала
+function showCornerMatMenu(ev,cornerId){
+  const c=cornerLinks.find(x=>x.id===cornerId); if(!c) return;
+  const menu=menuShell(ev,'Материал детали угла',230);
+  matPickerInto(menu,{cur:c.mat||null,noneLabel:'— как у проекта (по умолчанию) —',onPick:id=>{
+    c.mat=(id&&id!==curMatId())?id:null;
+    closeMatMenu(); renderWallCompass(); renderCornerScheme(); run();
+  }});
+}
 function compassEdit(ev,cornerId){
   const c=cornerLinks.find(x=>x.id===cornerId); if(!c) return;
   const kind=c.kind||'sharp';
@@ -2197,6 +2209,9 @@ function compassEdit(ev,cornerId){
     const hasB=c.bw!==''&&c.bw!=null;
     numRowMenu(menu,hasB?'Плоская зона у стены A, мм':'Плоская зона, мм',c.flatA||0,v=>{ c.flatA=Math.max(0,v); run(); renderCornerScheme(); });
     if(hasB) numRowMenu(menu,'Плоская зона у стены B, мм',c.flatB||0,v=>{ c.flatB=Math.max(0,v); run(); renderCornerScheme(); });
+    menuDivider(menu,'Материал детали угла');
+    const own=c.mat&&c.mat!==curMatId()?c.mat:null;
+    menuBtn(menu,own?((findMat(own)||{}).name||own):'Как у проекта (по умолчанию)',!!own,()=>{ closeMatMenu(); showCornerMatMenu(ev,c.id); });
   }
   del(menu);
 }
@@ -3499,10 +3514,15 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
     // деталь угла остаётся плоским прямоугольником — гнутая зона (arcW) посередине, плоские зоны
     // (flatA/flatB) пристроены по краям тем же материалом, без стыка внутри самой детали
     const arcWTotal=arcW+flatA+flatB;
+    // свой материал детали угла (c.mat, пикер в меню угла): гнутая деталь кроится из листов ЭТОГО материала (свой пул, как у
+    // детали стены с индивидуальным материалом) — ширину и длину листа берём у него; если он совпадает с основным (G.matId) —
+    // обычная деталь в общем пуле
+    const cm=(c.mat&&c.mat!==G.matId)?PRESETS.find(x=>x.id===c.mat):null;
+    const pwC=cm?cm.pw:G.pw, plC=cm?cm.pl:G.pl;
     // ширину детали (arcWTotal) разрезать нельзя — зона изгиба физически цельная поперёк; высоту,
     // в отличие от ширины, можно (см. cornerHeightBounds ниже — тот же приём, что у стыков стены)
-    if(!(arcWTotal<=G.pw+0.5)){
-      cornerIssues.push({id:c.id,msg:`ширина детали угла ${fmt(arcWTotal)} мм не помещается в лист шириной ${fmt(G.pw)} мм — нужен материал шире либо меньший радиус/угол/плоские зоны`});
+    if(!(arcWTotal<=pwC+0.5)){
+      cornerIssues.push({id:c.id,msg:`ширина детали угла ${fmt(arcWTotal)} мм не помещается в лист шириной ${fmt(pwC)} мм${cm?` (материал угла: ${cm.name})`:''} — нужен материал шире либо меньший радиус/угол/плоские зоны`});
       return;
     }
     // подпись детали дуги — вместе с номерами стен (как «Угол A-B» в компасе): без них два разных
@@ -3520,7 +3540,7 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
     const seamPts=b
       ? aSeamPts.filter(p=>(b.seamsU||[]).some(s=>!s.nat&&Math.abs(s.pos-p)<2))
       : aSeamPts;
-    const bounds=cornerHeightBounds(a.H,G.pl,seamPts);
+    const bounds=cornerHeightBounds(a.H,plC,seamPts);
     const em=v=>edgeMode(v);
     const jm=pos=>{
       const key=jointSegKey('h',pos,0);
@@ -3545,7 +3565,7 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
       const len=y1-y0;
       if(len<=0.5) continue;
       arcPieces.push({len,w:arcWTotal,cuts:[],label:cornerLabel+(multiPiece?'.'+(k+1):''),
-        pk:'corner-'+c.id+(multiPiece?'.'+k:''),isCorner:true,cornerId:c.id,arcW,flatA,flatB,y0,y1});
+        pk:'corner-'+c.id+(multiPiece?'.'+k:''),isCorner:true,cornerId:c.id,arcW,flatA,flatB,y0,y1,...(cm?{matOverride:cm.id}:{})});
     }
     radiusSuccessIds.add(c.id);
   });
@@ -3572,7 +3592,7 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
   // --- общий раскрой: куски всех стен в один пул листов (детали с индивидуальным материалом
   //     сюда не идут — у них свой пул ниже, рядом с заполнением проёмов), плюс детали радиусных
   //     углов (arcPieces выше) — та же кромка, тот же материал, тот же общий пул листов ---
-  const allPieces=layouts.flatMap(L=>L.pieces).filter(p=>!p.matOverride).concat(arcPieces);
+  const allPieces=layouts.flatMap(L=>L.pieces).filter(p=>!p.matOverride).concat(arcPieces.filter(p=>!p.matOverride));
 
   // Если «изгиб» геометрически не влез (см. buildLayout) — на эту сторону возвращаем
   // обычный «Г-образный» угол, иначе деталь откоса потеряется без замены (и опустится
@@ -3951,9 +3971,16 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
     layouts.forEach((L,wi)=>L.pieces.forEach(p=>{
       if(!p.matOverride) return;
       const mp=PRESETS.find(x=>x.id===p.matOverride); if(!mp) return;
-      (byMat[mp.id]=byMat[mp.id]||{mat:mp,items:[]}).items.push({wi,p});
+      (byMat[mp.id]=byMat[mp.id]||{mat:mp,items:[],arcs:[]}).items.push({wi,p});
     }));
-    Object.values(byMat).forEach(({mat,items})=>{
+    // гнутые детали радиусных углов со своим материалом — в тот же пул листов этого материала (целиком, без вложенной раскладки:
+    // ширину разрезать нельзя, высота уже поделена по длине листа этого материала — см. arcPieces)
+    arcPieces.forEach(p=>{
+      if(!p.matOverride) return;
+      const mp=PRESETS.find(x=>x.id===p.matOverride); if(!mp) return;
+      (byMat[mp.id]=byMat[mp.id]||{mat:mp,items:[],arcs:[]}).arcs.push(p);
+    });
+    Object.values(byMat).forEach(({mat,items,arcs})=>{
       const poolId='piece:'+mat.id;
       const Gm=Object.assign({},G,{pl:mat.pl,pw:mat.pw,rot:G.rot&&!isSlatId(mat.id)});
       const pieces=[];
@@ -3975,15 +4002,16 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
         fillLayouts.push({wi,k:wi+':'+p.pk,L});
         pieces.push(...L.pieces);
       });
+      arcs.forEach(p=>pieces.push(p));
       const sA=packSheets(pieces,Gm), a=sA.length;
       const sB=packSheetsCols(pieces,Gm), b=sB.length;
       const sheetsM=(a<=b)?packSheets(pieces,Gm):sB;   // повторный прогон победителя детерминирован
-      const area=items.reduce((x,{p})=>x+m2(p.w,p.len),0);
+      const area=items.reduce((x,{p})=>x+m2(p.w,p.len),0)+arcs.reduce((x,p)=>x+m2(p.w,p.len),0);
       manual[poolId]=manual[poolId]||{};
       const manF=applyManual(sheetsM,manual[poolId],Gm,mat.pl,mat.pw,manual.shelf.filter(s=>s.pool===poolId));
       man.moved+=manF.moved; man.dropped+=manF.dropped;
       fills.push({matId:poolId,matColorId:mat.id,matName:mat.name,pl:mat.pl,pw:mat.pw,price:matPriceOf(G,mat),
-                  tubesPerSheet:mat.tubesPerSheet,sheets:sheetsM,layouts:fillLayouts,area,shelf:manF.shelf,kind:'piece'});
+                  tubesPerSheet:mat.tubesPerSheet,sheets:sheetsM,layouts:fillLayouts,area,shelf:manF.shelf,kind:'piece',arcs:arcs.length});
     });
   }
 
@@ -4497,14 +4525,19 @@ function schemeFor(G,R,wi){
 // строит развёртку ОДНОГО радиусного угла (SVG + подпись) — вызывается для каждого угла из общего
 // списка в renderCornerScheme (один раздел «Развёртки радиусных углов» и на экране, и в печати).
 // Возвращает {meta,svg} либо {meta,errMsg}, если угол не прошёл геометрическую проверку (см. cornerIssues).
+// детали радиусного угла: в общем пуле листов или (если у угла свой материал) в пуле этого материала
+const cornerPiecesOf=(R,id)=>[...(R.sheets||[]),...(R.fills||[]).filter(f=>f.kind==='piece').flatMap(f=>f.sheets)]
+  .flatMap(sh=>sh.list).filter(p=>p.isCorner&&p.cornerId===id).sort((x,y)=>x.y0-y.y0);
 function cornerSchemeSvg(c,a,b,R,G){
   const aTag='С'+(walls.indexOf(a)+1);
-  const meta=b?`Угол R${fmt(+c.radius)} (${aTag}-С${walls.indexOf(b)+1})`:`Угол R${fmt(+c.radius)} (${aTag}·${c.as==='right'?'справа':'слева'})`;
+  const ownMat=c.mat&&c.mat!==G.matId?c.mat:null;   // свой материал детали угла
+  const meta=(b?`Угол R${fmt(+c.radius)} (${aTag}-С${walls.indexOf(b)+1})`:`Угол R${fmt(+c.radius)} (${aTag}·${c.as==='right'?'справа':'слева'})`)
+    +(ownMat?' · '+((findMat(ownMat)||{}).name||ownMat):'');
   const issue=(R.cornerIssues||[]).find(x=>x.id===c.id);
   if(issue) return {meta,errMsg:issue.msg};
   // деталь может быть разрезана по высоте поперечным стыком (см. cornerHeightBounds в
   // computeProject) — кусков может быть несколько, каждый со своим y0/y1 (высота от пола, мм)
-  const pieces=R.sheets.flatMap(sh=>sh.list).filter(p=>p.isCorner&&p.cornerId===c.id).sort((x,y)=>x.y0-y.y0);
+  const pieces=cornerPiecesOf(R,c.id);
   if(!pieces.length) return {meta,errMsg:'Деталь угла ещё не рассчитана.'};
   const total=pieces[0].w, H=a.H, arcW=pieces[0].arcW, flatA=pieces[0].flatA||0, flatB=pieces[0].flatB||0;
   const fs=Math.max(total,H)/48;
@@ -4514,7 +4547,7 @@ function cornerSchemeSvg(c,a,b,R,G){
   // в схеме стены (wallLedGraph/schemeFor: cy=H-y) — пол оказывается внизу картинки, потолок вверху
   let g='';
   pieces.forEach(p=>{
-    g+=`<rect x="0" y="${H-p.y1}" width="${total}" height="${p.y1-p.y0}" fill="var(--straw-face)" fill-opacity=".92" stroke="var(--straw-deep)" stroke-width="${fs*0.07}"/>`;
+    g+=`<rect x="0" y="${H-p.y1}" width="${total}" height="${p.y1-p.y0}" fill="${ownMat?matColor(ownMat):'var(--straw-face)'}" fill-opacity=".92" stroke="var(--straw-deep)" stroke-width="${fs*0.07}"/>`;
   });
   // зона изгиба — лёгкая заливка поверх, отличает её от плоских продолжений по краям
   g+=`<rect x="${flatA}" y="0" width="${arcW}" height="${H}" fill="var(--warn)" fill-opacity=".16"/>`;
@@ -4858,7 +4891,7 @@ function renderCutmap(G,R){
     html+=cutmapSvg(R.sheets,{boxW,pl:G.pl,pw:G.pw,minoff:G.minoff,noRot:matType(curMatId())==='slat'}).replace('<svg ','<svg data-pool="main" ');
   }
   R.fills.forEach(f=>{
-    html+=`<div class="mat-h" style="border-left:4px solid ${matColor(f.matColorId||f.matId)}">Материал: ${esc(f.matName)} — ${f.sheets.length} ${plu(f.sheets.length,'лист','листа','листов')} ${fmt(f.pl)}×${fmt(f.pw)} · ${fillKindText(f.kind)}</div>`;
+    html+=`<div class="mat-h" style="border-left:4px solid ${matColor(f.matColorId||f.matId)}">Материал: ${esc(f.matName)} — ${f.sheets.length} ${plu(f.sheets.length,'лист','листа','листов')} ${fmt(f.pl)}×${fmt(f.pw)} · ${fillKindText(f.kind,false,f.arcs)}</div>`;
     // все детали пула лежат на верстаке — листов нет, рисовать нечего (иначе SVG с нулевым размером и NaN в viewBox)
     html+=f.sheets.length?cutmapSvg(f.sheets,{boxW,pl:f.pl,pw:f.pw,minoff:G.minoff,noRot:matType(String(f.matId).replace(/^piece:/,''))==='slat'}).replace('<svg ','<svg data-pool="'+f.matId+'" ')
       :'<p class="hint">Все детали этого материала лежат на верстаке — листов не нужно. Верните их кнопкой ↩ на верстаке.</p>';
@@ -5442,7 +5475,7 @@ function renderScene3D(G,R){
     // см. wallCanvasTexture3D — то же самое понадобилось и тут). LED-стык ниже уже подсвечивает
     // такую границу лентой — plain-стык (без LED) нужен для ОСТАЛЬНЫХ (cap/butt), иначе граница
     // просто не видна вовсе.
-    const cPieces=(R.sheets?R.sheets.flatMap(sh=>sh.list):[]).filter(p=>p.isCorner&&p.cornerId===c.id).sort((x,y)=>x.y0-y.y0);
+    const cPieces=cornerPiecesOf(R,c.id);
     const seamYs=[];
     for(let k=0;k<cPieces.length-1;k++){
       const pos=Math.round((cPieces[k].y1+cPieces[k+1].y0)/2);
@@ -5461,12 +5494,12 @@ function renderScene3D(G,R){
       seamYs.forEach(pos=>{ const y=ch*(1-pos/H); cctx.fillRect(0,Math.max(0,y-lw/2),4,lw); });
       const t=new THREE.CanvasTexture(cnv); t.needsUpdate=true; return t;
     })() : null;
-    // деталь радиусного угла всегда кроится из материала проекта по умолчанию, никогда из
-    // индивидуального (см. computeProject: arcPieces минуют фильтр matOverride) — тот же
-    // defaultColorHex, что и у стены/отkоса по умолчанию, а не отдельный акцентный цвет темы.
+    // деталь радиусного угла кроится из материала проекта по умолчанию, а если у угла выбран свой материал (c.mat) —
+    // из него: цвет по этому материалу, иначе тот же defaultColorHex, что и у стены/откоса по умолчанию, а не акцентный цвет темы.
+    const cornerHex=(c.mat&&condHex(c.mat))||defaultColorHex;
     // seamTex (если есть) — поверх цвета через map (белый фон = цвет как есть, тёмные линии
     // затемняют его в местах стыка), а не замена самого цвета отдельной текстурой.
-    const mat=new THREE.MeshStandardMaterial({color:new THREE.Color(defaultColorHex),
+    const mat=new THREE.MeshStandardMaterial({color:new THREE.Color(cornerHex),
       map:seamTex,side:THREE.DoubleSide,roughness:0.85});
     st.group.add(new THREE.Mesh(geo,mat));
     // плоские зоны (flatA/flatB) — прямые продолжения детали угла по краям дуги, тем же
@@ -5480,7 +5513,7 @@ function renderScene3D(G,R){
       g2.setAttribute('uv',new THREE.Float32BufferAttribute([0,0, 0,1, 1,0, 1,1],2));
       g2.setIndex([0,1,2, 2,1,3]);
       g2.computeVertexNormals();
-      const m2=new THREE.MeshStandardMaterial({color:new THREE.Color(defaultColorHex),map:seamTex,side:THREE.DoubleSide,roughness:0.85});
+      const m2=new THREE.MeshStandardMaterial({color:new THREE.Color(cornerHex),map:seamTex,side:THREE.DoubleSide,roughness:0.85});
       st.group.add(new THREE.Mesh(g2,m2));
     };
     if(flatA>0.5) addFlatWing(wallEdgeA,tanA);
@@ -5678,8 +5711,8 @@ function renderSpec(G,R){const S=G;
     rows.push(['Панель '+S.presetName, R.sheetsTotal+' шт',
       `${R.mainSheets} на плоскость`+(R.extraSheets?` + ${R.extraSheets} на откосы`:R.parts.length?', откосы из обрезков':'')]);
   R.fills.forEach(f=>{
-    const nP=f.kind==='otkos'?f.sheets.reduce((a,sh)=>a+sh.otk.length,0):f.layouts.reduce((a,x)=>a+x.L.pieces.length,0);
-    rows.push(['Панель '+f.matName, f.sheets.length+' шт', `${fillKindText(f.kind)} · ${nP} ${plu(nP,'деталь','детали','деталей')} · ${fmt(f.area,2)} м²`]);
+    const nP=f.kind==='otkos'?f.sheets.reduce((a,sh)=>a+sh.otk.length,0):f.layouts.reduce((a,x)=>a+x.L.pieces.length,0)+(f.arcs||0);
+    rows.push(['Панель '+f.matName, f.sheets.length+' шт', `${fillKindText(f.kind,false,f.arcs)} · ${nP} ${plu(nP,'деталь','детали','деталей')} · ${fmt(f.area,2)} м²`]);
   });
   if(R.failed.length)
     rows.push(['⚠ Откосы не выкроены', R.failed.length+' шт', 'не помещаются в лист — в смете не учтены']);
@@ -5714,7 +5747,7 @@ function renderEstimate(G,R){const S=G;
   const rows=[];
   const add=(n,q,u,p)=>{ if(q>0) rows.push({n,q,u,p,s:q*p}); };
   add('Панель '+S.presetName,R.sheetsTotal,'шт',S.price.panel);
-  R.fills.forEach(f=>add('Панель '+f.matName+' ('+fillKindText(f.kind,true)+')',f.sheets.length,'шт',f.price));
+  R.fills.forEach(f=>add('Панель '+f.matName+' ('+fillKindText(f.kind,true,f.arcs)+')',f.sheets.length,'шт',f.price));
   const gOrder=['Край области','Стыки вертикальные','Стыки горизонтальные','Контур проёмов','Углы','LED'];
   const grp={}; R.prof.forEach(p=>{(grp[p.group]=grp[p.group]||[]).push(p);});
   gOrder.forEach(g=>{ (grp[g]||[]).forEach(p=>add(p.name,p.sticks,'хл',p.price)); });
@@ -5817,11 +5850,9 @@ function renderNotes(G,R){
     const idx=cornerLinks.findIndex(c=>c.id===id);
     n.push(['warn','Радиусный угол'+(idx>=0?' '+(idx+1):''),msg]);
   });
-  // деталь радиусного угла (гнутая, isCorner) всегда кроится из материала проекта по умолчанию —
-  // назначить ей свой материал через клик по детали нельзя (её вообще нет в схеме стены, см.
-  // schemeFor: там кликабельны только L.pieces). Если у прилегающей стены прямо у этого угла
-  // назначен свой материал (pieceMats), деталь угла молча останется другого цвета/фактуры —
-  // предупреждаем, а не молчим, как и для проёма/стыка в зоне среза выше
+  // деталь радиусного угла (гнутая, isCorner) кроится из материала проекта по умолчанию, пока у угла не выбран свой
+  // (меню угла в компасе, c.mat). Если у прилегающей стены прямо у этого угла назначен свой материал (pieceMats), а у угла
+  // — нет, деталь угла молча останется другого цвета/фактуры — предупреждаем, а не молчим, как и для проёма/стыка в зоне среза
   {
     const defaultMatId=curMatId();
     // деталь угла могла не появиться не только из-за cornerIssues (геометрия/лист не подошли),
@@ -5830,6 +5861,7 @@ function renderNotes(G,R){
     const arcCornerIds=new Set(R.sheets.flatMap(sh=>sh.list).filter(p=>p.isCorner).map(p=>p.cornerId));
     cornerLinks.forEach(c=>{
       if((c.kind||'sharp')!=='radius'||!arcCornerIds.has(c.id)) return;
+      if(c.mat) return;   // у угла свой материал — выбран осознанно
       const a=walls.find(w=>w.id===+c.aw); if(!a) return;
       const b=(c.bw!==''&&c.bw!=null)?walls.find(w=>w.id===+c.bw):null;
       const sideOverrides=(w,side)=>{
@@ -6181,6 +6213,7 @@ function applySnapshot(o,fromFile){
         if(op.otkosMat) Object.keys(op.otkosMat).forEach(k=>{ const n=fix(op.otkosMat[k]); if(n) op.otkosMat[k]=n; else delete op.otkosMat[k]; });
       });
     });
+    (Array.isArray(o.cornerLinks)?o.cornerLinks:[]).forEach(c=>{ if(c&&c.mat){ const n=fix(c.mat); c.mat=n||null; } });   // материал детали угла
     const cw=$('#i-colorway').value;
     if(cw&&(!CAT_BY_ID.has(cw)||matType(cw)!==$('#i-preset').value)){ if(!CAT_BY_ID.has(cw)) lost.add(cw); $('#i-colorway').value=''; }
     matLoadNotice=lost.size?`В файле есть расцветки, которых нет в каталоге: ${[...lost].join(', ')}. Они заменены базовым материалом типа — выберите расцветку заново.`:'';
@@ -8141,17 +8174,22 @@ document.addEventListener('keydown',e=>{
     // — стык, который иначе остаётся «воздухом»; прямой угол с одной стеной на фото — уже seams
     const photoWallIds=new Set(layersR.map(({m})=>m.wallId));
     const wName=id=>(walls.find(w=>w.id===+id)||{}).name||'стена';
-    const corners=cornerLinks.filter(c=>{
+    const cornersSel=cornerLinks.filter(c=>{
       if((c.kind||'sharp')==='across') return false;
       const aOn=photoWallIds.has(+c.aw), bOn=c.bw!==''&&c.bw!=null&&photoWallIds.has(+c.bw);
       return (c.kind==='radius'&&(aOn||bOn))||(aOn&&bOn);
-    }).map(c=>{
+    });
+    // свой материал гнутой детали радиусного угла (если выбран и отличается от основного)
+    const cornerMatOf=c=>(c.kind==='radius'&&c.mat&&c.mat!==curMatId()&&findMat(c.mat))?c.mat:null;
+    const corners=cornersSel.map(c=>{
       const b=c.bw!==''&&c.bw!=null;
       const where=`«${wName(c.aw)}» (${edgeSideRu[c.as]||c.as})`+(b?` — «${wName(c.bw)}» (${edgeSideRu[c.bs]||c.bs})`:' — вторая стена вне проекта');
       const room=cornerType==='in'?'внутренний (вогнутый) угол комнаты':'внешний (выпуклый) угол';
       return {between:where, corner:room, shape:c.kind==='radius'
         ?`скруглённый (радиусный) угол, радиус ${Math.round(c.radius)} мм по центральной линии панели — изогнутая деталь, угол комнаты ${Math.round(c.angle)}°`
-        :`обычный стык двух стен под ${Math.round(c.angle)}°, без скругления`};
+        :`обычный стык двух стен под ${Math.round(c.angle)}°, без скругления`,
+        // изогнутая деталь угла — из своего материала (если выбран): другой цвет/фактура, чем у панелей стен рядом
+        material:cornerMatOf(c)?Object.assign({name:findMat(c.mat).name},cf(c.mat,condHex(c.mat))):undefined};
     });
     F.corners=corners.length>0;
     // материалы, реально попавшие на это фото, и где какой используется
@@ -8163,6 +8201,7 @@ document.addEventListener('keydown',e=>{
       m.fills.forEach(r=>addRole(r.matId,'заполнение проёмов (см. filled_openings)'));
       otkos.forEach(o=>addRole(o.matId||m.matId,'откосы (см. otkos)'));
     });
+    cornersSel.forEach(c=>{ const id=cornerMatOf(c); if(id) addRole(id,'изогнутая деталь радиусного угла (см. corners)'); });
     const mainId=layersR[0].m.matId;
     const sampleFileOf=si=>'образцы/'+String(si.refOnly?si.label+' — рельеф':si.label).replace(/[\\/:*?"<>|\u0000-\u001f]+/g,'_')+'.jpg';
     const hintOf=si=>si.desc+(si.fin?'; блеск: '+si.fin:'');

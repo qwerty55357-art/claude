@@ -585,6 +585,49 @@ for(let t=0;t<N;t++){
     const coutWide=(Rwide.prof.find(p=>p.key==='cout')||{total:0}).total;
     if(wideOnly) chk('L140m',coutWide>0.5,`${id}: радиус — угол со слишком широкой деталью должен откатиться на обычный профиль`);
     if(wideOnly) chk('L140n',(Rwide.cornerIssues||[]).length===1,`${id}: радиус — деталь угла шире листа не дала issue`);
+
+    // L145 (нов): свой материал детали угла (c.mat) — гнутая деталь кроится из листов ЭТОГО материала в своём пуле (fills kind:'piece'),
+    // а не из общего; ширина/длина листа берутся у материала угла (узкая рейка — откат на обычный профиль с issue); если
+    // материал совпал с основным (G.matId) — деталь остаётся в общем пуле
+    {
+      const poolArcs=R_=>R_.fills.filter(f=>f.kind==='piece').flatMap(f=>f.sheets.flatMap(sh=>sh.list)).filter(x=>x.isCorner);
+      const mainArcs=R_=>R_.sheets.flatMap(sh=>sh.list).filter(x=>x.isCorner);
+      const base=Rrad;   // тот же угол без своего материала — для сравнения
+      const linkMat=m=>[{id:1,kind:'radius',type:'out',angle,radius,aw:1,as:'right',bw:2,bs:'left',mat:m}];
+      const Rm=C.computeProject(Gt2,[wR1,wR2],{},linkMat('marble'),[]);
+      const pa=poolArcs(Rm);
+      chk('L145a',pa.length===1&&mainArcs(Rm).length===0,`${id}: деталь угла со своим материалом должна лежать ТОЛЬКО в пуле этого материала (в пуле ${pa.length}, в общем ${mainArcs(Rm).length})`);
+      if(pa.length===1) chk('L145b',Math.abs(pa[0].w-arcW)<0.5&&Math.abs(pa[0].len-2400)<0.5,`${id}: размеры детали угла в пуле материала ${pa[0].w}×${pa[0].len} != ${arcW}×2400`);
+      const fm=Rm.fills.find(f=>f.kind==='piece');
+      chk('L145c',!!fm&&fm.matColorId==='marble'&&fm.sheets.length>=1&&fm.arcs===1,`${id}: пул материала угла не создан (${JSON.stringify(fm&&{m:fm.matColorId,s:fm.sheets.length,a:fm.arcs})})`);
+      chk('L145d',Math.abs((Rm.prof.find(p=>p.key==='cout')||{total:0}).total)<0.5,`${id}: деталь угла со своим материалом всё равно начислила обычный угловой профиль`);
+      // геометрия стен не зависит от материала детали угла
+      chk('L145e',Math.abs(stripsW(Rm.layouts[0])-w1rad)<0.5&&Math.abs(stripsW(Rm.layouts[1])-w2rad)<0.5,`${id}: материал детали угла изменил ширину панелей смежных стен`);
+      // материал совпал с основным — всё как без материала
+      const Rsame=C.computeProject(Object.assign({},Gt2,{matId:'marble'}),[wR1,wR2],{},linkMat('marble'),[]);
+      if(arcFits&&tall24) chk('L145f',mainArcs(Rsame).length===1&&poolArcs(Rsame).length===0,`${id}: материал угла = основному — деталь должна остаться в общем пуле`);
+      // узкая рейка (150 мм): гнутая деталь шире листа — откат на обычный профиль с понятным issue
+      const Rs=C.computeProject(Gt2,[wR1,wR2],{},linkMat('slat'),[]);
+      chk('L145g',poolArcs(Rs).length===0&&mainArcs(Rs).length===0&&(Rs.cornerIssues||[]).length===1&&/150/.test((Rs.cornerIssues[0]||{}).msg||'')&&((Rs.prof.find(p=>p.key==='cout')||{total:0}).total>0.5),
+        `${id}: рейка как материал угла — деталь шире листа 150 мм должна откатиться на обычный профиль с issue (${JSON.stringify(Rs.cornerIssues)})`);
+      // высокая стена: куски детали режутся по ДЛИНЕ ЛИСТА МАТЕРИАЛА УГЛА (мрамор 2800), а не основного
+      const wT1=Object.assign({},wR1,{H:6000}), wT2=Object.assign({},wR2,{H:6000});
+      const Rt=C.computeProject(Gt2,[wT1,wT2],{},linkMat('marble'),[]);
+      const ta=poolArcs(Rt);
+      chk('L145h',ta.length>=3&&ta.every(x=>x.len<=2800.5)&&Math.abs(ta.reduce((a2,x)=>a2+x.len,0)-6000)<0.5,`${id}: высокая стена — куски детали угла из мрамора: ${JSON.stringify(ta.map(x=>x.len))}`);
+      // смета: цена листа — по типу материала угла (G.price.mats), иначе цена пресета
+      const Rp=C.computeProject(Object.assign({},Gt2,{price:Object.assign({},Gt2.price,{mats:{marble:7777}})}),[wR1,wR2],{},linkMat('marble'),[]);
+      chk('L145i',(Rp.fills.find(f=>f.kind==='piece')||{}).price===7777&&(Rm.fills.find(f=>f.kind==='piece')||{}).price===4500,`${id}: цена листа материала угла: ${(Rp.fills.find(f=>f.kind==='piece')||{}).price}/${(Rm.fills.find(f=>f.kind==='piece')||{}).price}`);
+      // ручная перестановка в пуле материала: деталь угла не поворачивается (гнутая), на верстак уходит и возвращается
+      if(pa.length===1){
+        const rot={['piece:marble']:{[pa[0]._uid]:{sheet:0,x:pa[0].x,y:pa[0].y,rot:true}}};
+        const Rr=C.computeProject(Gt2,[wR1,wR2],rot,linkMat('marble'),[]);
+        const ra=poolArcs(Rr);
+        chk('L145j',ra.length===1&&Math.abs(ra[0].w-arcW)<0.5&&Math.abs(ra[0].len-2400)<0.5,`${id}: деталь угла в пуле материала повернулась на 90° вопреки запрету`);
+        const Rsh=C.computeProject(Gt2,[wR1,wR2],{shelf:[{pool:'piece:marble',uid:pa[0]._uid,rot:false}]},linkMat('marble'),[]);
+        chk('L145k',poolArcs(Rsh).length===0&&(Rsh.fills.find(f=>f.kind==='piece').shelf||[]).length===1,`${id}: деталь угла из пула материала не ушла на верстак`);
+      }
+    }
   }
   // L7/L8: панелей в разумных пределах
   const needArea=(R.netArea+R.otkosArea)*1e6;
