@@ -1,4 +1,4 @@
-// Карта раскроя читаема при любой ширине экрана: число колонок листов подстраивается под ширину карты (лист не уже ~190 px),
+// Карта раскроя читаема при любой ширине экрана: число колонок листов подстраивается под ширину карты (лист 105–170 px, не «на весь экран»),
 // ограничение высоты не ужимает карту из нескольких рядов, при изменении окна карта перерисовывается.
 // Запуск: NODE_PATH=$(npm root -g) node tests/cutmap_cols.js
 const {chromium}=require('playwright'); const path=require('path');
@@ -16,12 +16,16 @@ let fails=0; const ok=(c,w)=>{ if(!c){ fails++; console.log('✗',w); } else con
   for(const w of [1920,1500,1280,1024]){
     await p.setViewportSize({width:w,height:900}); await p.waitForTimeout(700);
     const s=await probe();
-    ok(s.sheetPx>=170,'окно '+w+': лист на экране ≈ '+Math.round(s.sheetPx)+' px (колонок '+s.cols+', карта '+s.box+' px)');
+    ok(s.sheetPx>=100&&s.sheetPx<=175,'окно '+w+': лист на экране ≈ '+Math.round(s.sheetPx)+' px — читаемо и не огромно (колонок '+s.cols+', карта '+s.box+' px)');
     ok(s.n<=s.cols?s.maxH!=='':s.maxH==='','окно '+w+': ограничение высоты '+(s.n<=s.cols?'у одного ряда есть':'у нескольких рядов снято'));
   }
   await p.setViewportSize({width:1920,height:1080}); await p.waitForTimeout(700);
   const wide=await probe(); await p.setViewportSize({width:1280,height:1080}); await p.waitForTimeout(800); const narrow=await probe();
   ok(wide.cols>narrow.cols,'при сужении окна карта перерисовалась: колонок '+wide.cols+' → '+narrow.cols);
+  // верстак узкий, а одиночный лист (заполнение мрамором) не растягивается на всю карту
+  const geo=await p.evaluate(()=>{ const z=document.querySelector('#shelf-zone').getBoundingClientRect(); const sv=document.querySelector('#cutmap svg[data-pool="marble"]'); const r=sv.getBoundingClientRect(); return {shelf:z.width,one:r.width/1.3}; });
+  ok(geo.shelf<=160,'верстак узкий: '+Math.round(geo.shelf)+' px');
+  ok(geo.one<=180,'один лист заполнения не огромный: ≈ '+Math.round(geo.one)+' px');
   // перетаскивание детали по-прежнему попадает на нужное место при любом числе колонок
   const uid=await p.evaluate(()=>LAST.R.sheets[0].list[0]._uid);
   const el=p.locator('#cutmap svg[data-pool="main"] [data-cmdrag="'+uid+'"]').first(); await el.scrollIntoViewIfNeeded();
