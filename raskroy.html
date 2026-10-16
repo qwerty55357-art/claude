@@ -177,6 +177,9 @@ tbody tr:hover td{background:var(--surface)}
      одна и та же. Фиксируем формат и поля явно, чтобы печать/PDF выглядели одинаково независимо
      от устройства (пользователь всё ещё может переопределить формат в диалоге печати вручную) */
   @page{ size:A4; margin:12mm; }
+  /* тёмная цветовая схема (полосы прокрутки на экране) красила бы ещё и поля страницы PDF в #121212 — на бумаге всё светлое */
+  :root{color-scheme:light}
+  html{background:#fff !important}
   .wall-scheme{display:block !important;break-inside:avoid;page-break-inside:avoid}
   .wall-scheme-h{display:block !important}
   [data-resize],[data-cmrot]{display:none !important}
