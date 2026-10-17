@@ -23,7 +23,7 @@ const L=require('./lib.js');
    {sel:'#hseam-fill',n:4,at:'tl'},{sel:'#btn-add-seam',n:5,at:'tl'}]});
  await L.shot(p,'30_hfree_scheme',{el:'#scheme',pad:8,top:110,marks:[]});
  // --- радиусный угол
- await p.locator('[data-cpedit]').click(); await p.waitForTimeout(300);
+ await p.locator('#wall-compass [data-cpedit]').first().click(); await p.waitForTimeout(300);
  await p.locator('#mat-menu button',{hasText:'Радиусный'}).click(); await p.waitForTimeout(600);
  await L.shot(p,'36_corner_radius',{el:'#corner-scheme-block',pad:8,top:100,marks:[{sel:'#corner-scheme',n:1,at:'tl'}]});
  console.log(p.errs);

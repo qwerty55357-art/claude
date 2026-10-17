@@ -19,10 +19,10 @@ module.exports=async function setup(p){
   await p.waitForTimeout(400);
 };
 module.exports.second=async function(p){
-  await p.click('[data-cpadd="E"]'); await p.waitForTimeout(300);
+  // «+ стена» в списке стен: достраивает цепочку от правого конца активной стены (поворот вправо на 90°) и сразу связывает углом
+  await p.click('[data-cpplus]'); await p.waitForTimeout(300);
   await p.fill('#i-wname','Боковая стена');
   await p.fill('#i-w','3000'); await p.fill('#i-h','2600');
   await p.waitForTimeout(300);
-  await p.click('[data-cpjump="1"]'); await p.waitForTimeout(300);
-  await p.click('[data-cpadd="NE"]'); await p.waitForTimeout(400);
+  await p.click('[data-cpjump="1"]'); await p.waitForTimeout(400);
 };

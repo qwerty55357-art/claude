@@ -628,6 +628,26 @@ for(let t=0;t<N;t++){
         chk('L145k',poolArcs(Rsh).length===0&&(Rsh.fills.find(f=>f.kind==='piece').shelf||[]).length===1,`${id}: деталь угла из пула материала не ушла на верстак`);
       }
     }
+
+    // L146 (нов): выступающий угол (angle>180°, колонна/выступ Г- и П-образной комнаты) — деталь та же, что у вогнутого с углом 360-angle
+    // (одинаковые касательная t и развёртка дуги): раскрой, ширины панелей и профили совпадают, только дуга выгибается в другую сторону
+    {
+      const lk=(ang,extra)=>[Object.assign({id:1,kind:'radius',type:'out',angle:ang,radius,aw:1,as:'right',bw:2,bs:'left'},extra||{})];
+      const R90=Rrad, R270=C.computeProject(Gt2,[wR1,wR2],{},lk(270),[]);
+      const a90=R90.sheets.flatMap(sh=>sh.list).find(p=>p.isCorner), a270=R270.sheets.flatMap(sh=>sh.list).find(p=>p.isCorner);
+      chk('L146a',!!a90===!!a270&&(!a90||(Math.abs(a90.w-a270.w)<0.5&&Math.abs(a90.len-a270.len)<0.5)),`${id}: радиус 270° != радиус 90° по детали угла (${a270&&a270.w}×${a270&&a270.len} против ${a90&&a90.w}×${a90&&a90.len})`);
+      chk('L146b',Math.abs(stripsW(R270.layouts[0])-w1rad)<0.5&&Math.abs(stripsW(R270.layouts[1])-w2rad)<0.5,`${id}: радиус 270°: ширина панелей стен не совпала со 90°`);
+      chk('L146c',R270.sheetsTotal===R90.sheetsTotal&&Math.abs((R270.prof.find(p=>p.key==='cout')||{total:0}).total-coutRad)<0.5&&(R270.cornerIssues||[]).length===(R90.cornerIssues||[]).length,`${id}: радиус 270°: число листов/профиль/замечания отличаются от 90°`);
+      // 180° — прямая линия, 0° и 360° — вырожденные: деталь не создаётся, угол считается обычным стыком с замечанием
+      [180,0,360,-10].forEach(bad=>{
+        const Rb=C.computeProject(Gt2,[wR1,wR2],{},lk(bad),[]);
+        chk('L146d',!Rb.sheets.flatMap(sh=>sh.list).some(p=>p.isCorner)&&(Rb.cornerIssues||[]).length===1&&((Rb.prof.find(p=>p.key==='cout')||{total:0}).total>0.5),`${id}: радиусный угол ${bad}° должен откатиться на обычный стык с замечанием (issues=${(Rb.cornerIssues||[]).length})`);
+      });
+      // обычный стык под любым углом: тип профиля (cin/cout) берётся из c.type, число и длина профиля от угла не зависят
+      const sh=ang=>C.computeProject(Gt2,[wR1,wR2],{},[{id:1,kind:'sharp',type:'in',angle:ang,aw:1,as:'right',bw:2,bs:'left'}],[]);
+      const pin=ang=>(sh(ang).prof.find(p=>p.key==='cin')||{total:0}).total;
+      chk('L146e',Math.abs(pin(90)-2400)<0.5&&Math.abs(pin(270)-2400)<0.5&&Math.abs(pin(135)-2400)<0.5,`${id}: внутренний угол: длина cin должна равняться H при любом угле (${pin(90)}/${pin(270)}/${pin(135)})`);
+    }
   }
   // L7/L8: панелей в разумных пределах
   const needArea=(R.netArea+R.otkosArea)*1e6;

@@ -11,13 +11,12 @@ const L=require('./lib.js');
    {sels:['#i-w','#i-ceil'],n:4,at:'tl'},
    {sels:['#i-hfree','#btn-add-seam'],n:5,at:'tl'},
    {sels:['#i-vfree','#btn-add-vseam'],n:6,at:'tl'},{sel:'#btn-del-wall',n:7,at:'tr'}]});
- // компас
+ // список стен и углов
  await L.shot(p,'04_compass',{el:'#wall-compass',pad:18,marks:[
    {sel:'[data-ctype="out"]',n:1,at:'tl'},{sel:'[data-ctype="in"]',n:2,at:'tr'},
-   {sel:'[data-cpjump="1"]',n:3,at:'tl'},{sel:'[data-cpjump="2"]',n:4,at:'tr'},{sel:'[data-cpedit]',n:5,at:'tr'},{sel:'[data-cpadd="S"]',n:6,at:'bl'}]});
+   {sel:'[data-cpjump="1"]',n:3,at:'tl'},{sel:'[data-cpjump="2"]',n:4,at:'tr'},{sel:'#wall-compass [data-cpedit]',n:5,at:'tr'},{sel:'[data-cpplus]',n:6,at:'bl'}]});
  // меню угла
- await p.evaluate(()=>{ const e=document.querySelector('[data-cpedit]'); const r=e.getBoundingClientRect(); window.__r=r; });
- await p.locator('[data-cpedit]').click(); await p.waitForTimeout(300);
+ await p.locator('#wall-compass [data-cpedit]').first().click(); await p.waitForTimeout(300);
  await L.shot(p,'05_corner_menu',{el:'#wall-compass',scroll:false,union:['#wall-compass','#mat-menu'],pad:10,marks:[]});
  await p.evaluate(()=>closeMatMenu()); await p.waitForTimeout(200);
  // 02 Панель
