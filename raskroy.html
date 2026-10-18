@@ -403,16 +403,16 @@ tbody tr:hover td{background:var(--surface)}
     <div class="sect-h"><span class="sect-n">06</span><span class="sect-t">Цены</span><span class="sect-arrow">▾</span></div>
     <div class="sect-b">
       <div class="row">
-        <div class="f"><label>Панель, шт</label><input type="number" id="p-panel" value="4500"></div>
-        <div class="f"><label>Клей, туба</label><input type="number" id="p-glue" value="450"></div>
+        <div class="f"><label>Панель, шт</label><input type="number" id="p-panel" value="5500"></div>
+        <div class="f"><label>Клей, туба</label><input type="number" id="p-glue" value="700"></div>
       </div>
       <div class="row">
         <div class="f"><label>Заглушка, хлыст</label><input type="number" id="p-edge" value="900"></div>
         <div class="f"><label>Соединитель, хлыст</label><input type="number" id="p-joint" value="950"></div>
       </div>
       <div class="row">
-        <div class="f"><label>Угол внеш., хлыст</label><input type="number" id="p-cout" value="1100"></div>
-        <div class="f"><label>Угол внутр., хлыст</label><input type="number" id="p-cin" value="1100"></div>
+        <div class="f"><label>Угол внеш., хлыст</label><input type="number" id="p-cout" value="600"></div>
+        <div class="f"><label>Угол внутр., хлыст</label><input type="number" id="p-cin" value="600"></div>
       </div>
       <div class="row">
         <div class="f"><label>LED-стартовый, хлыст</label><input type="number" id="p-ledprof" value="1200"></div>
@@ -811,11 +811,11 @@ const CATALOG_IMG={
    МАТЕРИАЛЫ. Добавить гибкий камень / 3D-гипс — дописать строку сюда.
    ===================================================================== */
 const PRESETS = [
-  {id:'bamboo29', name:'Бамбуковая панель 2900×1150', pl:2900, pw:1150, price:4500, tubesPerSheet:1.5},
-  {id:'marble',   name:'Гибкий мрамор 2800×1200',     pl:2800, pw:1200, price:4500, tubesPerSheet:1.5},
-  {id:'slat',     name:'Реечная панель 2900×150',     pl:2900, pw:150,  price:4500, tubesPerSheet:0.2},
-  {id:'rockL',    name:'Скала большая 2900×1200',     pl:2900, pw:1200, price:4500, tubesPerSheet:1.55},
-  {id:'rockS',    name:'Скала маленькая 2900×600',    pl:2900, pw:600,  price:4500, tubesPerSheet:0.8},
+  {id:'bamboo29', name:'Бамбуковая панель 2900×1150', pl:2900, pw:1150, price:5500, tubesPerSheet:1.5},
+  {id:'marble',   name:'Гибкий мрамор 2800×1200',     pl:2800, pw:1200, price:5500, tubesPerSheet:1.5},
+  {id:'slat',     name:'Реечная панель 2900×150',     pl:2900, pw:150,  price:1600, tubesPerSheet:0.2},
+  {id:'rockL',    name:'Скала большая 2900×1200',     pl:2900, pw:1200, price:25000, tubesPerSheet:1.55},
+  {id:'rockS',    name:'Скала маленькая 2900×600',    pl:2900, pw:600,  price:11000, tubesPerSheet:0.8},
   {id:'custom',   name:'Свой размер',                 pl:2900, pw:1150, price:4500, tubesPerSheet:1.5},
 ];
 // цвет заливки материала на схеме — значения живут в CSS-переменных --mat-* (см. :root)

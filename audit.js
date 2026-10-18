@@ -617,7 +617,7 @@ for(let t=0;t<N;t++){
       chk('L145h',ta.length>=3&&ta.every(x=>x.len<=2800.5)&&Math.abs(ta.reduce((a2,x)=>a2+x.len,0)-6000)<0.5,`${id}: высокая стена — куски детали угла из мрамора: ${JSON.stringify(ta.map(x=>x.len))}`);
       // смета: цена листа — по типу материала угла (G.price.mats), иначе цена пресета
       const Rp=C.computeProject(Object.assign({},Gt2,{price:Object.assign({},Gt2.price,{mats:{marble:7777}})}),[wR1,wR2],{},linkMat('marble'),[]);
-      chk('L145i',(Rp.fills.find(f=>f.kind==='piece')||{}).price===7777&&(Rm.fills.find(f=>f.kind==='piece')||{}).price===4500,`${id}: цена листа материала угла: ${(Rp.fills.find(f=>f.kind==='piece')||{}).price}/${(Rm.fills.find(f=>f.kind==='piece')||{}).price}`);
+      chk('L145i',(Rp.fills.find(f=>f.kind==='piece')||{}).price===7777&&(Rm.fills.find(f=>f.kind==='piece')||{}).price===C.PRESETS.find(x=>x.id==='marble').price,`${id}: цена листа материала угла: ${(Rp.fills.find(f=>f.kind==='piece')||{}).price}/${(Rm.fills.find(f=>f.kind==='piece')||{}).price}`);
       // ручная перестановка в пуле материала: деталь угла не поворачивается (гнутая), на верстак уходит и возвращается
       if(pa.length===1){
         const rot={['piece:marble']:{[pa[0]._uid]:{sheet:0,x:pa[0].x,y:pa[0].y,rot:true}}};
