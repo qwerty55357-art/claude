@@ -149,7 +149,11 @@ tbody tr:hover td{background:var(--surface)}
    естественным образом умещаются рядом друг с другом по ширине листа, а не только один столбец
    сверху вниз, как раньше */
 #corner-scheme{display:flex;flex-wrap:wrap;gap:16px}
-.corner-scheme-item{flex:0 0 auto;border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:16px;overflow:auto}
+/* ширину карточки на экране задаёт пропорция самой детали (inline width в renderCornerScheme), а не длина подписи: иначе после выбора
+   материала (в подписи появляются название и артикул) карточка того же угла раздувалась и выглядела крупнее соседних */
+.corner-scheme-item{display:flex;flex-direction:column;flex:0 1 auto;min-width:260px;max-width:100%;border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:16px;overflow:auto}
+.corner-scheme-item[style*="--cs-r"]{width:calc(var(--cs-r) * 76vh + 34px)}
+.corner-scheme-item>svg{margin-top:auto}   /* подписи разной длины (материал угла) сдвигали бы деталь — прижимаем её к низу карточки, у равных деталей верх совпадает */
 .corner-scheme-item-h{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
 /* блок «Визуализация на фото» (см. IIFE в самом низу скрипта, рядом с 3D) — фото + раскладка
    стены поверх него через проективное преобразование по 4 точкам, целиком canvas/JS, без сети
@@ -202,6 +206,7 @@ tbody tr:hover td{background:var(--surface)}
      правило вне @media print выше), поэтому несколько узких карточек одинаковой малой высоты
      естественно выстраиваются В РЯД по ширине листа, а не только друг под другом */
   .corner-scheme-item{break-inside:avoid;page-break-inside:avoid;overflow:visible}
+  .corner-scheme-item[style*="--cs-r"]{width:calc(var(--cs-r) * 11cm + 34px)}   /* предел высоты svg на печати — 11 см (см. ниже) */
   .corner-scheme-item svg{max-height:11cm !important;width:auto !important}
   #scene3d-block{display:none !important}
   #viz-block{display:none !important}
@@ -4870,7 +4875,7 @@ function cornerSchemeSvg(c,a,b,R,G){
   // Явные width/height дают браузеру настоящий intrinsic-размер, и max-height начинает работать
   // предсказуемо: одинаковая высота (как и должно быть — H одна и та же), ширина — пропорционально
   // реальной ширине детали.
-  return {meta,svg:`<svg viewBox="${vb}" width="${vbW}" height="${vbH}" style="width:100%;max-height:76vh" role="img" aria-label="Развёртка радиусного угла — ${esc(meta)}">${g}</svg>`};
+  return {meta,ratio:vbW/vbH,svg:`<svg viewBox="${vb}" width="${vbW}" height="${vbH}" style="width:100%;max-height:76vh" role="img" aria-label="Развёртка радиусного угла — ${esc(meta)}">${g}</svg>`};
 }
 // показывает СРАЗУ ВСЕ радиусные углы проекта одним списком в одном разделе (а не по одному
 // выбранному на экране + отдельная печатная копия на каждый угол своей страницей, как было раньше)
@@ -4891,7 +4896,9 @@ function renderCornerScheme(){
     const b=(c.bw!==''&&c.bw!=null)?walls.find(w=>w.id===+c.bw):null;
     const res=cornerSchemeSvg(c,a,b,R,G);
     const body=res.errMsg?`<p class="hint" style="color:var(--err)">${esc(res.errMsg)}</p>`:res.svg;
-    return `<div class="corner-scheme-item"><div class="corner-scheme-item-h">${esc(res.meta)}</div>${body}</div>`;
+    // 76vh — тот же предел высоты, что у самого svg (style=max-height); 34px — рамка и поля карточки
+    const wst=res.ratio?` style="--cs-r:${res.ratio.toFixed(4)}"`:'';
+    return `<div class="corner-scheme-item"${wst}><div class="corner-scheme-item-h">${esc(res.meta)}</div>${body}</div>`;
   }).join('');
   $('#corner-scheme-meta').textContent=`углов: ${list.length}`;
   box.innerHTML=items;

@@ -163,6 +163,13 @@ let fails=0; const ok=(c,w)=>{ if(!c){ fails++; console.log('✗',w); } else con
   const after=await prof();
   ok(after.cout<before.cout||after.cin<before.cin,'LED на связанном конце заменяет профиль угла (cout '+before.cout+'→'+after.cout+')');
 
+  // --- развёртки радиусных углов: карточки одинаковых деталей одного размера, материал угла (длинная подпись) размер не меняет
+  await p.evaluate(()=>{ walls=[newWall()]; cornerLinks=[]; cornerSeq=0; active=0; walls[0].W=5000; let cur=walls[0];
+    for(let i=0;i<3;i++){ const e=planEnds(computeWallPlacements3D(walls,cornerLinks)).find(q=>q.id===cur.id&&q.side==='right'); cur=planCommit(e,{u:[-e.dz,e.dx],L:3000,angle:90,close:null}); }
+    cornerLinks.forEach(c=>{ c.kind='radius'; c.radius=300; }); walls.forEach(w=>{ w.edges.left='cap'; w.edges.right='cap'; });
+    const m=PRESETS.find(x=>x.cw&&x.type==='marble'); cornerLinks[1].mat=m.id; run(); }); await settle();
+  const cards=await p.evaluate(()=>[...document.querySelectorAll('.corner-scheme-item')].map(e=>{ const r=e.getBoundingClientRect(), v=e.querySelector('svg').getBoundingClientRect(); return [Math.round(r.width),Math.round(r.height),Math.round(v.top-r.top)]; }));
+  ok(cards.length===3&&cards.every(c=>c.join()===cards[0].join()),'карточки развёрток трёх одинаковых углов совпадают по размеру и положению детали, хотя у одного длинная подпись с материалом ('+JSON.stringify(cards)+')');
   // --- старый проект «компас» (стены в слотах N/E/W, углы 90°) открывается как цепочка
   await p.evaluate(()=>{ window.__rich(); }); await settle();
   ok(await p.locator('#plan-canvas [data-cpjump]').count()>=3,'проект из прежнего компаса показывается на плане');
