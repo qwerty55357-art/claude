@@ -715,6 +715,46 @@ for(let t=0;t<N;t++){
     const Rr=C.computeProject(Gc(20,prices),[wA,wB],{},lk('over',{kind:'radius',radius:200}),[]);
     chk('L148f',(Rr.cornerIssues||[]).length>0||P(Rr,'cover').total===0,`${id}: радиусный угол с типом «накладной» не должен давать профиль`);
   }
+  // L149 (нов): граница «бамбуковая панель ↔ реечная» (заполнение проёма во всю длину раскладки) — по умолчанию заглушка (профиль
+  // jointPlug по цене заглушки), а не соединитель; прочие пары материалов, неполное заполнение, выключенный профиль на стыках и явный
+  // выбор пользователя — как прежде
+  if(rand()<0.3){
+    const slat=C.PRESETS.find(x=>x.id==='slat'), bamboo=C.PRESETS.find(x=>x.id==='bamboo29'), marble=C.PRESETS.find(x=>x.id==='marble');
+    if(slat&&bamboo&&marble){
+      const mkF=(fill,ox,ow,oh,extra)=>Object.assign({id:1,W:3000,H:2400,ceil:3000,rowH:0,seamsU:[],seamSeq:0,vseamsU:[],vseamSeq:0,edges:{top:'none',bot:'none',left:'none',right:'none'},cout:0,cin:0,jointModes:{},
+        ops:[{kind:'niche',w:ow,h:oh,x:ox,y:0,otkos:false,depth:0,id:1,fillMat:fill}]},extra||{});
+      const Gf=(matId,extra)=>Object.assign({},G,{orient:'v',sym:false,jointV:true,matId,price:Object.assign({},G.price,{edge:610,joint:950})},extra||{});
+      const T=(R0,k)=>(R0.prof.find(q=>q.key===k)||{total:0,price:null});
+      // заполнение 800 мм в середине стены на всю высоту — две границы
+      const mid=mkF('slat',1000,800,2400);
+      // эталон: обе границы явно соединителем — соединителей Xcap, из них остальные (обычные) стыки полос — Xcap-4800
+      const bothCap=ow=>Object.assign(mkF('slat',1000,ow,2400),{jointModes:{'v|1000|0':'cap',['v|'+(1000+ow)+'|0']:'cap'}});
+      const Xcap=Math.round(T(C.computeProject(Gf('bamboo29'),[bothCap(800)]),'jointV').total), Xo=Xcap-4800;
+      const R1=C.computeProject(Gf('bamboo29'),[mid]);
+      chk('L149a',Math.round(T(R1,'jointPlug').total)===4800&&T(R1,'jointPlug').price===610&&Math.round(T(R1,'jointV').total)===Xo,`${id}: границы бамбук/рейка должны идти заглушкой 2×2400 по цене заглушки (${T(R1,'jointPlug').total}, цена ${T(R1,'jointPlug').price}, соединитель ${T(R1,'jointV').total} вместо ${Xo})`);
+      // рейка основной, бамбук в заполнении — то же
+      const R2=C.computeProject(Gf('slat'),[mkF('bamboo29',1000,800,2400)]);
+      chk('L149b',Math.round(T(R2,'jointPlug').total)===4800,`${id}: рейка основная, бамбук в заполнении — тоже заглушка (${T(R2,'jointPlug').total})`);
+      // бамбук + мрамор и рейка + мрамор — соединитель; материал проекта не задан — соединитель (как раньше)
+      const R3=C.computeProject(Gf('bamboo29'),[mkF('marble',1000,800,2400)]);
+      chk('L149c',T(R3,'jointPlug').total===0&&Math.round(T(R3,'jointV').total)===Xcap,`${id}: бамбук с мрамором — соединитель, заглушки нет (${T(R3,'jointPlug').total}/${T(R3,'jointV').total} вместо ${Xcap})`);
+      const R4=C.computeProject(Gf(undefined),[mid]);
+      chk('L149d',T(R4,'jointPlug').total===0&&Math.round(T(R4,'jointV').total)===Xcap,`${id}: без материала проекта в G — прежний соединитель`);
+      // заполнение у края стены — одна граница; не на всю высоту — границы нет вовсе
+      const R5=C.computeProject(Gf('bamboo29'),[mkF('slat',0,800,2400)]);
+      chk('L149e',Math.round(T(R5,'jointPlug').total)===2400,`${id}: заполнение у края стены — одна граница 2400 (${T(R5,'jointPlug').total})`);
+      const R6=C.computeProject(Gf('bamboo29'),[mkF('slat',1000,800,1200)]);
+      chk('L149f',T(R6,'jointPlug').total===0,`${id}: заполнение не на всю высоту — границы стыка нет`);
+      // профиль на вертикальных стыках выключен — встык; явный выбор пользователя главнее умолчания
+      const R7=C.computeProject(Gf('bamboo29',{jointV:false}),[mid]);
+      chk('L149g',T(R7,'jointPlug').total===0&&T(R7,'jointV').total===0,`${id}: профиль на стыках выключен — границы встык (${T(R7,'jointPlug').total}/${T(R7,'jointV').total})`);
+      const wc=mkF('slat',1000,800,2400); wc.jointModes={'v|1000|0':'cap','v|1800|0':'butt'};
+      const R8=C.computeProject(Gf('bamboo29'),[wc]);
+      chk('L149h',Math.round(T(R8,'jointV').total)===Xcap-2400&&T(R8,'jointPlug').total===0,`${id}: явные «соединитель»/«встык» не перебиваются умолчанием (${T(R8,'jointV').total}/${T(R8,'jointPlug').total})`);
+      // раскрой панелей от типа профиля на границе не зависит
+      chk('L149i',R1.sheetsTotal===C.computeProject(Gf('bamboo29',{jointV:true}),[Object.assign(mkF('slat',1000,800,2400),{jointModes:{'v|1000|0':'cap','v|1800|0':'cap'}})]).sheetsTotal,`${id}: число листов не должно зависеть от типа профиля границы`);
+    }
+  }
   // L7/L8: панелей в разумных пределах
   const needArea=(R.netArea+R.otkosArea)*1e6;
   chk('L7',R.sheetsTotal>=Math.ceil(needArea/(G.pl*G.pw)-1e-9),`${id}: панелей меньше минимума`);

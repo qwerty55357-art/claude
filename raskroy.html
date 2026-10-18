@@ -1450,6 +1450,7 @@ function renderJointsV(R){
         <div class="f"><label>Стык ${label}</label>
           <select data-jvpos="${Math.round(j.pos)}" data-jvseg="${Math.round(sg[0])}">
             <option value="cap"${cur==='cap'?' selected':''}>Соединитель</option>
+            ${j.fill||cur==='plug'?`<option value="plug"${cur==='plug'?' selected':''}>Заглушка</option>`:''}
             <option value="butt"${cur==='butt'?' selected':''}>Встык (без профиля)</option>
             <option value="led"${cur==='led'?' selected':''} disabled title="Ставится и снимается рисованием в разделе «LED»">LED (рисование)</option>
           </select>
@@ -3642,13 +3643,30 @@ function wallS(G,w){
     jointModeH:(pos,segStart)=>jointSegMode(w,G,'h',pos,segStart),
     jointModeV:(pos,segStart)=>jointSegMode(w,G,'v',pos,segStart)});
 }
-// ---- Режим стыка по отрезкам: 'cap' (соединитель) | 'butt' (встык, профиль не считается) | 'led' ----
+// ---- Режим стыка по отрезкам: 'cap' (соединитель) | 'plug' (заглушка) | 'butt' (встык, профиль не считается) | 'led' ----
 // Ключ отрезка стабилен, пока не меняется геометрия стены (позиция стыка + начало отрезка).
 const jointSegKey=(kind,pos,segStart)=>kind+'|'+Math.round(pos)+'|'+Math.round(segStart);
+// граница между полосами стены и заполнением проёма во всю длину раскладки (joint.fill в buildLayout), где встречаются бамбуковая и
+// реечная панели: панели разной толщины и устройства, соединитель между ними не подходит — по умолчанию ставится заглушка
+function fillBoundaryPlug(w,G,pos){
+  if(!G||!G.matId) return false;
+  const typeOf=id=>((PRESETS.find(x=>x.id===id)||{}).type)||id;
+  const main=typeOf(G.matId);
+  if(main!=='bamboo29'&&main!=='slat') return false;
+  const vert=G.orient==='v';
+  return (w.ops||[]).some(o=>{
+    if(!o.fillMat||mountKeepsWall(o)||!fillSpansWall(w,o,vert)) return false;
+    const ft=typeOf(o.fillMat);
+    if(!((main==='bamboo29'&&ft==='slat')||(main==='slat'&&ft==='bamboo29'))) return false;
+    const a0=vert?o.x:o.y, aL=vert?o.w:o.h;
+    return Math.abs(pos-a0)<1.5||Math.abs(pos-(a0+aL))<1.5;
+  });
+}
 function jointSegMode(w,G,kind,pos,segStart){
   const key=jointSegKey(kind,pos,segStart);
   const explicit=(w.jointModes||{})[key];
   if(explicit) return explicit;
+  if(kind==='v'&&G.jointV&&fillBoundaryPlug(w,G,pos)) return 'plug';      // общий переключатель «профиль на вертикальных стыках» выключен — стыки встык и тут
   const globalOn = kind==='v' ? G.jointV : G.jointH;
   return globalOn ? 'cap' : 'butt';
 }
@@ -4010,6 +4028,7 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
     edge:'Край области',
     jointV:'Стыки вертикальные',
     jointH:'Стыки горизонтальные',
+    jointPlug:'Стыки вертикальные',
     ops:'Контур проёмов',
     frame:'Контур проёмов',
     cout:'Углы',
@@ -4026,7 +4045,7 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
     prof.push({key,name,runs:runs2,sticks:n.sticks,total:n.total,detail:n.detail,price,group:PGROUP[key]||'Прочее'});
   };
 
-  const capRuns=[], ledStartRuns=[], jvRuns=[], jhRuns=[], ledJointRuns=[], ledPlainRuns=[], opsRuns=[], frameRuns=[];
+  const capRuns=[], ledStartRuns=[], jvRuns=[], jhRuns=[], plugRuns=[], ledJointRuns=[], ledPlainRuns=[], opsRuns=[], frameRuns=[];
   const cornerRuns={cout:[],cin:[],cover:[]};
   // LED-позиция может входить в контур (см. ledCircuits) — тогда способ реализации (старт/
   // соединитель/без профиля) берётся из контура целиком, а не из типа позиции по умолчанию;
@@ -4096,6 +4115,7 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
         const len=sg[1]-sg[0];
         if(mode==='led') pushLed({wall:w.id,el:'jointV',pos:j.pos,segStart:sg[0]},'joint',len);
         else if(mode==='cap') jvRuns.push(len);
+        else if(mode==='plug') plugRuns.push(len);
       });
     });
 
@@ -4233,6 +4253,7 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
   push('edge','Заглушка · край области',capRuns,G.price.edge);
   push('jointV','Соединитель · вертикальные швы',jvRuns,G.price.joint);
   push('jointH','Соединитель · горизонтальные швы',jhRuns,G.price.joint);
+  push('jointPlug','Заглушка · стык разных панелей (бамбук / рейка)',plugRuns,G.price.edge);
   push('ops','Заглушка · торцы у проёмов без откосов',opsRuns,G.price.edge);
   push('frame','Заглушка · примыкание откосов к раме',frameRuns,G.price.edge);
   push('cout','Угол внешний (стены и контуры откосов)',cornerRuns.cout,G.price.cout);
@@ -4541,7 +4562,7 @@ function schemeFor(G,R,wi){
   L.joints.forEach(j=>{
     j.segs.forEach(s=>{
       const mode=jointSegMode(wall,S,'v',j.pos,s[0]);
-      const col=mode==='led'?'var(--warn)':mode==='butt'?'var(--muted)':'var(--straw-deep)';
+      const col=mode==='led'?'var(--warn)':mode==='butt'?'var(--muted)':mode==='plug'?'var(--alu)':'var(--straw-deep)';   // заглушка — цвета профиля, соединитель — соломенный
       const wgt=mode==='led'?0.24:mode==='butt'?0.08:0.14;
       if(j.fill){
         gFillJoints+=(L.vert
@@ -6407,7 +6428,7 @@ function wallFaceModel(wallId){
       return;
     }
     if(leg.el==='otkos'||!mode||mode==='none') return;   // контур проёма — не стык на плоскости
-    seg.mode=mode;
+    seg.mode=mode==='plug'?'cap':mode;   // в описании для нейросети — тот же тонкий профиль-заглушка
     seg.user=leg.el==='jointH'&&(wall.seamsU||[]).some(u=>!u.nat&&Math.abs(u.pos-leg.pos)<1.5);
     seams.push(seg);
   });
@@ -6867,6 +6888,7 @@ document.addEventListener('keydown',e=>{
       closeMatMenu(); run();
     };
     menuBtn(menu,'Соединитель',cur==='cap',()=>setMode('cap'));
+    if(fillEdge||cur==='plug') menuBtn(menu,'Заглушка',cur==='plug',()=>setMode('plug'));   // граница с заполнением другой панелью (бамбук / рейка — по умолчанию)
     menuBtn(menu,'Встык (без профиля)',cur==='butt',()=>setMode('butt'));
     if(cur==='led') menuDivider(menu,'Сейчас: LED (меняется в разделе «LED»)');
     if(fillEdge){ menuDivider(menu,'Граница заполнения (другой материал во всю высоту) — не двигается'); return; }

@@ -44,7 +44,7 @@ let fails=0; const ok=(c,w)=>{ if(!c){ fails++; console.log('✗',w); } else con
   ok(/О1·П2\.2/.test(sch)&&/О1·П2\.1/.test(sch)&&/О2·П5\.2/.test(sch)&&/лист 1\b/.test(sch),'на схеме у реек есть подписи деталей (О1·П2.2, О1·П2.1…) с размером и листом');
   // --- профили
   ok(st.fillJoints.join()==='650,1790','два стыка-границы заполнения: на 650 и 1790 мм: '+st.fillJoints);
-  ok(st.prof.jointV===6040,'вертикальные соединители = обе границы (2×3020): '+st.prof.jointV);
+  ok(st.prof.jointPlug===6040&&!st.prof.jointV,'на границах бамбук/рейка по умолчанию заглушка, а не соединитель (2×3020): '+st.prof.jointPlug+' / соединитель '+st.prof.jointV);
   ok(st.prof.edge===6040,'заглушка по краю стены идёт вдоль рейки (левый и правый край, 2×3020): '+st.prof.edge);
   ok(st.prof.jointH===2440,'горизонтальный соединитель на 320 мм идёт через все материалы: 1140+650+650 = '+st.prof.jointH);
   // --- тип стыка по клику на схеме
@@ -58,9 +58,14 @@ let fails=0; const ok=(c,w)=>{ if(!c){ fails++; console.log('✗',w); } else con
   { const bb=await p.locator('#scheme .wall-scheme.on [data-jvfill]').first().boundingBox();   // у границы лежит номер LED-отрезка из фикстуры — кликаем выше него
     await p.mouse.click(bb.x+bb.width/2,bb.y+bb.height*0.2); await p.waitForTimeout(300); }
   const mt=await p.locator('#mat-menu').innerText();
-  ok(/Соединитель/.test(mt)&&/Встык/.test(mt)&&!/Закрепить|перемещаемыми/.test(mt),'у границы рейка/бамбук меню — только тип стыка, без «Закрепить/перемещаемыми»');
+  ok(/Соединитель/.test(mt)&&/Заглушка/.test(mt)&&/Встык/.test(mt)&&!/Закрепить|перемещаемыми/.test(mt),'у границы рейка/бамбук меню — только тип стыка (соединитель, заглушка, встык), без «Закрепить/перемещаемыми»');
   await p.locator('#mat-menu button',{hasText:'Встык'}).click(); await p.waitForTimeout(500);
-  st=await state(); ok(st.prof.jointV===3020,'«встык» для границы убирает профиль границы (−3020): '+st.prof.jointV);
+  st=await state(); ok(st.prof.jointPlug===3020&&!st.prof.jointV,'«встык» для границы убирает профиль границы (−3020): заглушка '+st.prof.jointPlug);
+  // «Соединитель» на границе — прежний соединитель вместо заглушки, «Заглушка» возвращает заглушку
+  await p.evaluate(()=>{ const w=walls[0]; Object.keys(w.jointModes||{}).filter(k=>k.startsWith('v|')).forEach(k=>{ if(w.jointModes[k]==='butt') w.jointModes[k]='cap'; }); run(); }); await p.waitForTimeout(500);
+  st=await state(); ok(st.prof.jointV===3020&&st.prof.jointPlug===3020,'соединитель на одной границе: соединитель 3020 + заглушка 3020 ('+st.prof.jointV+' + '+st.prof.jointPlug+')');
+  await p.evaluate(()=>{ const w=walls[0]; Object.keys(w.jointModes||{}).filter(k=>k.startsWith('v|')).forEach(k=>{ if(w.jointModes[k]==='cap') w.jointModes[k]='plug'; }); run(); }); await p.waitForTimeout(500);
+  st=await state(); ok(st.prof.jointPlug===6040&&!st.prof.jointV,'обе границы снова заглушкой (6040)');
   // граница не двигается мышью и не включает свободную расстановку
   await p.locator('#scheme').scrollIntoViewIfNeeded();
   { const bb=await p.locator('#scheme .wall-scheme.on [data-jvfill]').first().boundingBox();
