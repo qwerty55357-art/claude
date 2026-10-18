@@ -13,18 +13,18 @@ const L=require('./lib.js');
    {sels:['#i-vfree','#btn-add-vseam'],n:6,at:'tl'},{sel:'#btn-del-wall',n:7,at:'tr'}]});
  // список стен и углов
  await L.shot(p,'04_compass',{el:'#wall-compass',pad:18,marks:[
-   {sel:'[data-ctype="out"]',n:1,at:'tl'},{sel:'[data-ctype="in"]',n:2,at:'tr'},
-   {sel:'[data-cpjump="1"]',n:3,at:'tl'},{sel:'[data-cpjump="2"]',n:4,at:'tr'},{sel:'#wall-compass [data-cpedit]',n:5,at:'tr'},{sel:'[data-cpplus]',n:6,at:'bl'}]});
+   {sel:'[data-ctype="out"]',n:1,at:'tl'},{sel:'[data-ctype="in"]',n:2,at:'tr'},{sel:'[data-ctype="over"]',n:3,at:'tr'},
+   {sel:'[data-cpjump="1"]',n:4,at:'tl'},{sel:'[data-cpjump="2"]',n:5,at:'tr'},{sel:'#wall-compass [data-cpedit]',n:6,at:'tr'},{sel:'[data-cpplus]',n:7,at:'bl'}]});
  // меню угла
  await p.locator('#wall-compass [data-cpedit]').first().click(); await p.waitForTimeout(300);
  await L.shot(p,'05_corner_menu',{el:'#wall-compass',scroll:false,union:['#wall-compass','#mat-menu'],pad:10,marks:[]});
  await p.evaluate(()=>closeMatMenu()); await p.waitForTimeout(200);
  // 02 Панель
  await L.shot(p,'06_sect02',{el:S(2),pad:6,marks:[
-   {sel:'#i-preset',n:1,at:'tl'},{sel:'#i-cw-btn',n:2,at:'tl'},{sel:'#i-profcolor',n:3,at:'tl'},
-   {sels:['#i-pl','#i-pw'],n:4,at:'tl'},{sel:'#i-orient',n:5,at:'tl'},
-   {sel:'#i-sym',n:6,at:'tl',dx:-4},{sel:'#i-brick',n:7,at:'tl',dx:-4},{sel:'#i-offcut',n:8,at:'tl',dx:-4},
-   {sels:['#i-minoff','#i-kerf'],n:9,at:'tl'},{sel:'#i-rot',n:10,at:'tl',dx:-4},{sel:'#i-splice',n:11,at:'tl',dx:-4}]});
+   {sel:'#i-preset',n:1,at:'tl'},{sel:'#i-cw-btn',n:2,at:'tl'},{sel:'#i-profcolor',n:3,at:'tl'},{sel:'#i-coverw',n:4,at:'tl'},
+   {sels:['#i-pl','#i-pw'],n:5,at:'tl'},{sel:'#i-orient',n:6,at:'tl'},
+   {sel:'#i-sym',n:7,at:'tl',dx:-4},{sel:'#i-brick',n:8,at:'tl',dx:-4},{sel:'#i-offcut',n:9,at:'tl',dx:-4},
+   {sels:['#i-minoff','#i-kerf'],n:10,at:'tl'},{sel:'#i-rot',n:11,at:'tl',dx:-4},{sel:'#i-splice',n:12,at:'tl',dx:-4}]});
  // пикер
  await p.setViewportSize({width:1500,height:1050}); await p.locator('#i-cw-btn .mat-pick-btn').click(); await p.waitForTimeout(500);
  await L.shot(p,'07_picker',{el:'#mat-menu',scroll:false,pad:6,marks:[

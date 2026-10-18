@@ -7,7 +7,7 @@ t(){ echo "== $*"; env -u RASKROY_OLD "$@" 2>&1 | grep -v "WebGL\|GroupMarker\|C
 if [ -n "$RASKROY_OLD" ]; then echo "== core_diff"; NOFILL=1 node tests/core_diff.js 2>&1 | grep -v "WebGL\|GroupMarker\|CERT" | tail -2; fi
 t node tests/core_audit.js
 AUDIT_N=3000 t node tests/core_audit_mats.js
-for x in free_enable_equiv hseams_free vseams_free prompt_rules viz_smoke viz_mockup catalog_prompt catalog_compat catalog_ui slat_fill shelf_sticky shelf_reuse shelf_back cutmap_cols print_clean corner_mat plan_ui otkos_outer price_mats corrupt_files photo_inputs; do t node tests/$x.js; done
+for x in free_enable_equiv hseams_free vseams_free prompt_rules viz_smoke viz_mockup catalog_prompt catalog_compat catalog_ui slat_fill shelf_sticky shelf_reuse shelf_back cutmap_cols print_clean corner_mat plan_ui otkos_outer psu_cover price_mats corrupt_files photo_inputs; do t node tests/$x.js; done
 CONS_N=15 t node tests/consistency.js
 t node tests/ui_matrix.js
 t node tests/catalog_all.js

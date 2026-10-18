@@ -688,6 +688,33 @@ for(let t=0;t<N;t++){
     const Rc=C.computeProject(G7,[mkW({otkosMode:{left:'corner',right:'corner',top:'protrude',bottom:'corner'},otkosOuterMat:{left:mOut.id}})]);
     chk('L147k',!Rc.parts.some(q=>q.outer&&q.side==='left'),`${id}: сторона «Г-образный угол» не должна давать накладку`);
   }
+  // L148 (нов): накладной Г-образный угол (c.type 'over') — отдельная позиция «Угол накладной Г N мм» с ценой по размеру профиля
+  // (G.coverW, price.cover); внешний/внутренний угол так же, как прежде; LED на связанном конце и успешный радиусный угол профиля не дают
+  if(rand()<0.3){
+    const mk2=i=>({id:i,W:3000,H:2400,ceil:3000,rowH:0,ops:[],seamsU:[],seamSeq:0,vseamsU:[],vseamSeq:0,edges:{top:'none',bot:'none',left:'cap',right:'cap'},cout:0,cin:0,jointModes:{}});
+    const wA=mk2(1), wB=mk2(2);
+    const Gc=(size,cover)=>Object.assign({},G,{orient:'v',sym:false,coverW:size,price:Object.assign({},G.price,{cout:1100,cin:1200,cover})});
+    const lk=(type,extra)=>[Object.assign({id:1,kind:'sharp',type,angle:90,aw:1,as:'right',bw:2,bs:'left'},extra||{})];
+    const P=(R0,k)=>R0.prof.find(q=>q.key===k)||{total:0};
+    const prices={15:700,20:800,30:900};
+    [15,20,30].forEach(sz=>{
+      const Ro=C.computeProject(Gc(sz,prices),[wA,wB],{},lk('over'),[]);
+      const cv=P(Ro,'cover');
+      chk('L148a',Math.round(cv.total)===2400&&cv.price===prices[sz]&&new RegExp('Г '+sz+' мм').test(cv.name||'')&&P(Ro,'cout').total===0&&P(Ro,'cin').total===0,`${id}: накладной угол ${sz} мм: длина ${cv.total}, цена ${cv.price}, название «${cv.name}»`);
+    });
+    const Ro2=C.computeProject(Gc(20,prices),[wA,wB],{},lk('over'),[]), Rx=C.computeProject(Gc(20,prices),[wA,wB],{},lk('out'),[]), Ri=C.computeProject(Gc(20,prices),[wA,wB],{},lk('in'),[]);
+    chk('L148b',Math.round(P(Rx,'cout').total)===2400&&P(Rx,'cover').total===0&&Math.round(P(Ri,'cin').total)===2400&&P(Ri,'cover').total===0,`${id}: внешний/внутренний угол должны остаться прежними (cout ${P(Rx,'cout').total}, cin ${P(Ri,'cin').total})`);
+    const rest=R0=>JSON.stringify(R0.prof.filter(q=>!/^(cover|cout|cin)$/.test(q.key)).map(q=>[q.key,Math.round(q.total)]));
+    chk('L148c',rest(Ro2)===rest(Rx)&&Ro2.sheetsTotal===Rx.sheetsTotal,`${id}: остальные профили и число листов не должны зависеть от типа угла`);
+    // цена одним числом (старые вызовы) и отсутствие цены (как у внешнего угла)
+    chk('L148d',P(C.computeProject(Gc(20,650),[wA,wB],{},lk('over'),[]),'cover').price===650&&P(C.computeProject(Gc(20,undefined),[wA,wB],{},lk('over'),[]),'cover').price===1100,`${id}: цена накладного угла числом/без цены`);
+    // LED на связанном конце заменяет угловой профиль любого типа
+    const wL=Object.assign(mk2(1),{edges:{top:'none',bot:'none',left:'cap',right:'led'}});
+    chk('L148e',P(C.computeProject(Gc(20,prices),[wL,wB],{},lk('over'),[]),'cover').total===0,`${id}: LED на связанном конце должен заменить накладной угол`);
+    // успешный радиусный угол профиль не даёт (деталь гнутая)
+    const Rr=C.computeProject(Gc(20,prices),[wA,wB],{},lk('over',{kind:'radius',radius:200}),[]);
+    chk('L148f',(Rr.cornerIssues||[]).length>0||P(Rr,'cover').total===0,`${id}: радиусный угол с типом «накладной» не должен давать профиль`);
+  }
   // L7/L8: панелей в разумных пределах
   const needArea=(R.netArea+R.otkosArea)*1e6;
   chk('L7',R.sheetsTotal>=Math.ceil(needArea/(G.pl*G.pw)-1e-9),`${id}: панелей меньше минимума`);

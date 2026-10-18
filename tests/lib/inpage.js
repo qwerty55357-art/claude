@@ -99,6 +99,9 @@ window.__rnd=function(seed){
   // материал накладки выступающих сторон — детерминированно от размеров проёма (поток r() не сдвигаем, прежние случаи остаются теми же)
   list.forEach(w=>w.ops.forEach(op=>{ if(op.otkos&&(op.otkosOverlap||0)>0&&Math.round(op.w/10+op.h/10)%2===0){
     op.otkosOuterMat={}; ['left','right','top','bottom'].forEach((sd,k)=>{ if(op.otkosMode&&op.otkosMode[sd]==='protrude'&&(k+Math.round(op.w/10))%3!==0) op.otkosOuterMat[sd]=fillIds[(Math.round(op.h/10)+k)%fillIds.length]; }); } }));
+  // тип «накладной» у части углов и размер накладного профиля — детерминированно от размеров (поток r() не сдвигаем)
+  o.cornerLinks.forEach((c,k)=>{ if((k+Math.round(list[0].W/10))%3===0) c.typeOv='over'; });
+  o.fields=Object.assign(o.fields||{},{'i-coverw':String([15,20,30][Math.round(list[0].W/10)%3])});
   applySnapshot(JSON.parse(JSON.stringify(o)),false);
   // материал отдельных деталей стен (ключ — устойчивый pk детали)
   if(r()<0.5){ walls.forEach(w=>{ const L=LAST.R.layouts[walls.indexOf(w)]; if(!L||!L.pieces.length) return;
