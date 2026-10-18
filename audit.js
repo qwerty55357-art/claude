@@ -649,6 +649,45 @@ for(let t=0;t<N;t++){
       chk('L146e',Math.abs(pin(90)-2400)<0.5&&Math.abs(pin(270)-2400)<0.5&&Math.abs(pin(135)-2400)<0.5,`${id}: внутренний угол: длина cin должна равняться H при любом угле (${pin(90)}/${pin(270)}/${pin(135)})`);
     }
   }
+  // L147 (нов): накладка выступающего откоса из другого материала (o.otkosOuterMat) — отдельная деталь: откос (глубина) и накладка (вылет)
+  // режутся раздельно, накладка уходит в пул своего материала; материал совпал с материалом откоса/неизвестен/вылет 0/сторона не
+  // «выступающая» — деление не включается; профили (угол, примыкание к раме, заглушки) от деления не зависят
+  if(rand()<0.3){
+    const mats=C.PRESETS.filter(x=>x.id&&!x.custom);
+    const mProj=mats[0], mOut=mats.find(x=>x.id!==mProj.id&&!/slat/.test(x.id))||mats[1], mIn=mats.find(x=>x.id!==mProj.id&&x.id!==mOut.id&&!/slat/.test(x.id))||mats[2];
+    const G7=Object.assign({},G,{matId:mProj.id,orient:'v',sym:false});
+    const mkW=(extra)=>({W:3000,H:2400,ceil:3000,rowH:0,seamsU:[],seamSeq:0,vseamsU:[],vseamSeq:0,edges:{top:'cap',bot:'none',left:'cap',right:'cap'},cout:0,cin:0,jointModes:{},
+      ops:[Object.assign({kind:'window',w:1200,h:1100,x:800,y:600,otkos:true,depth:150,otkosOverlap:60,id:1,
+        otkosMode:{left:'protrude',right:'corner',top:'protrude',bottom:'corner'}},extra||{})]});
+    const parts7=(Rx)=>Rx.parts.filter(q=>/^О1/.test(q.name)||q.op===0);
+    const prof7=(Rx)=>JSON.stringify(Rx.prof.map(q=>[q.key,Math.round(q.total)]).sort());
+    const R0=C.computeProject(G7,[mkW()]);
+    const L0=R0.parts.find(q=>q.side==='left'), T0=R0.parts.find(q=>q.side==='top');
+    chk('L147a',L0&&!R0.parts.some(q=>q.outer)&&Math.round(L0.dep)===210&&Math.round(L0.len)===1100,`${id}: накладка без отдельного материала должна остаться одной деталью 210×1100 (${L0&&L0.dep}×${L0&&L0.len})`);
+    // отдельный материал накладки слева и сверху
+    const Rs=C.computeProject(G7,[mkW({otkosOuterMat:{left:mOut.id,top:mOut.id}})]);
+    const iL=Rs.parts.find(q=>q.side==='left'&&!q.outer), oL=Rs.parts.find(q=>q.side==='left'&&q.outer), iT=Rs.parts.find(q=>q.side==='top'&&!q.outer), oT=Rs.parts.find(q=>q.side==='top'&&q.outer);
+    chk('L147b',iL&&oL&&iT&&oT&&Math.round(iL.dep)===150&&Math.round(oL.dep)===60&&Math.round(iL.len)===1100&&Math.round(oL.len)===1100,`${id}: левый откос/накладка должны разделиться на 150 и 60 мм одной длины (${iL&&iL.dep}/${oL&&oL.dep})`);
+    chk('L147c',iT&&oT&&Math.round(iT.len)===1200&&Math.round(oT.len)===1260&&Math.round(oT.dep)===60,`${id}: верхняя накладка длиннее откоса на вылет слева (Т-стык): ${iT&&iT.len}/${oT&&oT.len}`);
+    chk('L147d',oL&&oT&&oL.matOverride===mOut.id&&oT.matOverride===mOut.id&&!iL.matOverride&&!iT.matOverride,`${id}: накладка должна идти в пул своего материала, откос — в общий`);
+    const poolO=Rs.fills.find(f=>f.kind==='otkos'&&f.matColorId===mOut.id);
+    chk('L147e',poolO&&Math.abs(poolO.area-(60*1100+60*1260)/1e6)<1e-6&&poolO.sheets.length>=1,`${id}: отдельный пул материала накладки должен считать площадь вылет×длина (${poolO&&poolO.area})`);
+    // площадь стороны без верха не потеряна: левый откос+накладка = прежняя деталь 210×1100
+    chk('L147f',Math.abs((iL.dep+oL.dep)*iL.len-L0.dep*L0.len)<1,`${id}: площадь левого откоса и накладки не равна площади прежней детали`);
+    chk('L147g',prof7(R0)===prof7(Rs),`${id}: профили (угол/рама/заглушки) от деления накладки измениться не должны`);
+    // откос из своего материала, накладка из материала проекта
+    const Rm=C.computeProject(G7,[mkW({otkosMat:{left:mIn.id},otkosOuterMat:{left:mProj.id}})]);
+    const iLm=Rm.parts.find(q=>q.side==='left'&&!q.outer), oLm=Rm.parts.find(q=>q.side==='left'&&q.outer);
+    chk('L147i',iLm&&oLm&&iLm.matOverride===mIn.id&&!oLm.matOverride,`${id}: откос из своего материала и накладка из материала проекта: ${iLm&&iLm.matOverride}/${oLm&&oLm.matOverride}`);
+    // не делится: совпадение с материалом откоса, неизвестный материал, вылет 0, сторона не «выступающая»
+    const noSplit=(Rx,why)=>chk('L147j',!Rx.parts.some(q=>q.outer)&&Math.round(Rx.parts.find(q=>q.side==='left').dep)===(why==='ov0'?150:210),`${id}: деление не должно включаться (${why})`);
+    noSplit(C.computeProject(G7,[mkW({otkosMat:{left:mOut.id},otkosOuterMat:{left:mOut.id}})]),'same');
+    noSplit(C.computeProject(G7,[mkW({otkosOuterMat:{left:'нет-такого'}})]),'unknown');
+    noSplit(C.computeProject(G7,[mkW({otkosOuterMat:{left:mProj.id}})]),'proj');   // и откос, и накладка — материал проекта: делить нечего
+    noSplit(C.computeProject(G7,[mkW({otkosOverlap:0,otkosOuterMat:{left:mOut.id}})]),'ov0');
+    const Rc=C.computeProject(G7,[mkW({otkosMode:{left:'corner',right:'corner',top:'protrude',bottom:'corner'},otkosOuterMat:{left:mOut.id}})]);
+    chk('L147k',!Rc.parts.some(q=>q.outer&&q.side==='left'),`${id}: сторона «Г-образный угол» не должна давать накладку`);
+  }
   // L7/L8: панелей в разумных пределах
   const needArea=(R.netArea+R.otkosArea)*1e6;
   chk('L7',R.sheetsTotal>=Math.ceil(needArea/(G.pl*G.pw)-1e-9),`${id}: панелей меньше минимума`);

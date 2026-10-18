@@ -96,6 +96,9 @@ window.__rnd=function(seed){
     aw:list[3].id,as:'right',bw:list[0].id,bs:'left'});   // замыкаем комнату: Юг → Запад
   o.ledCircuits=r()<0.5?[{id:1,kind:pick(['start','joint']),legs:[{wall:list[0].id,el:'free',id:1,ax:0,ay:Math.round(H*0.9),bx:list[0].W,by:Math.round(H*0.9)}]}]:[];
   list.forEach(w=>w.ops.forEach(op=>{ if(op.otkos&&r()<0.25){ op.otkosMat={}; ['left','right','top','bottom'].forEach(sd=>{ if(r()<0.5) op.otkosMat[sd]=pick(fillIds); }); } }));
+  // материал накладки выступающих сторон — детерминированно от размеров проёма (поток r() не сдвигаем, прежние случаи остаются теми же)
+  list.forEach(w=>w.ops.forEach(op=>{ if(op.otkos&&(op.otkosOverlap||0)>0&&Math.round(op.w/10+op.h/10)%2===0){
+    op.otkosOuterMat={}; ['left','right','top','bottom'].forEach((sd,k)=>{ if(op.otkosMode&&op.otkosMode[sd]==='protrude'&&(k+Math.round(op.w/10))%3!==0) op.otkosOuterMat[sd]=fillIds[(Math.round(op.h/10)+k)%fillIds.length]; }); } }));
   applySnapshot(JSON.parse(JSON.stringify(o)),false);
   // материал отдельных деталей стен (ключ — устойчивый pk детали)
   if(r()<0.5){ walls.forEach(w=>{ const L=LAST.R.layouts[walls.indexOf(w)]; if(!L||!L.pieces.length) return;

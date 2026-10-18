@@ -916,7 +916,7 @@ function usedMatIds(){
   const ids=[curMatId()];
   walls.forEach(w=>{
     Object.values(w.pieceMats||{}).forEach(x=>x&&ids.push(x));
-    (w.ops||[]).forEach(o=>{ if(o.fillMat) ids.push(o.fillMat); Object.values(o.otkosMat||{}).forEach(x=>x&&ids.push(x)); });
+    (w.ops||[]).forEach(o=>{ if(o.fillMat) ids.push(o.fillMat); Object.values(o.otkosMat||{}).forEach(x=>x&&ids.push(x)); Object.values(o.otkosOuterMat||{}).forEach(x=>x&&ids.push(x)); });
   });
   cornerLinks.forEach(c=>{ if((c.kind||'sharp')==='radius'&&c.mat) ids.push(c.mat); });   // свой материал детали радиусного угла
   return [...new Set(ids)];
@@ -1978,7 +1978,7 @@ function renderOpenings(){
         <div class="f"><label>Глубина откоса</label><input type="number" data-k="depth" value="${o.depth}"><span class="unit">мм</span></div>
         <div class="f"><label>Вылет накладки</label><input type="number" data-k="otkosOverlap" value="${o.otkosOverlap||0}"><span class="unit">мм</span></div>
       </div>
-      <p class="hint" ${o.otkos?'':'hidden'} style="margin:0 0 6px">Вылет — для сторон в режиме «Выступающий»: насколько накладка выходит на стену за край проёма (0 — не выступает).</p>
+      <p class="hint" ${o.otkos?'':'hidden'} style="margin:0 0 6px">Вылет — для сторон в режиме «Выступающий»: насколько накладка выходит на стену за край проёма (0 — не выступает). Накладку можно сделать из другого материала, чем сам откос — клик по стороне откоса на схеме → «Материал накладки» (она тогда кроится отдельной деталью).</p>
       <div ${o.otkos?'':'hidden'} style="margin-bottom:8px">
         <p class="hint" style="margin:0 0 4px">Как отделана каждая сторона — то же самое можно кликом по контуру на схеме</p>
         <div class="row">
@@ -3106,7 +3106,7 @@ function packSheetsCols(pieces,S){
   return sheets;
 }
 
-function buildOtkosParts(S){
+function buildOtkosParts(S,G){
   const parts=[];
   S.ops.forEach((o,i)=>{
     if(!o.otkos||o.depth<=0) return;
@@ -3135,10 +3135,30 @@ function buildOtkosParts(S){
     };
     // ручной шов: позиции (мм от пола — лев/прав, от левого края — верх/низ), где стыковка неизбежна/выбрана
     const seamsOf=k=>((o.otkosSeamPos&&o.otkosSeamPos[k])||[]).filter(v=>Number.isFinite(v));
-    if(has('left'))   parts.push({name:t+'·лев', len:lenOf('left'), dep:depOf('left'), op:i, side:'left',  seamPos:seamsOf('left'), overlap:overlapOf('left'), revealDep:o.depth});
-    if(has('right'))  parts.push({name:t+'·прав',len:lenOf('right'), dep:depOf('right'), op:i, side:'right', seamPos:seamsOf('right'), overlap:overlapOf('right'), revealDep:o.depth});
-    if(has('top'))    parts.push({name:t+'·верх',len:lenOf('top'), dep:depOf('top'), op:i, side:'top',   seamPos:seamsOf('top'), overlap:overlapOf('top'), revealDep:o.depth});
-    if(o.kind!=='door' && has('bottom')) parts.push({name:t+'·низ',len:lenOf('bottom'), dep:depOf('bottom'), op:i, side:'bottom', seamPos:seamsOf('bottom'), overlap:overlapOf('bottom'), revealDep:o.depth});
+    // накладка («внешняя часть») выступающей стороны из ДРУГОГО материала (o.otkosOuterMat[сторона]) — отдельная деталь:
+    // два материала одной L-образной деталью не сделать. Тогда откос в проёме — обычная полоса глубиной o.depth (как при «Г-образном
+    // угле»), а накладка — полоса шириной в вылет вдоль края проёма (той же длины lenOf, с тем же Т-стыком у верха/низа). Если
+    // материал накладки совпал с материалом самой стороны (o.otkosMat, иначе материал проекта G.matId) или не существует,
+    // деление бессмысленно — остаётся прежняя одна деталь со сгибом
+    const innerMatId=k=>(o.otkosMat&&o.otkosMat[k])||(G&&G.matId)||null;
+    const outerMatId=k=>{
+      if(otkosMode(o,k)!=='protrude'||!((o.otkosOverlap||0)>0)) return null;
+      const id=o.otkosOuterMat&&o.otkosOuterMat[k];
+      return (id&&id!==innerMatId(k)&&PRESETS.some(x=>x.id===id))?id:null;
+    };
+    const put=(k,nm)=>{
+      if(!outerMatId(k)){ parts.push({name:t+'·'+nm, len:lenOf(k), dep:depOf(k), op:i, side:k, seamPos:seamsOf(k), overlap:overlapOf(k), revealDep:o.depth}); return; }
+      const ov=o.otkosOverlap||0, vertical=k==='left'||k==='right';
+      // у верха/низа накладка начинается на вылет левее проёма, если слева стоит «выступающая» сторона (Т-стык) — позиции ручных швов
+      // (мм от левого края проёма) сдвигаем на тот же вылет; у боковых накладка той же длины o.h
+      const shift=vertical?0:(otkosMode(o,'left')==='protrude'?ov:0), L2=lenOf(k);
+      parts.push({name:t+'·'+nm, len:vertical?o.h:o.w, dep:o.depth, op:i, side:k, seamPos:seamsOf(k), overlap:0, revealDep:o.depth});
+      parts.push({name:t+'·'+nm+'·накл', len:L2, dep:ov, op:i, side:k, outer:true, seamPos:seamsOf(k).map(v=>v+shift).filter(v=>v>0&&v<L2-1), overlap:0, revealDep:0});
+    };
+    if(has('left'))   put('left','лев');
+    if(has('right'))  put('right','прав');
+    if(has('top'))    put('top','верх');
+    if(o.kind!=='door' && has('bottom')) put('bottom','низ');
   });
   return parts;
 }
@@ -3882,7 +3902,7 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
   // --- откосы всех стен (детали строим до выбора укладки) ---
   let parts=[];
   walls.forEach((w,i)=>{
-    const ps=buildOtkosParts({ops:effOps[i]});
+    const ps=buildOtkosParts({ops:effOps[i]},G);
     ps.forEach(pp=>{ pp.wall=i; if(multi) pp.name=tag(i)+'·'+pp.name; });
     parts=parts.concat(ps);
   });
@@ -3893,9 +3913,10 @@ function computeProject(G,walls,manual,cornerLinks,ledCircuits){
   const otkosOverrideParts=[];
   parts=parts.filter(pp=>{
     const o=walls[pp.wall].ops[pp.op];
-    const mid=o&&o.otkosMat&&o.otkosMat[pp.side];
+    // накладка (pp.outer) — свой материал o.otkosOuterMat; совпал с материалом проекта — идёт в общий пул откосов
+    const mid=pp.outer?(o&&o.otkosOuterMat&&o.otkosOuterMat[pp.side]):(o&&o.otkosMat&&o.otkosMat[pp.side]);
     const mp=mid&&PRESETS.find(x=>x.id===mid);
-    if(!mp) return true;
+    if(!mp||(pp.outer&&mp.id===G.matId)) return true;
     pp.matOverride=mp.id;
     otkosOverrideParts.push(pp);
     return false;
@@ -4629,7 +4650,9 @@ function schemeFor(G,R,wi){
         // pointer-events:none — это декоративная подсказка поверх детали стены, клик по этой
         // зоне обязан по-прежнему попадать в кликабельный прямоугольник детали под ней (свой
         // материал детали), а не проваливаться в накладку без какого-либо обработчика
-        return `<rect x="${fx}" y="${fy}" width="${fw}" height="${fh}" fill="var(--straw)" fill-opacity=".3" stroke="var(--straw)" stroke-width="${fs*0.05}" stroke-dasharray="${fs*0.16} ${fs*0.12}" pointer-events="none"/>`;
+        // накладка из другого материала (o.otkosOuterMat — отдельная деталь) залита его цветом
+        const oid=o.otkosOuterMat&&o.otkosOuterMat[side], oc=(oid&&findMat(oid)&&oid!==((o.otkosMat&&o.otkosMat[side])||curMatId()))?matColor(oid):null;
+        return `<rect x="${fx}" y="${fy}" width="${fw}" height="${fh}" fill="${oc||'var(--straw)'}" fill-opacity="${oc?.62:.3}" stroke="${oc||'var(--straw)'}" stroke-width="${fs*0.05}" stroke-dasharray="${fs*0.16} ${fs*0.12}" pointer-events="none"/>`;
       };
       g+=flangeRect('top')+flangeRect('bottom')+flangeRect('left')+flangeRect('right');
       const sideLine=(side,x1,y1,x2,y2)=>{
@@ -5575,9 +5598,10 @@ function renderScene3D(G,R){
           flangeRects.push(['bottom', o.x-extL,o.y-ov, o.x+o.w+extR,o.y]);
         // чуть впереди лицевой плоскости стены (та же роль офсета, что у LED-ленты ниже) — иначе
         // накладка тонет в текстуре стены той же глубины (z-fighting), а не лежит поверх нее
-        const off=dz*1.5;
+        // +z — к зрителю (у обычного проёма dz=-1 уходит В стену, поэтому dz*1.5 клало накладку за плоскость стены, и видна она была лишь там, где выходит за край стены)
+        const off=1.5;
         flangeRects.forEach(([side,x0,y0,x1,y1])=>{
-          const mid=o.otkosMat&&o.otkosMat[side];
+          const mid=(o.otkosOuterMat&&o.otkosOuterMat[side])||(o.otkosMat&&o.otkosMat[side]);   // у накладки может быть свой материал
           const colorHex=(mid&&condHex(mid))||defaultColorHex;
           const geo=new THREE.BufferGeometry();
           geo.setAttribute('position',new THREE.Float32BufferAttribute(
@@ -6280,7 +6304,8 @@ function wallOtkosTargets(wi){
   const S=wallS(G,wall);
   const sideLabel={left:'слева',right:'справа',top:'сверху',bottom:'снизу'};
   const kindLabel={window:'Окно',door:'Дверь',niche:'Ниша'};
-  return buildOtkosParts(S).map(p=>({
+  // накладка (outer) лежит на плоскости стены, а не в проёме — отдельной гранью для разметки фото она не бывает
+  return buildOtkosParts(S,G).filter(p=>!p.outer).map(p=>({
     key:'otkos:'+p.op+':'+p.side,
     label:`${kindLabel[S.ops[p.op].kind]||'Проём'} ${p.op+1} — откос ${sideLabel[p.side]}`,
     len:p.len, dep:p.dep,
@@ -6486,6 +6511,7 @@ function applySnapshot(o,fromFile){
       (w.ops||[]).forEach(op=>{
         if(op.fillMat){ const n=fix(op.fillMat); op.fillMat=n||null; }
         if(op.otkosMat) Object.keys(op.otkosMat).forEach(k=>{ const n=fix(op.otkosMat[k]); if(n) op.otkosMat[k]=n; else delete op.otkosMat[k]; });
+        if(op.otkosOuterMat) Object.keys(op.otkosOuterMat).forEach(k=>{ const n=fix(op.otkosOuterMat[k]); if(n) op.otkosOuterMat[k]=n; else delete op.otkosOuterMat[k]; });
       });
     });
     (Array.isArray(o.cornerLinks)?o.cornerLinks:[]).forEach(c=>{ if(c&&c.mat){ const n=fix(c.mat); c.mat=n||null; } });   // материал детали угла
@@ -6859,6 +6885,16 @@ document.addEventListener('keydown',e=>{
       });
     });
     if(cur==='led') menuDivider(menu,'Сейчас: LED (меняется в разделе «LED»)');
+    // накладка выступающего откоса из другого материала — отдельной деталью (внутри проёма один материал, снаружи другой)
+    if(cur==='protrude'){
+      menuDivider(menu,'Накладка на стену (внешняя часть)');
+      if(!((o.otkosOverlap||0)>0)) menuBtn(menu,'Вылет накладки = 0 — задайте его в проёме',false,()=>{});
+      else{
+        const oid=(o.otkosOuterMat&&o.otkosOuterMat[side])||null, inner=(o.otkosMat&&o.otkosMat[side])||curMatId();
+        const nm=oid?((findMat(oid)||{}).name||oid)+(oid===inner?' — как откос, одна деталь':' — отдельная деталь'):'Как откос (одна деталь со сгибом)';
+        menuBtn(menu,'Материал накладки: '+nm,!!oid&&oid!==inner,()=>{ closeMatMenu(); showOtkosOuterMenu(ev,opId,side); });
+      }
+    }
     // индивидуальный материал ЭТОЙ стороны откоса — только если сторона вообще режется из
     // материала (corner/butt/protrude); при «изгибе»/«нет»/«заглушке»/«led» отдельной детали нет вовсе
     if(cur==='corner'||cur==='butt'||cur==='protrude'){
@@ -6870,6 +6906,17 @@ document.addEventListener('keydown',e=>{
         closeMatMenu(); run();
       }});
     }
+  }
+  // материал накладки выступающей стороны откоса (o.otkosOuterMat[side]): другой, чем у самого откоса — накладка режется отдельной деталью
+  function showOtkosOuterMenu(ev,opId,side){
+    const w=AW(); const o=w.ops.find(x=>x.id==opId); if(!o) return;
+    const names={top:'сверху',bottom:'снизу',left:'слева',right:'справа'};
+    const menu=menuShell(ev,`Материал накладки · откос ${names[side]||side}`,230);
+    matPickerInto(menu,{cur:(o.otkosOuterMat&&o.otkosOuterMat[side])||null,noneLabel:'— как откос (одна деталь со сгибом) —',onPick:id=>{
+      o.otkosOuterMat=o.otkosOuterMat||{};
+      if(id) o.otkosOuterMat[side]=id; else delete o.otkosOuterMat[side];
+      closeMatMenu(); renderOpenings(); run();
+    }});
   }
   function showMatMenu(ev,opId){
     const w=AW(); const o=w.ops.find(x=>x.id==opId); if(!o) return;

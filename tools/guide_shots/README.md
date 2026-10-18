@@ -10,7 +10,7 @@
 ```
 cd tools/guide_shots && mkdir -p img
 export NODE_PATH=$(npm root -g)        # нужен playwright и chromium
-for f in shots1 shots2 shots3 shots4 shots5 shots6 shots8 shots9 shots11 mock3; do node $f.js; done   # пишут PNG в img/
+for f in shots1 shots2 shots3 shots4 shots5 shots6 shots8 shots9 shots11 shots12 mock3; do node $f.js; done   # пишут PNG в img/
 ```
 
 `demo.js` собирает демонстрационный проект через настоящий интерфейс, `lib.js` — выноски и съёмка по селектору.
